@@ -28,7 +28,7 @@ word_sentence_association = Table(
 )
 
 # Подключение к базе данных
-engine = create_engine('postgresql://postgres:ouganda77@localhost:5432/tolstoy_words')
+engine = create_engine('postgresql://postgres:ouganda77@localhost:5432/tolstoy_words_csv')
 db_session = scoped_session(sessionmaker(bind=engine))
 
 Base.metadata.create_all(engine)
