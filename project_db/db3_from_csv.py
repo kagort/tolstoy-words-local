@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, Table
+from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, Table, UniqueConstraint
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker, scoped_session
 import logging
 
@@ -13,11 +13,15 @@ class DicTexts(Base):
     TextID = Column(Integer, primary_key=True, autoincrement=True)
     TextTitle = Column(String(255), unique=True)
 
-class TokenID(Base):  # Токен-слово пользователя
+class TokenID(Base):
     __tablename__ = 'tokenid'
     TokenID = Column(Integer, primary_key=True, autoincrement=True)
-    Token_text = Column(String(255), unique=True)
-    TextID = Column(Integer, ForeignKey('dictexts.TextID'))
+    Token_text = Column(String(255), nullable=False)
+    TextID = Column(Integer, ForeignKey('dictexts.TextID'), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('Token_text', 'TextID', name='token_text_textid_unique'),
+    )
 
 class Sentences(Base):
     __tablename__ = 'sentences'
