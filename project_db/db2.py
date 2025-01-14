@@ -26,6 +26,7 @@ class TokenID(Base):  # Токен-слово пользователя
     __tablename__ = 'tokenid'
     TokenID = Column(Integer, primary_key=True, autoincrement=True)
     Token_text = Column(String(255), unique=True)
+    TextID = Column(Integer, ForeignKey('dictexts.TextID'))
 
 
 class Words(Base):  # Контекстные слова

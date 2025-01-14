@@ -1,7 +1,7 @@
 import pandas as pd
 import nltk
 import spacy
-from collections import defaultdict
+from collections import defaultdict, Counter
 from tqdm import tqdm
 from sqlalchemy.orm import sessionmaker
 from pymorphy3 import MorphAnalyzer
@@ -9,7 +9,7 @@ from nltk.tokenize import sent_tokenize
 from project_db.db2 import *  # Импортируем обновленную схему базы данных
 
 import logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO)  # Журналирование logging.DEBUG
 
 # Инициализация библиотек
 nltk.download('punkt')
@@ -74,23 +74,39 @@ filtered_sentences = session.query(Sentences).filter(
     Sentences.Sentence_text.ilike(f"%{search_word}%")
 ).all()
 
-# Анализ окружения слов в предложениях
+# Подсчет частотности зависимых слов
+dependent_word_frequencies = Counter()
+
+# Анализ окружения слов в отфильтрованных предложениях
 for sentence in tqdm(filtered_sentences, desc="Анализ окружения"):
     doc = nlp(sentence.Sentence_text)
     for token in doc:
         if token.lemma_ == lemma:
             for child in token.children:
+                # Подсчет частотности для зависимых слов
+                dependent_word_frequencies[child.lemma_] += 1
+
                 # Ограничение длины текста слова
                 word_text = child.text[:255] if len(child.text) > 255 else child.text
 
-                # Добавление контекстных слов в Words
-                word_entry = Words(
+                # Проверка наличия слова в Words
+                word_entry = session.query(Words).filter_by(
                     Word_text=word_text,
                     Part_of_speech=child.pos_,
                     SentenceID=sentence.SentenceID
-                )
-                session.add(word_entry)
-                session.flush()  # Получаем WordID
+                ).first()
+
+                if not word_entry:
+                    word_entry = Words(
+                        Word_text=word_text,
+                        Part_of_speech=child.pos_,
+                        SentenceID=sentence.SentenceID,
+                        Frequency=1  # Начальная частотность
+                    )
+                    session.add(word_entry)
+                    session.flush()
+                else:
+                    word_entry.Frequency += 1
 
                 # Добавляем связь между Words и Sentences
                 session.execute(word_sentence_association.insert().values(
@@ -107,4 +123,7 @@ except Exception as e:
 finally:
     session.close()
 
-print("Данные успешно добавлены в базу данных.")
+# Вывод частотности зависимых слов
+print("Частотность зависимых слов в отфильтрованных предложениях:")
+for word, freq in dependent_word_frequencies.most_common():
+    print(f"{word}: {freq}")
