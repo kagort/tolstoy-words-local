@@ -61,17 +61,6 @@ search_word = input("Введите слово для поиска: ").strip().l
 parsed_word = morph.parse(search_word)[0]
 lemma = parsed_word.normal_form
 
-# Добавление леммы в TokenID
-existing_token = session.query(TokenID).filter_by(Token_text=lemma, TextID=text_id).first()
-
-if not existing_token:
-    token_entry = TokenID(Token_text=lemma, TextID=text_id)
-    session.add(token_entry)
-    session.flush()
-    token_id = token_entry.TokenID
-else:
-    token_id = existing_token.TokenID
-
 # Проверяем существование токена с учётом TextID
 existing_token = session.query(TokenID).filter_by(Token_text=lemma, TextID=text_id).first()
 
