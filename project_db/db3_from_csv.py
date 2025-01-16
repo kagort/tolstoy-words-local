@@ -32,18 +32,20 @@ class Sentences(Base):
 class Words(Base):
     __tablename__ = 'words'
     WordID = Column(Integer, primary_key=True, autoincrement=True)
+    TokenID = Column(Integer, ForeignKey('tokenid.TokenID'))
     Word_text = Column(String(255))
     Part_of_speech = Column(String(50))
     Frequency = Column(Integer)
     TextID = Column(Integer, ForeignKey('dictexts.TextID'))
 
 # Промежуточная таблица для связи многие-ко-многим
-word_sentence_association = Table(
-    'word_sentence_association', Base.metadata,
-    Column('WordID', Integer, ForeignKey('words.WordID')),
-    Column('SentenceID', Integer, ForeignKey('sentences.SentenceID')),
-    Column('TextID', Integer, ForeignKey('dictexts.TextID'))
-)
+class Cross(Base):
+    __tablename__ = 'word_sentence_association'
+    CrossID = Column(Integer, primary_key=True, autoincrement=True)
+    WordID = Column(Integer, ForeignKey('words.WordID'))
+    SentenceID = Column(Integer, ForeignKey('sentences.SentenceID'))
+    TextID = Column(Integer, ForeignKey('dictexts.TextID'))
+
 
 # Подключение к базе данных
 engine = create_engine('postgresql://postgres:ouganda77@localhost:5432/tolstoy_words_csv')
