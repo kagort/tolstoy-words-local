@@ -155,7 +155,7 @@ for pos, words in pos_data.items():
                 WordID=word_entry.WordID,
                 SentenceID=sentence_id,
                 TextID=text_id
-            ))
+            ))   #Ошибка?
 
 try:
     session.commit()
