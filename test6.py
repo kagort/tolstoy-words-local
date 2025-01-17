@@ -151,11 +151,13 @@ for pos, words in pos_data.items():
 
         # Добавление связей с предложениями
         for sentence_id in sentence_ids:
-            session.execute(word_sentence_association.insert().values(
+            session.execute(Cross.__table__.insert().values(
                 WordID=word_entry.WordID,
                 SentenceID=sentence_id,
                 TextID=text_id
-            ))   #Ошибка?
+            ))
+
+            #Ошибка?
 
 try:
     session.commit()
