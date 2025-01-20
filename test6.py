@@ -130,9 +130,25 @@ for pos, words in pos_data.items():
         print(f"{word} ({len(sentence_ids)}): {', '.join(map(str, sentence_ids))}")
 
 # Сохранение данных в базу
+parsed_word = morph.parse(search_word)[0]
+lemma = parsed_word.normal_form
+
+# Проверяем, есть ли токен в базе
+token_entry = session.query(TokenID).filter_by(Token_text=lemma, TextID=text_id).first()
+
+if not token_entry:
+    # Создаём токен для поискового слова
+    token_entry = TokenID(Token_text=lemma, TextID=text_id)
+    session.add(token_entry)
+    session.flush()
+
+# Получаем TokenID
+token_id = token_entry.TokenID
+
+# Обрабатываем слова из анализа
 for pos, words in pos_data.items():
     for word, sentence_ids in words.items():
-        # Проверка или добавление слова
+        # Проверяем или добавляем слово
         word_entry = session.query(Words).filter_by(
             Word_text=word,
             Part_of_speech=pos,
@@ -140,11 +156,13 @@ for pos, words in pos_data.items():
         ).first()
 
         if not word_entry:
+            # Добавляем новое слово с общим TokenID
             word_entry = Words(
                 Word_text=word,
                 Part_of_speech=pos,
                 Frequency=len(sentence_ids),
-                TextID=text_id
+                TextID=text_id,
+                TokenID=token_id  # Присваиваем токен, связанный с поисковым словом
             )
             session.add(word_entry)
             session.flush()

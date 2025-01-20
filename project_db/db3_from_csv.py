@@ -40,7 +40,7 @@ class Words(Base):
 
 # Промежуточная таблица для связи многие-ко-многим
 class Cross(Base):
-    __tablename__ = 'word_sentence_association'
+    __tablename__ = 'cross'
     CrossID = Column(Integer, primary_key=True, autoincrement=True)
     WordID = Column(Integer, ForeignKey('words.WordID'))
     SentenceID = Column(Integer, ForeignKey('sentences.SentenceID'))

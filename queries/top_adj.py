@@ -1,40 +1,41 @@
-import pandas as pd
-from project_db.db3_from_csv import engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, func, desc
+from project_db.db3_from_csv import DicTexts, Words, Sentences, Cross, TokenID
 
-# SQL-запрос
-query = """
-SELECT 
-    t."TextTitle" AS TextTitle,
-    tok."Token_text" AS TokenText,
-    w."Word_text" AS DependentWord,
-    SUM(w."Frequency") AS TotalFrequency,
-    STRING_AGG(s."Sentence_text", '; ') AS Sentences
-FROM 
-    public.word_sentence_association wsa
-JOIN 
-    public.words w ON wsa."WordID" = w."WordID"
-JOIN 
-    public.sentences s ON wsa."SentenceID" = s."SentenceID"
-JOIN 
-    public.dictexts t ON wsa."TextID" = t."TextID"
-JOIN 
-    public.tokenid tok ON tok."TokenID" = wsa."TextID"  -- Соединяем через TextID
-WHERE 
-    tok."TokenID" IN (1, 2)
-    AND w."Part_of_speech" = 'ADJ'
-GROUP BY 
-    t."TextTitle", tok."Token_text", w."Word_text"
-ORDER BY 
-    tok."TokenID", TotalFrequency DESC
-LIMIT 10;
-"""
 
-# Выполнение запроса
-df = pd.read_sql(query, con=engine)
+engine = create_engine('postgresql://postgres:ouganda77@localhost:5432/tolstoy_words_csv')
+Session = sessionmaker(bind=engine)
+session = Session()
 
-# Проверка результата
-print(df)
+# SQLAlchemy-запрос для получения топ-10 прилагательных
+top_adjectives_token1 = (
+    session.query(Words.Word_text, Words.Frequency, TokenID.TokenID)
+    .join(TokenID, Words.TokenID == TokenID.TokenID)
+    .filter(Words.Part_of_speech == 'ADJ', TokenID.TokenID == 1)
+    .order_by(desc(Words.Frequency))
+    .limit(10)
+    .all()
+)
 
-# Сохранение результата в CSV
-df.to_csv('top_adjectives_by_token.csv', index=False, encoding='utf-8')
-print("Результаты сохранены в top_adjectives_by_token.csv")
+# Для TokenID = 2
+top_adjectives_token2 = (
+    session.query(Words.Word_text, Words.Frequency, TokenID.TokenID)
+    .join(TokenID, Words.TokenID == TokenID.TokenID)
+    .filter(Words.Part_of_speech == 'ADJ', TokenID.TokenID == 2)
+    .order_by(desc(Words.Frequency))
+    .limit(10)
+    .all()
+)
+
+# Вывод результатов
+print("Топ-10 прилагательных для TokenID = 1:")
+for word, frequency, token_id in top_adjectives_token1:
+    print(f"{word}, {frequency}, TokenID: {token_id}")
+
+print("\nТоп-10 прилагательных для TokenID = 2:")
+for word, frequency, token_id in top_adjectives_token2:
+    print(f"{word}, {frequency}, TokenID: {token_id}")
+
+
+
+
