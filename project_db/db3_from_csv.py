@@ -18,6 +18,7 @@ class TokenID(Base):
     TokenID = Column(Integer, primary_key=True, autoincrement=True)
     Token_text = Column(String(255), nullable=False)
     TextID = Column(Integer, ForeignKey('dictexts.TextID'), nullable=False)
+    Token_count = Column(Integer)
 
     __table_args__ = (
         UniqueConstraint('Token_text', 'TextID', name='token_text_textid_unique'),

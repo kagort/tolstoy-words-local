@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search Sentences</title>
+    <style>
+        .highlight {
+            background-color: yellow;
+        }
+    </style>
+</head>
+<body>
+    <h1>Поиск предложений по токену</h1>
+    <form method="POST">
+        <label for="text_id">TextID:</label>
+        <input type="text" id="text_id" name="text_id" required>
+        <br>
+        <label for="token_text">Token Text:</label>
+        <input type="text" id="token_text" name="token_text" required>
+        <br>
+        <button type="submit">Искать</button>
+    </form>
+    {% if sentences %}
+        <h2>Найденные предложения:</h2>
+        <form action="{{ url_for('delete_sentences') }}" method="POST">
+            <ul>
+                {% for sentence in sentences %}
+                    <li>
+                        <input type="checkbox" name="selected_sentences" value="{{ sentence['id'] }}">
+                        <strong>ID: {{ sentence['id'] }}</strong>
+                        <span>{{ sentence['text'] | safe }}</span>
+                    </li>
+                {% endfor %}
+            </ul>
+            <button type="submit">Удалить выбранные</button>
+        </form>
+    {% elif error %}
+        <p style="color: red;">{{ error }}</p>
+    {% endif %}
+</body>
+</html>
