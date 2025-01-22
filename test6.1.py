@@ -26,6 +26,13 @@ def remove_punctuation(word):
 
 # Ввод данных
 text_title = input("Введите название текста: ")
+text_author = input("Введите ФИО автора в формате: Имя Отчество Фамилия: ")
+try:
+    text_year_creation = int(input("Введите год создания произведения в формате: 0000: "))
+except ValueError:
+    print("Ошибка: Год создания должен быть числом.")
+    exit()
+text_genre = input("Введите наименование жанра: ")
 file_path = input("Введите путь к файлу текста: ")
 
 # Проверка существующего текста
@@ -35,25 +42,29 @@ if existing_text:
     print(f"Текст '{text_title}' уже существует в базе с ID {existing_text.TextID}.")
     text_id = existing_text.TextID
 else:
-    # Загрузка текста
-    with open(file_path, 'r', encoding='utf-8') as file:
-        text = clean_text(file.read())
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            text = clean_text(file.read())
+    except FileNotFoundError:
+        print(f"Файл по пути {file_path} не найден.")
+        exit()
 
     # Добавление текста в базу
-    text_entry = DicTexts(TextTitle=text_title)
+    text_entry = DicTexts(
+        TextTitle=text_title,
+        Text_Author=text_author,
+        Text_year_creation=text_year_creation,
+        Text_genre=text_genre
+    )
     session.add(text_entry)
-    session.flush()
-
+    session.flush()  # Получаем TextID
     text_id = text_entry.TextID
 
     # Токенизация предложений и добавление в базу
     sentences = sent_tokenize(text, language='russian')
-
     for sent in sentences:
-        sentence_entry = Sentences(Sentence_text=sent, TextID=text_id)  # Сохраняем текст с пунктуацией
+        sentence_entry = Sentences(Sentence_text=sent, TextID=text_id)
         session.add(sentence_entry)
-        session.flush()
-
     session.commit()
 
 # Поиск слова
@@ -61,17 +72,14 @@ search_word = input("Введите слово для поиска: ").strip().l
 parsed_word = morph.parse(search_word)[0]
 lemma = parsed_word.normal_form
 
-# Проверяем существование токена с учётом TextID
 existing_token = session.query(TokenID).filter_by(Token_text=lemma, TextID=text_id).first()
 
 if not existing_token:
-    # Если токен отсутствует, создаём его с инициализацией Token_count
     token_entry = TokenID(Token_text=lemma, TextID=text_id, Token_count=0)
     session.add(token_entry)
-    session.flush()  # Сохраняем в базе, чтобы получить TokenID
+    session.flush()
     token_id = token_entry.TokenID
 else:
-    # Если токен уже существует, используем его ID
     token_id = existing_token.TokenID
 
 # Фильтрация предложений, содержащих слово
@@ -80,51 +88,32 @@ filtered_sentences = session.query(Sentences).filter(
     Sentences.Sentence_text.ilike(f"%{search_word}%")
 ).all()
 
-# Подсчитываем количество вхождений токена во всех предложениях
+# Инициализация данных для анализа зависимостей
+pos_data = {
+    "ADJ": defaultdict(list),
+    "NOUN": defaultdict(list),
+    "VERB_HEAD": defaultdict(list),
+    "VERB_CHILD": defaultdict(list),
+    "ADV": defaultdict(list),
+    "PRON": defaultdict(list),
+    "OTHER": defaultdict(list)
+}
+
 total_occurrences = 0
 for sentence in tqdm(filtered_sentences, desc="Анализ предложений"):
-    doc = nlp(sentence.Sentence_text)  # Анализ текста предложения
+    doc = nlp(sentence.Sentence_text)
     occurrences_in_sentence = sum(1 for token in doc if token.lemma_ == lemma)
     total_occurrences += occurrences_in_sentence
 
-# Обновляем Token_count для токена
-if existing_token:
-    existing_token.Token_count += total_occurrences
-    session.add(existing_token)
-else:
-    token_entry.Token_count = total_occurrences
-    session.add(token_entry)
-
-# Фильтрация предложений, содержащих слово
-filtered_sentences = session.query(Sentences).filter(
-    Sentences.TextID == text_id,
-    Sentences.Sentence_text.ilike(f"%{search_word}%")
-).all()
-
-# Схема анализа зависимых слов
-pos_data = {
-    "ADJ": defaultdict(list),       # Прилагательные
-    "NOUN": defaultdict(list),      # Существительные с падежом
-    "VERB_HEAD": defaultdict(list), # Глаголы, от которых слово зависит
-    "VERB_CHILD": defaultdict(list), # Глаголы, зависящие от слова
-    "ADV": defaultdict(list),       # Наречия
-    "PRON": defaultdict(list),      # Местоимения
-    "OTHER": defaultdict(list)      # Прочее
-}
-
-# Анализ окружения слов в отфильтрованных предложениях
-for sentence in tqdm(filtered_sentences, desc="Анализ окружения"):
-    doc = nlp(sentence.Sentence_text)  # Текст с пунктуацией сохраняется
+    # Анализ зависимостей токена в предложении
     for token in doc:
         if token.lemma_ == lemma:
-            # Глагол, от которого зависит слово
             if token.head.pos_ == "VERB" and token.head != token:
                 pos_data["VERB_HEAD"][remove_punctuation(token.head.lemma_)].append(sentence.SentenceID)
 
-            # Зависимые дети слова
             for child in token.children:
                 cleaned_word = remove_punctuation(child.lemma_)
-                if cleaned_word:  # Пропускаем пустые строки (пунктуация)
+                if cleaned_word:
                     if child.pos_ == "VERB":
                         pos_data["VERB_CHILD"][cleaned_word].append(sentence.SentenceID)
                     elif child.pos_ == "NOUN":
@@ -140,20 +129,15 @@ for sentence in tqdm(filtered_sentences, desc="Анализ окружения")
                     else:
                         pos_data["OTHER"][cleaned_word].append(sentence.SentenceID)
 
-# Подсчет общей частотности по частям речи
-pos_frequencies = {pos: sum(len(ids) for ids in words.values()) for pos, words in pos_data.items()}
+if total_occurrences > 0:
+    if existing_token:
+        existing_token.Token_count += total_occurrences
+    else:
+        token_entry.Token_count = total_occurrences
 
-# Вывод данных анализа
-print("\nРезультаты анализа зависимых слов (без пунктуации):")
-for pos, words in pos_data.items():
-    print(f"\nЧасть речи: {pos} (Частотность: {pos_frequencies[pos]})")  # Вывод частотности
-    for word, sentence_ids in words.items():
-        print(f"{word} ({len(sentence_ids)}): {', '.join(map(str, sentence_ids))}")
-
-# Сохранение данных в базу
+# Сохранение результатов анализа в базу
 for pos, words in pos_data.items():
     for word, sentence_ids in words.items():
-        # Проверяем или добавляем слово
         word_entry = session.query(Words).filter_by(
             Word_text=word,
             Part_of_speech=pos,
@@ -161,16 +145,14 @@ for pos, words in pos_data.items():
         ).first()
 
         if not word_entry:
-            # Добавляем новое слово с токеном
             word_entry = Words(
                 Word_text=word,
                 Part_of_speech=pos,
                 Frequency=len(sentence_ids),
                 TextID=text_id,
-                TokenID=token_id  # Присваиваем токен, связанный с поисковым словом
+                TokenID=token_id
             )
             session.add(word_entry)
-            session.flush()
 
         # Добавление связей с предложениями
         for sentence_id in sentence_ids:
