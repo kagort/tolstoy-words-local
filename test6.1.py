@@ -6,7 +6,7 @@ from tqdm import tqdm
 from sqlalchemy.orm import sessionmaker
 from pymorphy3 import MorphAnalyzer
 from nltk.tokenize import sent_tokenize
-from project_db.db3_from_csv import *  # Импортируем обновленную схему базы данных
+from project_db.model_3 import * # Импортируем обновленную схему базы данных
 import string  # Для работы с пунктуацией
 
 import logging
@@ -153,6 +153,7 @@ for pos, words in pos_data.items():
                 TokenID=token_id
             )
             session.add(word_entry)
+            session.flush()
 
         # Добавление связей с предложениями
         for sentence_id in sentence_ids:
@@ -162,6 +163,7 @@ for pos, words in pos_data.items():
                 TextID=text_id
             )
             session.add(row)
+
 
 try:
     session.commit()

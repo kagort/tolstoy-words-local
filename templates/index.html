@@ -1,42 +1,132 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Search Sentences</title>
+    <title>Поиск предложений по токену</title>
     <style>
         .highlight {
             background-color: yellow;
+            font-weight: bold;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        h1, h2 {
+            text-align: center;
+        }
+        form {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        select, input, button {
+            display: block;
+            width: 100%;
+            margin-top: 10px;
+            padding: 10px;
+            font-size: 16px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .sentence-container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            padding: 10px;
+            text-align: left;
+            vertical-align: top;
+        }
+        th {
+            background: #007bff;
+            color: white;
+        }
+        tr:nth-child(even) {
+            background: #f9f9f9;
+        }
+        .checkbox-column {
+            width: 50px;
+        }
+        .sentence-id {
+            color: #007bff;
+            font-weight: bold;
+            white-space: nowrap;
         }
     </style>
 </head>
 <body>
+
     <h1>Поиск предложений по токену</h1>
-    <form method="POST">
-        <label for="text_id">TextID:</label>
-        <input type="text" id="text_id" name="text_id" required>
-        <br>
-        <label for="token_text">Token Text:</label>
-        <input type="text" id="token_text" name="token_text" required>
-        <br>
+
+    <form method="GET" action="/">
+        <label for="text_id">Выберите текст:</label>
+        <select name="text_id" id="text_id" required>
+            {% for text in text_titles %}
+                <option value="{{ text.TextID }}" {% if text_id == text.TextID|string %}selected{% endif %}>
+                    {{ text.TextTitle }}
+                </option>
+            {% endfor %}
+        </select>
+
+        <label for="token_text">Введите слово:</label>
+        <input type="text" id="token_text" name="token_text" value="{{ token_text or '' }}" required>
+
         <button type="submit">Искать</button>
     </form>
+
     {% if sentences %}
-        <h2>Найденные предложения:</h2>
-        <form action="{{ url_for('delete_sentences') }}" method="POST">
-            <ul>
-                {% for sentence in sentences %}
-                    <li>
-                        <input type="checkbox" name="selected_sentences" value="{{ sentence['id'] }}">
-                        <strong>ID: {{ sentence['id'] }}</strong>
-                        <span>{{ sentence['text'] | safe }}</span>
-                    </li>
-                {% endfor %}
-            </ul>
-            <button type="submit">Удалить выбранные</button>
-        </form>
+        <div class="sentence-container">
+            <h2>Найденные предложения:</h2>
+            <form action="{{ url_for('delete_sentences') }}" method="POST">
+                <input type="hidden" name="text_id" value="{{ text_id }}">
+                <input type="hidden" name="token_text" value="{{ token_text }}">
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="checkbox-column"></th>
+                            <th>Sentence ID</th>
+                            <th>Текст</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for sentence in sentences %}
+                            <tr>
+                                <td class="checkbox-column">
+                                    <input type="checkbox" name="selected_sentences" value="{{ sentence['id'] }}">
+                                </td>
+                                <td class="sentence-id">[{{ sentence['id'] }}]</td>
+                                <td>{{ sentence['text'] | safe }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <button type="submit">Удалить выбранные связи</button>
+            </form>
+        </div>
     {% elif error %}
-        <p style="color: red;">{{ error }}</p>
+        <p style="color: red; text-align: center;">{{ error }}</p>
     {% endif %}
+
 </body>
 </html>

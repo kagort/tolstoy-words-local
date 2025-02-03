@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for
 from sqlalchemy.orm import sessionmaker
 from project_db.db3_from_csv import *
+from project_db.model_3 import *
 
 app = Flask(__name__)
 
@@ -17,7 +18,7 @@ def search_sentences():
         # Получение токена
         token = session.query(TokenID).filter_by(TextID=text_id, Token_text=token_text).first()
         if not token:
-            return render_template('index.html', error="Токен не найден.")
+            return render_template('index0.html', error="Токен не найден.")
 
         # Получение предложений с вхождениями токена
         sentences = session.query(Sentences).filter(
@@ -38,13 +39,13 @@ def search_sentences():
             })
 
         return render_template(
-            'index.html',
+            'index0.html',
             sentences=highlighted_sentences,
             text_id=text_id,
             token_text=token_text
         )
 
-    return render_template('index.html')
+    return render_template('index0.html')
 
 @app.route('/delete', methods=['POST'])
 def delete_sentences():
