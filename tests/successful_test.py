@@ -58,7 +58,7 @@ morph = MorphAnalyzer()
 # session = Session()
 Base.metadata.create_all(engine)
 # Загрузка текста
-with open("voina_i_mir.txt", 'r', encoding='utf-8') as file:
+with open("../voina_i_mir.txt", 'r', encoding='utf-8') as file:
     text = file.read()
 
 # Добавление текста в базу

@@ -12,7 +12,7 @@ nlp = spacy.load("ru_core_news_sm")
 morph = MorphAnalyzer()
 
 # Загрузка текста
-with open("voina_i_mir.txt", 'r', encoding='utf-8') as file:
+with open("../voina_i_mir.txt", 'r', encoding='utf-8') as file:
     text = file.read()
 
 # Токенизация текста на предложения

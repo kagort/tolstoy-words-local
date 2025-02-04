@@ -1,10 +1,10 @@
 import pandas as pd
 from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship, scoped_session
+from sqlalchemy.orm import declarative_base, sessionmaker, scoped_session
 
 
-from user_word_context import rows
-from user_word_context import sentence_data
+from tests.user_word_context import rows
+from tests.user_word_context import sentence_data
 
 # Создание DataFrame
 context_df = pd.DataFrame(rows)

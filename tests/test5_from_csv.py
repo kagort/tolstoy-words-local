@@ -2,8 +2,8 @@ import pandas as pd
 from project_db.db3_from_csv import *
 
 # Загрузка файлов
-context_df = pd.read_csv("context_analysis.csv")
-sentence_df = pd.read_csv("sentences_with_id.csv")
+context_df = pd.read_csv("../context_analysis.csv")
+sentence_df = pd.read_csv("../sentences_with_id.csv")
 
 # Добавляем предложения в базу
 sentence_map = {}  # Для хранения ID предложений

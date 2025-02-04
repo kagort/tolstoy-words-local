@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, redirect, url_for
 from sqlalchemy.orm import sessionmaker
+from pymorphy3 import MorphAnalyzer
 from project_db.db3_from_csv import *
 from project_db.model_3 import *
 
@@ -9,32 +10,47 @@ app = Flask(__name__)
 Session = sessionmaker(bind=engine)
 session = Session()
 
+# Инициализация морфологического анализатора
+morph = MorphAnalyzer()
+
 @app.route('/', methods=['GET', 'POST'])
 def search_sentences():
+    """Форма поиска предложений по токену."""
+    text_titles = session.query(DicTexts.TextID, DicTexts.TextTitle).all()
+
     if request.method == 'POST':
         text_id = request.form.get('text_id')
         token_text = request.form.get('token_text')
 
-        # Получение токена
-        token = session.query(TokenID).filter_by(TextID=text_id, Token_text=token_text).first()
+        # Приводим слово к нормальной форме
+        normal_form = morph.parse(token_text)[0].normal_form
+
+        # Получаем токен
+        token = session.query(TokenID).filter_by(TextID=text_id, Token_text=normal_form).first()
         if not token:
-            return render_template('index0.html', error="Токен не найден.")
+            return render_template('index0.html', error="Токен не найден.", text_titles=text_titles)
 
-        # Получение предложений с вхождениями токена
-        sentences = session.query(Sentences).filter(
-            Sentences.TextID == text_id,
-            Sentences.Sentence_text.ilike(f"%{token_text}%")
-        ).all()
+        # Получаем все пересечения токена из таблицы Cross
+        cross_entries = session.query(Cross).filter_by(TokenID=token.TokenID).all()
 
-        # Обработка предложений: выделение токена
+        # Получаем SentenceID и CrossID
+        sentence_word_pairs = [(cross.SentenceID, cross.CrossID) for cross in cross_entries]
+
+        # Загружаем предложения
+        sentence_dict = {s.SentenceID: s.Sentence_text for s in session.query(Sentences).filter(
+            Sentences.SentenceID.in_([s_id for s_id, _ in sentence_word_pairs])
+        ).all()}
+
+        # Подготавливаем список с подсветкой токена
         highlighted_sentences = []
-        for sentence in sentences:
-            highlighted_text = sentence.Sentence_text.replace(
-                token_text,
-                f"<span class='highlight'>{token_text}</span>"
+        for sentence_id, cross_id in sentence_word_pairs:
+            sentence_text = sentence_dict.get(sentence_id, "Текст не найден")
+            highlighted_text = sentence_text.replace(
+                token_text, f"<span class='highlight'>{token_text}</span>"
             )
             highlighted_sentences.append({
-                'id': sentence.SentenceID,
+                'sentence_id': sentence_id,
+                'cross_id': cross_id,
                 'text': highlighted_text
             })
 
@@ -42,22 +58,52 @@ def search_sentences():
             'index0.html',
             sentences=highlighted_sentences,
             text_id=text_id,
-            token_text=token_text
+            token_text=token_text,
+            text_titles=text_titles
         )
 
-    return render_template('index0.html')
+    return render_template('index0.html', text_titles=text_titles)
 
 @app.route('/delete', methods=['POST'])
 def delete_sentences():
-    selected_sentences = request.form.getlist('selected_sentences')
+    """Удаление конкретных вхождений токена."""
+    selected_entries = request.form.getlist('selected_sentences')
+    text_id = request.form.get('text_id')
+    token_text = request.form.get('token_text')
 
-    for sentence_id in selected_sentences:
-        sentence = session.query(Sentences).filter_by(SentenceID=sentence_id).first()
-        if sentence:
-            session.delete(sentence)
+    if not selected_entries or not text_id or not token_text:
+        return redirect(url_for('search_sentences'))
+
+    # Приводим слово к нормальной форме
+    normal_form = morph.parse(token_text)[0].normal_form
+
+    # Получаем токен
+    token = session.query(TokenID).filter_by(TextID=text_id, Token_text=normal_form).first()
+    if not token:
+        return redirect(url_for('search_sentences'))
+
+    deleted_occurrences = 0
+
+    for cross_id in selected_entries:
+        try:
+            cross_id = int(cross_id)
+        except ValueError:
+            continue  # Пропускаем некорректные значения
+
+        # Удаляем конкретное вхождение из Cross
+        cross_entry = session.query(Cross).filter_by(CrossID=cross_id).first()
+        if cross_entry:
+            session.delete(cross_entry)
+            deleted_occurrences += 1
+
+    # Обновляем Token_count
+    if deleted_occurrences > 0:
+        token.Token_count = max(0, token.Token_count - deleted_occurrences)
 
     session.commit()
-    return redirect(url_for('search_sentences'))
+
+    # Перезагружаем страницу
+    return redirect(url_for('search_sentences', text_id=text_id, token_text=token_text))
 
 if __name__ == '__main__':
     app.run(debug=True)
