@@ -1,3 +1,4 @@
+import logging
 from flask import Flask, render_template, request, redirect, url_for
 from sqlalchemy.orm import sessionmaker
 from pymorphy3 import MorphAnalyzer
@@ -17,10 +18,16 @@ morph = MorphAnalyzer()
 def search_sentences():
     """Форма поиска предложений по токену."""
     text_titles = session.query(DicTexts.TextID, DicTexts.TextTitle).all()
-
+    text_id = None
+    token_text = None
     if request.method == 'POST':
         text_id = request.form.get('text_id')
         token_text = request.form.get('token_text')
+
+    if request.method == 'GET':
+        text_id = request.args.get('text_id')
+        token_text = request.args.get('token_text')
+    if text_id and token_text:
 
         # Приводим слово к нормальной форме
         normal_form = morph.parse(token_text)[0].normal_form
@@ -72,8 +79,9 @@ def delete_sentences():
     token_text = request.form.get('token_text')
 
     if not selected_entries or not text_id or not token_text:
+        logging.info('redirect')
         return redirect(url_for('search_sentences'))
-
+    logging.info('normal')
     # Приводим слово к нормальной форме
     normal_form = morph.parse(token_text)[0].normal_form
 
@@ -101,7 +109,7 @@ def delete_sentences():
         token.Token_count = max(0, token.Token_count - deleted_occurrences)
 
     session.commit()
-
+    logging.info("reload")
     # Перезагружаем страницу
     return redirect(url_for('search_sentences', text_id=text_id, token_text=token_text))
 

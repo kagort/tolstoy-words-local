@@ -6,7 +6,7 @@ from tqdm import tqdm
 from sqlalchemy.orm import sessionmaker
 from pymorphy3 import MorphAnalyzer
 from nltk.tokenize import sent_tokenize
-from project_db.model_3 import *  # Импортируем обновленную схему базы данных
+from project_db.model_3 import *  # Импорт базы
 import string  # Для работы с пунктуацией
 
 import logging
@@ -107,7 +107,7 @@ total_occurrences = 0
 for sentence in tqdm(filtered_sentences, desc="Анализ предложений"):
     doc = nlp(sentence.Sentence_text)
     occurrences_in_sentence = sum(1 for token in doc if token.lemma_ == lemma)
-    total_occurrences += occurrences_in_sentence  # Увеличиваем общий счетчик
+    total_occurrences += occurrences_in_sentence  # Увеличиваем счетчик
 
     # Анализ зависимостей токена в предложении
     for token in doc:
