@@ -33,8 +33,8 @@ res_text2 = session.query(
 # Вывод результатов
 print("Результаты для TextID = 1:")
 for row in res_text1:
-    print(f"Часть речи: {row.Part_of_speech}, Частота: {row.Total_Frequency}")
+    print(f"{row.Part_of_speech}, Частота: {row.Total_Frequency}")
 
 print("\nРезультаты для TextID = 2:")
 for row in res_text2:
-    print(f"Часть речи: {row.Part_of_speech}, Частота: {row.Total_Frequency}")
+    print(f"{row.Part_of_speech}, Частота: {row.Total_Frequency}")
