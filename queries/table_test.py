@@ -2,7 +2,7 @@ from project_db.model_3 import *
 from sqlalchemy import func
 
 # Список интересующих нас TokenID
-target_token_ids = [1, 2]
+target_token_ids = [1, 2, 4, 5, 8, 9]
 
 # Проверяем, что список не пустой
 if not target_token_ids:

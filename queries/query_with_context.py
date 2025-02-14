@@ -2,7 +2,7 @@ from project_db.model_3 import *
 from sqlalchemy import func
 
 # Определяем интересующие нас TokenID (например, существительные)
-target_token_ids = [1, 2]  # Пример: список ID токенов
+target_token_ids = [4, 5]  # Пример: список ID токенов
 
 # Подзапрос для получения зависимых слов и их предложений
 subquery = session.query(
