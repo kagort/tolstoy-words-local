@@ -6,7 +6,7 @@ from tqdm import tqdm
 from sqlalchemy.orm import sessionmaker
 from pymorphy3 import MorphAnalyzer
 from nltk.tokenize import sent_tokenize
-from project_db.model_3 import *  # Импорт базы
+from project_db.model_3 import *  # Импорт модели базы
 import string  # Для работы с пунктуацией
 
 import logging
@@ -21,13 +21,6 @@ morph = MorphAnalyzer()
 def clean_text(text):
     return text.replace('\x00', '').strip()
     session.close()
-
-# Функция для удаления пунктуации
-def remove_punctuation(word):
-    """Удаляет пунктуацию из строки."""
-    return word.translate(str.maketrans('', '', string.punctuation))
-
-# ... (все предыдущие импорты и инициализации остаются без изменений)
 
 # Функция для удаления пунктуации
 def remove_punctuation(word):
