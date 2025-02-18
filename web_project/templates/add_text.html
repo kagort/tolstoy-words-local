@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Добавление текста</title>
+</head>
+<body>
+    <h1>Добавление нового текста</h1>
+    <form method="POST">
+        <label for="text_title">Название текста:</label><br>
+        <input type="text" id="text_title" name="text_title" required><br><br>
+        <label for="text_author">Автор:</label><br>
+        <input type="text" id="text_author" name="text_author" required><br><br>
+        <label for="text_year_creation">Год создания:</label><br>
+        <input type="number" id="text_year_creation" name="text_year_creation" required><br><br>
+        <label for="text_genre">Жанр:</label><br>
+        <input type="text" id="text_genre" name="text_genre" required><br><br>
+        <label for="file_path">Путь к файлу:</label><br>
+        <input type="text" id="file_path" name="file_path" required><br><br>
+        <button type="submit">Добавить текст</button>
+    </form>
+</body>
+</html>

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Анализ слова</title>
+</head>
+<body>
+    <h1>Анализ слова</h1>
+    <form method="POST">
+        <label for="text_id">Выберите текст:</label><br>
+        <select name="text_id" id="text_id">
+            {% for text in texts %}
+                <option value="{{ text.TextID }}">{{ text.TextTitle }}</option>
+            {% endfor %}
+        </select><br><br>
+        <label for="search_word">Введите слово для анализа:</label><br>
+        <input type="text" id="search_word" name="search_word"><br><br>
+        <button type="submit">Проанализировать</button>
+    </form>
+</body>
+</html>
