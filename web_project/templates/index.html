@@ -6,11 +6,16 @@
 </head>
 <body>
     <h1>Доступные тексты:</h1>
-    <ul>
-        {% for text in texts %}
-            <li>ID: {{ text.TextID }}, Название: {{ text.TextTitle }}, Автор: {{ text.Text_Author }}</li>
-        {% endfor %}
-    </ul>
+    {% if texts %}
+        <ul>
+            {% for text in texts %}
+                <li>ID: {{ text.TextID }}, Название: {{ text.TextTitle }}, Автор: {{ text.Text_Author }}</li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>В базе данных нет ни одного текста.</p>
+    {% endif %}
+    <!-- Ссылка на добавление текста -->
     <a href="{{ url_for('add_text') }}">Добавить новый текст</a>
     <br><br>
     <a href="{{ url_for('analyze_word') }}">Проанализировать слово</a>

@@ -11,7 +11,7 @@ import string
 import logging
 
 # Инициализация библиотек
-nltk.download('punkt')
+nltk.download('punkt', quiet=True)
 nlp = spacy.load("ru_core_news_sm")
 morph = MorphAnalyzer()
 
@@ -89,111 +89,121 @@ def add_text():
 
     return render_template('add_text.html')
 
-# Поиск и анализ слова
+# Поиск и анализ слов
 @app.route('/analyze_word', methods=['GET', 'POST'])
 def analyze_word():
     if request.method == 'POST':
         text_id = int(request.form['text_id'])
-        search_word = request.form['search_word'].strip().lower()
+        search_words_input = request.form['search_words'].strip().lower()
 
-        if not search_word:
-            return "Ошибка: Слово для поиска не может быть пустым."
+        if not search_words_input:
+            return "Ошибка: Список слов для анализа не может быть пустым."
 
-        lemma = morph.parse(search_word)[0].normal_form
+        # Разделяем введенные слова по запятой
+        search_words = [word.strip() for word in search_words_input.split(",") if word.strip()]
 
-        # Проверка существования токена для данного текста
-        existing_token = session.query(TokenID).filter_by(Token_text=lemma, TextID=text_id).first()
-        if existing_token:
-            return f"Токен '{search_word}' уже существует для выбранного текста."
+        results = []
 
-        # Создание новой записи для токена
-        token_entry = TokenID(Token_text=lemma, TextID=text_id, Token_count=0)
-        session.add(token_entry)
-        session.flush()  # Получаем TokenID
-        token_id = token_entry.TokenID
+        for search_word in search_words:
+            lemma = morph.parse(search_word)[0].normal_form
 
-        # Фильтрация предложений, содержащих слово
-        filtered_sentences = session.query(Sentences).filter(
-            Sentences.TextID == text_id,
-            Sentences.Sentence_text.ilike(f"%{search_word}%")
-        ).all()
+            # Проверка существования токена для данного текста
+            existing_token = session.query(TokenID).filter_by(Token_text=lemma, TextID=text_id).first()
+            if existing_token:
+                results.append(f"Токен '{search_word}' уже существует для выбранного текста.")
+                continue
 
-        if not filtered_sentences:
-            return f"Слово '{search_word}' не найдено в тексте."
+            # Создание новой записи для токена
+            token_entry = TokenID(Token_text=lemma, TextID=text_id, Token_count=0)
+            session.add(token_entry)
+            session.flush()  # Получаем TokenID
+            token_id = token_entry.TokenID
 
-        # Инициализация данных для анализа зависимостей
-        pos_data = {
-            "ADJ": defaultdict(list),
-            "NOUN": defaultdict(list),
-            "VERB_HEAD": defaultdict(list),
-            "VERB_CHILD": defaultdict(list),
-            "ADV": defaultdict(list),
-            "PRON": defaultdict(list),
-            "OTHER": defaultdict(list)
-        }
+            # Фильтрация предложений, содержащих слово
+            filtered_sentences = session.query(Sentences).filter(
+                Sentences.TextID == text_id,
+                Sentences.Sentence_text.ilike(f"%{search_word}%")
+            ).all()
 
-        total_occurrences = 0
+            if not filtered_sentences:
+                results.append(f"Слово '{search_word}' не найдено в тексте.")
+                continue
 
-        for sentence in filtered_sentences:
-            doc = nlp(sentence.Sentence_text)
-            occurrences_in_sentence = sum(1 for token in doc if token.lemma_ == lemma)
-            total_occurrences += occurrences_in_sentence
+            # Инициализация данных для анализа зависимостей
+            pos_data = {
+                "ADJ": defaultdict(list),
+                "NOUN": defaultdict(list),
+                "VERB_HEAD": defaultdict(list),
+                "VERB_CHILD": defaultdict(list),
+                "ADV": defaultdict(list),
+                "PRON": defaultdict(list),
+                "OTHER": defaultdict(list)
+            }
 
-            for token in doc:
-                if token.lemma_ == lemma:
-                    if token.head.pos_ == "VERB" and token.head != token:
-                        pos_data["VERB_HEAD"][remove_punctuation(token.head.lemma_)].append(sentence.SentenceID)
-                    for child in token.children:
-                        cleaned_word = remove_punctuation(child.lemma_)
-                        if cleaned_word:
-                            if child.pos_ == "VERB":
-                                pos_data["VERB_CHILD"][cleaned_word].append(sentence.SentenceID)
-                            elif child.pos_ == "NOUN":
-                                case = child.morph.get("Case")
-                                case_label = f"{cleaned_word} ({case[0] if case else 'Неизвестный падеж'})"
-                                pos_data["NOUN"][case_label].append(sentence.SentenceID)
-                            elif child.pos_ == "ADJ":
-                                pos_data["ADJ"][cleaned_word].append(sentence.SentenceID)
-                            elif child.pos_ == "ADV":
-                                pos_data["ADV"][cleaned_word].append(sentence.SentenceID)
-                            elif child.pos_ == "PRON":
-                                pos_data["PRON"][cleaned_word].append(sentence.SentenceID)
-                            else:
-                                pos_data["OTHER"][cleaned_word].append(sentence.SentenceID)
+            total_occurrences = 0
 
-        # Обновление Token_count
-        if total_occurrences > 0:
-            token_entry.Token_count = total_occurrences
+            for sentence in filtered_sentences:
+                doc = nlp(sentence.Sentence_text)
+                occurrences_in_sentence = sum(1 for token in doc if token.lemma_ == lemma)
+                total_occurrences += occurrences_in_sentence
 
-        # Сохранение результатов анализа в базу
-        for pos, words in pos_data.items():
-            for word, sentence_ids in words.items():
-                word_entry = Words(
-                    Word_text=word,
-                    Part_of_speech=pos,
-                    Frequency=len(sentence_ids),
-                    TextID=text_id,
-                    TokenID=token_id
-                )
-                session.add(word_entry)
-                session.flush()  # Получаем WordID
+                for token in doc:
+                    if token.lemma_ == lemma:
+                        if token.head.pos_ == "VERB" and token.head != token:
+                            pos_data["VERB_HEAD"][remove_punctuation(token.head.lemma_)].append(sentence.SentenceID)
+                        for child in token.children:
+                            cleaned_word = remove_punctuation(child.lemma_)
+                            if cleaned_word:
+                                if child.pos_ == "VERB":
+                                    pos_data["VERB_CHILD"][cleaned_word].append(sentence.SentenceID)
+                                elif child.pos_ == "NOUN":
+                                    case = child.morph.get("Case")
+                                    case_label = f"{cleaned_word} ({case[0] if case else 'Неизвестный падеж'})"
+                                    pos_data["NOUN"][case_label].append(sentence.SentenceID)
+                                elif child.pos_ == "ADJ":
+                                    pos_data["ADJ"][cleaned_word].append(sentence.SentenceID)
+                                elif child.pos_ == "ADV":
+                                    pos_data["ADV"][cleaned_word].append(sentence.SentenceID)
+                                elif child.pos_ == "PRON":
+                                    pos_data["PRON"][cleaned_word].append(sentence.SentenceID)
+                                else:
+                                    pos_data["OTHER"][cleaned_word].append(sentence.SentenceID)
 
-                # Добавление связей с предложениями
-                for sentence_id in sentence_ids:
-                    row = Cross(
-                        WordID=word_entry.WordID,
-                        SentenceID=sentence_id,
+            # Обновление Token_count
+            if total_occurrences > 0:
+                token_entry.Token_count = total_occurrences
+
+            # Сохранение результатов анализа в базу
+            for pos, words in pos_data.items():
+                for word, sentence_ids in words.items():
+                    word_entry = Words(
+                        Word_text=word,
+                        Part_of_speech=pos,
+                        Frequency=len(sentence_ids),
                         TextID=text_id,
                         TokenID=token_id
                     )
-                    session.add(row)
+                    session.add(word_entry)
+                    session.flush()  # Получаем WordID
 
-        try:
-            session.commit()
-            return f"Анализ токена '{search_word}' успешно завершен."
-        except Exception as e:
-            session.rollback()
-            return f"Ошибка при сохранении данных: {e}"
+                    # Добавление связей с предложениями
+                    for sentence_id in sentence_ids:
+                        row = Cross(
+                            WordID=word_entry.WordID,
+                            SentenceID=sentence_id,
+                            TextID=text_id,
+                            TokenID=token_id
+                        )
+                        session.add(row)
+
+            try:
+                session.commit()
+                results.append(f"Анализ токена '{search_word}' успешно завершен.")
+            except Exception as e:
+                session.rollback()
+                results.append(f"Ошибка при сохранении данных для токена '{search_word}': {e}")
+
+        return "<br>".join(results)
 
     texts = session.query(DicTexts).all()
     return render_template('analyze_word.html', texts=texts)

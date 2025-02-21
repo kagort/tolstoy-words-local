@@ -2,19 +2,19 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Анализ слова</title>
+    <title>Анализ слов</title>
 </head>
 <body>
-    <h1>Анализ слова</h1>
+    <h1>Анализ слов</h1>
     <form method="POST">
         <label for="text_id">Выберите текст:</label><br>
-        <select name="text_id" id="text_id">
+        <select name="text_id" id="text_id" required>
             {% for text in texts %}
                 <option value="{{ text.TextID }}">{{ text.TextTitle }}</option>
             {% endfor %}
         </select><br><br>
-        <label for="search_word">Введите слово для анализа:</label><br>
-        <input type="text" id="search_word" name="search_word"><br><br>
+        <label for="search_words">Введите слова для анализа (через запятую):</label><br>
+        <input type="text" id="search_words" name="search_words" required><br><br>
         <button type="submit">Проанализировать</button>
     </form>
 </body>
