@@ -8,6 +8,7 @@ engine = create_engine('postgresql://postgres:ouganda77@localhost:5432/tolstoy_w
 Session = sessionmaker(bind=engine)
 session = Session()
 
+
 # Функция для извлечения предложений и сохранения их в CSV
 def extract_sentences_with_tokens(output_file):
     try:
@@ -32,11 +33,13 @@ def extract_sentences_with_tokens(output_file):
             .all()
         )
 
+        # Подсчет общего количества извлеченных предложений
+        total_sentences = len(sentences)
+
         # Шаг 4: Сохранить результаты в CSV-файл
         with open(output_file, mode='w', encoding='utf-8', newline='') as csvfile:
             fieldnames = ['TextID', 'Sentence']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
             writer.writeheader()
             for sentence in sentences:
                 writer.writerow({
@@ -45,11 +48,14 @@ def extract_sentences_with_tokens(output_file):
                 })
 
         print(f"Предложения успешно сохранены в файл {output_file}")
+        print(f"Общее количество извлеченных предложений: {total_sentences}")
 
     except Exception as e:
         print(f"Ошибка: {e}")
+
     finally:
         session.close()
+
 
 # Вызов функции
 if __name__ == '__main__':

@@ -6,7 +6,7 @@ class DicTexts(Base):
     __tablename__ = 'dictexts'
     TextID = Column(Integer, primary_key=True, autoincrement=True)
     TextTitle = Column(String(255), unique=True)
-    Text_Author = Column(String(255), unique=True)
+    Text_Author = Column(String(255), nullable=True)
     Text_year_creation = Column(Integer, nullable=True)
     Text_genre = Column(String(255), nullable=True)
 
