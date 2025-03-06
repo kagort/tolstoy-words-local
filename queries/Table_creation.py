@@ -27,7 +27,11 @@ def main():
             .subquery()
         )
 
-        # 2. Подсчет количества слов в предложениях с токенами (без агрегации avg)
+        # Проверка наличия данных в sentences_cte
+        if not session.query(sentences_cte.c.TextID).first():
+            raise ValueError("Нет данных для анализа в sentences_cte")
+
+        # 2. Подсчет количества слов в предложениях с токенами
         words_per_sentence = (
             session.query(
                 Cross.TextID,
@@ -39,7 +43,7 @@ def main():
             .subquery()
         )
 
-        # 2.1 Теперь считаем среднее количество слов на предложение
+        # 2.1 Среднее количество слов на предложение
         avg_words = (
             session.query(
                 words_per_sentence.c.TextID,
@@ -48,6 +52,10 @@ def main():
             .group_by(words_per_sentence.c.TextID)
             .subquery()
         )
+
+        # Проверка наличия данных в avg_words
+        if not session.query(avg_words.c.TextID).first():
+            raise ValueError("Нет данных для анализа в avg_words")
 
         # 3. Топ-5 токенов
         top_tokens = (
@@ -73,6 +81,10 @@ def main():
             )
             .subquery()
         )
+
+        # Проверка наличия данных в top_tokens_ranked
+        if not session.query(top_tokens_ranked.c.TextID).first():
+            raise ValueError("Нет данных для анализа в top_tokens_ranked")
 
         # 4. Части речи
         pos_counts = (
@@ -100,6 +112,10 @@ def main():
             .subquery()
         )
 
+        # Проверка наличия данных в pos_ranked
+        if not session.query(pos_ranked.c.TextID).first():
+            raise ValueError("Нет данных для анализа в pos_ranked")
+
         # 5. Формируем основной запрос
         query = (
             session.query(
@@ -118,6 +134,10 @@ def main():
             df = pd.read_sql_query(query.statement, session.bind)
             pbar.update(1)
 
+        # Проверка наличия данных в основном DataFrame
+        if df.empty:
+            raise ValueError("Основной DataFrame пустой")
+
         # 7. Загрузка топ-токенов
         top_tokens_df = (
             pd.read_sql_query(
@@ -131,6 +151,10 @@ def main():
                 session.bind
             )
         )
+
+        # Проверка наличия данных в top_tokens_df
+        if top_tokens_df.empty:
+            raise ValueError("Топ-токены не найдены")
 
         # 8. Пивот топ-токенов
         top_pivot = top_tokens_df.pivot(
@@ -152,6 +176,10 @@ def main():
                 session.bind
             )
         )
+
+        # Проверка наличия данных в pos_df
+        if pos_df.empty:
+            raise ValueError("Части речи не найдены")
 
         # 10. Пивот частей речи
         pos_pivot = pos_df.pivot(
