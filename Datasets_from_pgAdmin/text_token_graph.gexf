@@ -1,0 +1,290 @@
+<?xml version='1.0' encoding='utf-8'?>
+<gexf xmlns="http://www.gexf.net/1.2draft" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.gexf.net/1.2draft http://www.gexf.net/1.2draft/gexf.xsd" version="1.2">
+  <meta lastmodifieddate="2025-03-12">
+    <creator>NetworkX 3.4.2</creator>
+  </meta>
+  <graph defaultedgetype="directed" mode="static" name="">
+    <attributes mode="static" class="node">
+      <attribute id="0" title="type" type="string" />
+    </attributes>
+    <nodes>
+      <node id="1" label="Война мир (Лев Николаевич Толстой, 1863)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+      <node id="дым" label="дым (count=33)">
+        <attvalues>
+          <attvalue for="0" value="token" />
+        </attvalues>
+      </node>
+      <node id="запах" label="запах (count=26)">
+        <attvalues>
+          <attvalue for="0" value="token" />
+        </attvalues>
+      </node>
+      <node id="букет" label="букет (count=8)">
+        <attvalues>
+          <attvalue for="0" value="token" />
+        </attvalues>
+      </node>
+      <node id="одеколон" label="одеколон (count=7)">
+        <attvalues>
+          <attvalue for="0" value="token" />
+        </attvalues>
+      </node>
+      <node id="навоз" label="навоз (count=3)">
+        <attvalues>
+          <attvalue for="0" value="token" />
+        </attvalues>
+      </node>
+      <node id="2" label="Анна Каренина (Лев Николаевич Толстой, 1873)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+      <node id="чадо" label="чадо (count=2)">
+        <attvalues>
+          <attvalue for="0" value="token" />
+        </attvalues>
+      </node>
+      <node id="3" label="Севастопольские рассказы (Лев Николаевич Толстой, 1855)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+      <node id="смрад" label="смрад (count=4)">
+        <attvalues>
+          <attvalue for="0" value="token" />
+        </attvalues>
+      </node>
+      <node id="4" label="Братья Карамазовы (Фёдор Михайлович Достоевский, 1878)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+      <node id="фимиам" label="фимиам (count=1)">
+        <attvalues>
+          <attvalue for="0" value="token" />
+        </attvalues>
+      </node>
+      <node id="дух" label="дух (count=5)">
+        <attvalues>
+          <attvalue for="0" value="token" />
+        </attvalues>
+      </node>
+      <node id="благоухание" label="благоухание (count=2)">
+        <attvalues>
+          <attvalue for="0" value="token" />
+        </attvalues>
+      </node>
+      <node id="ладан" label="ладан (count=2)">
+        <attvalues>
+          <attvalue for="0" value="token" />
+        </attvalues>
+      </node>
+      <node id="5" label="Преступление и наказание (Фёдор Михайлович Достоевский, 1865)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+      <node id="вонь" label="вонь (count=3)">
+        <attvalues>
+          <attvalue for="0" value="token" />
+        </attvalues>
+      </node>
+      <node id="зловоние" label="зловоние (count=1)">
+        <attvalues>
+          <attvalue for="0" value="token" />
+        </attvalues>
+      </node>
+      <node id="6" label="Идиот (Фёдор Михайлович Достоевский, 1868)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+      <node id="7" label="Отцы и дет (Иван Сергеевич Тургенев, 1860)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+      <node id="8" label="Дворянское гнездо (Иван Сергеевич Тургенев, 1860)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+      <node id="9" label="Дым (Иван Сергеевич Тургенев, 1865)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+      <node id="дуновение" label="дуновение (count=3)">
+        <attvalues>
+          <attvalue for="0" value="token" />
+        </attvalues>
+      </node>
+      <node id="10" label="Тихий Дон (Михаил Александрович Шолохов, 1925)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+      <node id="аромат" label="аромат (count=1)">
+        <attvalues>
+          <attvalue for="0" value="token" />
+        </attvalues>
+      </node>
+      <node id="11" label="Конармия (Исаак Эммануилович Бабель, 1923)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+      <node id="12" label="Мать (Максим Горький, 1906)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+      <node id="13" label="Жизнь Клима Самгина (Максим Горький, 1937)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+      <node id="14" label="Фома Гордеев (Максим Горький, 1899)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+      <node id="15" label="Другие берега (Владимир Владимирович Набоков, 1954)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+      <node id="16" label="Дар (Владимир Владимирович Набоков, 1935)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+      <node id="душок" label="душок (count=2)">
+        <attvalues>
+          <attvalue for="0" value="token" />
+        </attvalues>
+      </node>
+      <node id="запашок" label="запашок (count=1)">
+        <attvalues>
+          <attvalue for="0" value="token" />
+        </attvalues>
+      </node>
+      <node id="17" label="Приглашение на казнь (Владимир Владимирович Набоков, 1934)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+      <node id="благовоние" label="благовоние (count=1)">
+        <attvalues>
+          <attvalue for="0" value="token" />
+        </attvalues>
+      </node>
+      <node id="18" label="Собрание повестей и рассказов в одном томе (Фёдор Михайлович Достоевский, 1845)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+      <node id="19" label="Полное собрание рассказов (Владимир Владимирович Набоков, 1950)">
+        <attvalues>
+          <attvalue for="0" value="text" />
+        </attvalues>
+      </node>
+    </nodes>
+    <edges>
+      <edge source="1" target="дым" id="0" label="contains" />
+      <edge source="1" target="запах" id="1" label="contains" />
+      <edge source="1" target="букет" id="2" label="contains" />
+      <edge source="1" target="одеколон" id="3" label="contains" />
+      <edge source="1" target="навоз" id="4" label="contains" />
+      <edge source="2" target="запах" id="5" label="contains" />
+      <edge source="2" target="дым" id="6" label="contains" />
+      <edge source="2" target="навоз" id="7" label="contains" />
+      <edge source="2" target="букет" id="8" label="contains" />
+      <edge source="2" target="чадо" id="9" label="contains" />
+      <edge source="3" target="дым" id="10" label="contains" />
+      <edge source="3" target="запах" id="11" label="contains" />
+      <edge source="3" target="навоз" id="12" label="contains" />
+      <edge source="3" target="букет" id="13" label="contains" />
+      <edge source="3" target="смрад" id="14" label="contains" />
+      <edge source="4" target="фимиам" id="15" label="contains" />
+      <edge source="4" target="дух" id="16" label="contains" />
+      <edge source="4" target="смрад" id="17" label="contains" />
+      <edge source="4" target="благоухание" id="18" label="contains" />
+      <edge source="4" target="ладан" id="19" label="contains" />
+      <edge source="5" target="вонь" id="20" label="contains" />
+      <edge source="5" target="дым" id="21" label="contains" />
+      <edge source="5" target="запах" id="22" label="contains" />
+      <edge source="5" target="зловоние" id="23" label="contains" />
+      <edge source="5" target="букет" id="24" label="contains" />
+      <edge source="6" target="букет" id="25" label="contains" />
+      <edge source="6" target="дым" id="26" label="contains" />
+      <edge source="7" target="запах" id="27" label="contains" />
+      <edge source="7" target="одеколон" id="28" label="contains" />
+      <edge source="7" target="букет" id="29" label="contains" />
+      <edge source="7" target="дым" id="30" label="contains" />
+      <edge source="7" target="фимиам" id="31" label="contains" />
+      <edge source="8" target="запах" id="32" label="contains" />
+      <edge source="8" target="одеколон" id="33" label="contains" />
+      <edge source="8" target="дух" id="34" label="contains" />
+      <edge source="8" target="ладан" id="35" label="contains" />
+      <edge source="8" target="дым" id="36" label="contains" />
+      <edge source="9" target="дым" id="37" label="contains" />
+      <edge source="9" target="запах" id="38" label="contains" />
+      <edge source="9" target="букет" id="39" label="contains" />
+      <edge source="9" target="дуновение" id="40" label="contains" />
+      <edge source="10" target="запах" id="41" label="contains" />
+      <edge source="10" target="дым" id="42" label="contains" />
+      <edge source="10" target="навоз" id="43" label="contains" />
+      <edge source="10" target="аромат" id="44" label="contains" />
+      <edge source="10" target="одеколон" id="45" label="contains" />
+      <edge source="11" target="дым" id="46" label="contains" />
+      <edge source="11" target="запах" id="47" label="contains" />
+      <edge source="11" target="навоз" id="48" label="contains" />
+      <edge source="11" target="вонь" id="49" label="contains" />
+      <edge source="11" target="дуновение" id="50" label="contains" />
+      <edge source="12" target="дым" id="51" label="contains" />
+      <edge source="12" target="запах" id="52" label="contains" />
+      <edge source="12" target="навоз" id="53" label="contains" />
+      <edge source="12" target="аромат" id="54" label="contains" />
+      <edge source="12" target="дуновение" id="55" label="contains" />
+      <edge source="13" target="дым" id="56" label="contains" />
+      <edge source="13" target="запах" id="57" label="contains" />
+      <edge source="13" target="одеколон" id="58" label="contains" />
+      <edge source="13" target="навоз" id="59" label="contains" />
+      <edge source="13" target="букет" id="60" label="contains" />
+      <edge source="14" target="дым" id="61" label="contains" />
+      <edge source="14" target="запах" id="62" label="contains" />
+      <edge source="14" target="ладан" id="63" label="contains" />
+      <edge source="14" target="вонь" id="64" label="contains" />
+      <edge source="14" target="навоз" id="65" label="contains" />
+      <edge source="15" target="запах" id="66" label="contains" />
+      <edge source="15" target="дым" id="67" label="contains" />
+      <edge source="15" target="букет" id="68" label="contains" />
+      <edge source="15" target="дух" id="69" label="contains" />
+      <edge source="15" target="дуновение" id="70" label="contains" />
+      <edge source="16" target="запах" id="71" label="contains" />
+      <edge source="16" target="дым" id="72" label="contains" />
+      <edge source="16" target="вонь" id="73" label="contains" />
+      <edge source="16" target="душок" id="74" label="contains" />
+      <edge source="16" target="запашок" id="75" label="contains" />
+      <edge source="17" target="букет" id="76" label="contains" />
+      <edge source="17" target="дуновение" id="77" label="contains" />
+      <edge source="17" target="благовоние" id="78" label="contains" />
+      <edge source="17" target="зловоние" id="79" label="contains" />
+      <edge source="18" target="запах" id="80" label="contains" />
+      <edge source="18" target="букет" id="81" label="contains" />
+      <edge source="18" target="дым" id="82" label="contains" />
+      <edge source="18" target="смрад" id="83" label="contains" />
+      <edge source="18" target="вонь" id="84" label="contains" />
+      <edge source="19" target="дым" id="85" label="contains" />
+      <edge source="19" target="запах" id="86" label="contains" />
+      <edge source="19" target="букет" id="87" label="contains" />
+      <edge source="19" target="дух" id="88" label="contains" />
+      <edge source="19" target="навоз" id="89" label="contains" />
+    </edges>
+  </graph>
+</gexf>
