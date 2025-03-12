@@ -1,117 +1,84 @@
-import pandas as pd
-import plotly.express as px
 import dash
 from dash import dcc, html
 from dash.dependencies import Input, Output
-from collections import defaultdict
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import json
 
 # Загрузка данных
-df = pd.read_csv('analytical_table.csv')
+file_path = r"C:\Users\User\PycharmProjects\Tolstoy_words_local\Datasets_from_pgAdmin\data.csv"
+data = pd.read_csv(file_path, delimiter=",", quotechar='"', encoding="utf-8")
 
-# Дополнительные вычисления:
-# 1. Самый частотный токен в каждом тексте
-top_tokens = (
-    df.groupby('TextTitle')['TokenTotalCount']
-    .idxmax()
-    .apply(lambda x: df.loc[x, 'TokenText'])
-    .reset_index(name='TopToken')
-)
+# Функция для безопасного преобразования JSON
 
-# 2. Рейтинг текстов по общему количеству вхождений токенов
-text_ratings = (
-    df.groupby('TextTitle')['TokenTotalCount']
-    .sum()
-    .reset_index(name='TotalTokens')
-    .sort_values('TotalTokens', ascending=False)
-    .reset_index(drop=True)
-    .assign(Rank=lambda x: x['TotalTokens'].rank(ascending=False, method='first').astype(int))
-)
+def safe_json_parse(x):
+    try:
+        return json.loads(x.replace("'", "\"")) if isinstance(x, str) else {}
+    except json.JSONDecodeError:
+        return {}
 
-# 3. Количество уникальных частей речи для каждого (TextTitle, TokenText)
-pos_counts = (
-    df.groupby(['TextTitle', 'TokenText'])['PartOfSpeech']
-    .nunique()
-    .reset_index(name='UniquePOSCount')
-)
+# Преобразование JSON-полей
+data["top_tokens"] = data["top_tokens"].apply(safe_json_parse)
+data["top_pos_stats"] = data["top_pos_stats"].apply(safe_json_parse)
 
-# 4. Токен с максимальным количеством частей речи в тексте
-max_pos_tokens = (
-    pos_counts.groupby('TextTitle')
-    .apply(lambda x: x.nlargest(1, 'UniquePOSCount'))
-    .reset_index(drop=True)
-)
-
+# Инициализация Dash приложения
 app = dash.Dash(__name__)
 
 app.layout = html.Div([
-    html.H1("Анализ текстов", style={'text-align': 'center'}),
-
-    # SunBurst-диаграмма (текст -> токен -> часть речи)
-    dcc.Graph(
-        id='sunburst',
-        figure=px.sunburst(
-            df,
-            path=['TextTitle', 'TokenText', 'PartOfSpeech'],
-            values='Frequency',
-            color='PartOfSpeech',
-            title='Иерархия частотности: Текст → Токен → Часть речи'
-        )
-    ),
-
-    # Выбор текста для детального анализа
-    dcc.Dropdown(
-        id='text-selector',
-        options=[{'label': text, 'value': text} for text in df['TextTitle'].unique()],
-        value=df['TextTitle'].unique()[0],
-        style={'width': '50%', 'margin': '20px auto'}
-    ),
-
-    # Раздел для вывода метрик
-    html.Div([
-        html.Div(id='top-token', style={'margin': '20px'}),
-        html.Div(id='text-rating', style={'margin': '20px'}),
-        html.Div(id='max-pos-token', style={'margin': '20px'})
-    ], style={'display': 'flex', 'gap': '20px'})
+    html.H1("Анализ текстовых данных"),
+    dcc.Graph(id="general-stats"),
+    dcc.Graph(id="top-tokens"),
+    dcc.Graph(id="pos-distribution"),
+    dcc.Graph(id="author-timeline"),
+    dcc.Interval(
+        id="interval-component", interval=1000, n_intervals=0  # Обновление раз в секунду
+    )
 ])
 
-# Исправленный коллбэк
 @app.callback(
-    [Output('top-token', 'children'),
-     Output('text-rating', 'children'),
-     Output('max-pos-token', 'children')],
-    [Input('text-selector', 'value')]
+    Output("general-stats", "figure"),
+    Input("interval-component", "n_intervals")
 )
-def update_metrics(selected_text):
-    # 1. Самый частотный токен
-    top_token = top_tokens[top_tokens['TextTitle'] == selected_text]['TopToken'].values[0]
+def update_general_stats(_):
+    total_sentences = data["total_sentences"].sum()
+    token_sentences = data["token_sentences"].sum()
+    avg_token_percent = data["token_sentence_percent"].mean()
+    avg_words_per_sentence = data["avg_words_per_token_sentence"].mean()
 
-    # 2. Рейтинг текста
-    rating_row = text_ratings[text_ratings['TextTitle'] == selected_text]
-    text_rank = rating_row['Rank'].values[0]
-    total_tokens = rating_row['TotalTokens'].values[0]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=["Все предложения", "С токенами"], y=[total_sentences, token_sentences]))
+    fig.add_trace(go.Scatter(x=["Средний %", "Среднее кол-во слов"], y=[avg_token_percent, avg_words_per_sentence], mode="lines+markers"))
+    fig.update_layout(title="Общая статистика")
+    return fig
 
-    # 3. Токен с наибольшим количеством частей речи
-    max_pos_row = max_pos_tokens[max_pos_tokens['TextTitle'] == selected_text]
-    token_with_max_pos = max_pos_row['TokenText'].values[0]
-    pos_count = max_pos_row['UniquePOSCount'].values[0]
+@app.callback(
+    Output("top-tokens", "figure"),
+    Input("interval-component", "n_intervals")
+)
+def update_top_tokens(_):
+    all_tokens = [item for sublist in data["top_tokens"] for item in sublist]
+    tokens_df = pd.DataFrame(all_tokens).groupby("token")["count"].sum().reset_index().nlargest(10, "count")
+    return px.bar(tokens_df, x="token", y="count", title="Топ-10 токенов")
 
-    return (
-        html.Div([
-            html.H3("Самый частотный токен:"),
-            html.P(
-                f"{top_token} (Частота: {df[(df['TextTitle'] == selected_text) & (df['TokenText'] == top_token)]['TokenTotalCount'].values[0]})")
-        ]),
+@app.callback(
+    Output("pos-distribution", "figure"),
+    Input("interval-component", "n_intervals")
+)
+def update_pos_distribution(_):
+    all_pos = [
+        {"part_of_speech": pos["part_of_speech"], "frequency": pos["frequency"]}
+        for pos_dict in data["top_pos_stats"] for key, stats in pos_dict.items() for pos in stats
+    ]
+    pos_df = pd.DataFrame(all_pos).groupby("part_of_speech")["frequency"].sum().reset_index()
+    return px.pie(pos_df, names="part_of_speech", values="frequency", title="Распределение частей речи")
 
-        html.Div([
-            html.H3("Рейтинг текста:"),
-            html.P(f"Место: {text_rank} (Всего токенов: {total_tokens})")
-        ]),
+@app.callback(
+    Output("author-timeline", "figure"),
+    Input("interval-component", "n_intervals")
+)
+def update_author_timeline(_):
+    return px.timeline(data, x_start="Text_year_creation", x_end="Text_year_creation", y="Text_Author", color="TextTitle", title="Таймлайн по годам")
 
-        html.Div([
-            html.H3("Токен с наибольшим количеством частей речи:"),
-            html.P(f"{token_with_max_pos} (Части речи: {pos_count})")
-        ])
-    )
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run_server(debug=True)
