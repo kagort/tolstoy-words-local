@@ -4,6 +4,8 @@ from collections import Counter
 import re
 import logging
 from tqdm import tqdm  # Для прогресс-бара
+import os
+import pandas as pd
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -11,10 +13,25 @@ logging.basicConfig(level=logging.INFO)
 # Загрузка модели spaCy для русского языка
 nlp = spacy.load("ru_core_news_sm")
 
-# Загрузка данных из CSV файла
-logging.info("Загрузка данных из CSV файла...")
-file_path = r"C:\Users\User\PycharmProjects\Tolstoy_words_local\Datasets_from_pgAdmin\sentences_with_tokens.csv"
+
+# Определение среды выполнения
+if os.getenv("STREAMLIT_CLOUD"):  # Переменная окружения для Streamlit Cloud
+    file_path = "Datasets_from_pgAdmin/sentences_with_tokens.csv"  # Относительный путь для Streamlit Cloud
+else:
+    file_path = r"C:\Users\User\PycharmProjects\Tolstoy_words_local\Datasets_from_pgAdmin\sentences_with_tokens.csv"  # Локальный путь
+
+# Проверка существования файла
+if not os.path.exists(file_path):
+    raise FileNotFoundError(f"Файл не найден: {file_path}")
+
+# Загрузка данных
 df = pd.read_csv(file_path)
+print("Данные успешно загружены!")
+
+# Загрузка данных из CSV файла
+# logging.info("Загрузка данных из CSV файла...")
+# file_path = r"C:\Users\User\PycharmProjects\Tolstoy_words_local\Datasets_from_pgAdmin\sentences_with_tokens.csv"
+# df = pd.read_csv(file_path)
 
 # Фильтрация только ольфакторных предложений
 olfactory_keywords = [
