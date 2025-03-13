@@ -13,7 +13,7 @@ nlp = spacy.load("ru_core_news_sm")
 
 # Загрузка данных из CSV файла
 logging.info("Загрузка данных из CSV файла...")
-file_path = "sentences_with_tokens.csv"
+file_path = r"C:\Users\User\PycharmProjects\Tolstoy_words_local\Datasets_from_pgAdmin\sentences_with_tokens.csv"
 df = pd.read_csv(file_path)
 
 # Фильтрация только ольфакторных предложений
