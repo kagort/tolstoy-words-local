@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from streamlit_app import olfactory_sentences_df
+from df_creation import olfactory_sentences_df
 
 # Загрузка данных из DataFrame
 def load_data():
