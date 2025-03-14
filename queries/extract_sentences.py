@@ -59,5 +59,5 @@ def extract_sentences_with_tokens(output_file):
 
 # Вызов функции
 if __name__ == '__main__':
-    output_csv_file = '../Datasets_from_pgAdmin/sentences_with_tokens.csv'
+    output_csv_file = '../Datasets_from_pgAdmin/simple_sentences.csv'
     extract_sentences_with_tokens(output_csv_file)
