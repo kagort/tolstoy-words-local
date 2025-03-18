@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Главная страница</title>
+</head>
+<body>
+    <h1>Доступные тексты</h1>
+    {% if texts %}
+        <ul>
+            {% for text in texts %}
+                <li>{{ text.TextTitle }} (Автор: {{ text.Text_Author }}, Год: {{ text.Text_year_creation }}, Жанр: {{ text.Text_genre }})</li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>Нет доступных текстов.</p>
+    {% endif %}
+    <a href="{{ url_for('add_text') }}">Добавить новый текст</a>
+    <br><br>
+    <a href="{{ url_for('analyze_word') }}">Анализировать слова</a>
+</body>
+</html>

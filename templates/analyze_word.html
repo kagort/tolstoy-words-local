@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Анализ слов</title>
+    <style>
+        #progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #f3f3f3;
+            border: 1px solid #ccc;
+            margin-top: 10px;
+        }
+        #progress-fill {
+            height: 100%;
+            background-color: #4caf50;
+            width: 0%;
+        }
+    </style>
+</head>
+<body>
+    <h1>Анализ слов</h1>
+    <form id="analysis-form" method="POST">
+        <label>Выберите тексты:</label><br>
+        {% for text in texts %}
+            <input type="checkbox" name="text_ids" value="{{ text.TextID }}"> {{ text.TextTitle }}<br>
+        {% endfor %}
+        <br>
+
+        <label for="search_words">Введите слова (через запятую):</label><br>
+        <input type="text" id="search_words" name="search_words" required><br><br>
+
+        <button type="submit">Анализировать</button>
+    </form>
+
+    <!-- Прогресс-бар -->
+    <div id="progress-bar">
+        <div id="progress-fill"></div>
+    </div>
+    <p id="progress-text">Ожидание начала...</p>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        $(document).ready(function () {
+            $('#analysis-form').on('submit', function (e) {
+                e.preventDefault();
+
+                // Собираем выбранные тексты через чекбоксы
+                const selectedTexts = [];
+                $('input[name="text_ids"]:checked').each(function () {
+                    selectedTexts.push($(this).val());
+                });
+
+                const formData = {
+                    text_ids: selectedTexts,
+                    search_words: $('#search_words').val()
+                };
+
+                $.ajax({
+                    url: '/analyze_word',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(formData),
+                    success: function (response) {
+                        alert(response.message);
+                    },
+                    error: function (error) {
+                        alert('Ошибка при анализе: ' + error.responseText);
+                    }
+                });
+
+                // Запускаем обновление прогресса
+                updateProgress();
+            });
+
+            function updateProgress() {
+                setInterval(function () {
+                    $.get('/progress', function (data) {
+                        const progress = data.progress;
+                        $('#progress-fill').css('width', progress + '%');
+                        $('#progress-text').text(`Прогресс: ${progress}%`);
+                    });
+                }, 500);
+            }
+        });
+    </script>
+</body>
+</html>
