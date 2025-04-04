@@ -1,22 +1,91 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Главная страница</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Список текстов</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f9f9f9;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .text-list {
+            list-style-type: none;
+            padding: 0;
+        }
+        .text-item {
+            margin: 10px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: #fff;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .text-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        }
+        .text-item strong {
+            font-size: 18px;
+            color: #333;
+        }
+        .text-item a {
+            text-decoration: none;
+            color: #007BFF;
+            font-weight: bold;
+        }
+        .text-item a:hover {
+            text-decoration: underline;
+        }
+        .text-item span {
+            color: #666;
+            font-size: 14px;
+            margin-left: 10px;
+        }
+        .no-texts {
+            text-align: center;
+            font-size: 16px;
+            color: #555;
+        }
+        .add-text-link {
+            display: block;
+            text-align: center;
+            margin-top: 20px;
+            font-size: 16px;
+            color: #28a745;
+            text-decoration: none;
+        }
+        .add-text-link:hover {
+            text-decoration: underline;
+        }
+    </style>
 </head>
 <body>
-    <h1>Доступные тексты</h1>
+    <h1>Список текстов</h1>
+
     {% if texts %}
-        <ul>
-            {% for text in texts %}
-                <li>{{ text.TextTitle }} (Автор: {{ text.Text_Author }}, Год: {{ text.Text_year_creation }}, Жанр: {{ text.Text_genre }})</li>
+        <ul class="text-list">
+            {% for index, text in texts %}
+                <li class="text-item">
+                    <strong>{{ index }}.</strong>
+                    <a href="{{ url_for('analyze_word') }}">{{ text.TextTitle }}</a>
+                    <span>(Автор: {{ text.Text_Author }}, Год: {{ text.Text_year_creation }})</span>
+                </li>
             {% endfor %}
         </ul>
     {% else %}
-        <p>Нет доступных текстов.</p>
+        <p class="no-texts">Нет доступных текстов.</p>
     {% endif %}
-    <a href="{{ url_for('add_text') }}">Добавить новый текст</a>
-    <br><br>
-    <a href="{{ url_for('analyze_word') }}">Анализировать слова</a>
+
+    <!-- Ссылка для добавления нового текста -->
+    <div>
+        <a href="{{ url_for('add_text') }}" class="add-text-link">Добавить новый текст</a>
+    </div>
 </body>
 </html>

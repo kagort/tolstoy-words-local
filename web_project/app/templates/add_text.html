@@ -1,28 +1,92 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Добавление текста</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f9f9f9;
+        }
+        h1 {
+            color: #333;
+        }
+        form {
+            max-width: 500px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        label {
+            font-size: 16px;
+            margin-top: 10px;
+            display: block;
+            color: #555;
+        }
+        input[type="text"],
+        input[type="number"] {
+            width: 100%;
+            padding: 10px;
+            margin-top: 5px;
+            margin-bottom: 15px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #218838;
+        }
+        a {
+            display: inline-block;
+            margin-top: 20px;
+            color: #007BFF;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        .error-message {
+            color: red;
+            margin-top: 10px;
+        }
+    </style>
 </head>
 <body>
     <h1>Добавление нового текста</h1>
     <form method="POST" action="{{ url_for('add_text') }}">
-        <label for="text_title">Название текста:</label><br>
-        <input type="text" id="text_title" name="text_title" required><br><br>
+        <label for="text_title">Название текста:</label>
+        <input type="text" id="text_title" name="text_title" placeholder="Введите название текста" required>
 
-        <label for="text_author">Автор:</label><br>
-        <input type="text" id="text_author" name="text_author" required><br><br>
+        <label for="text_author">Автор:</label>
+        <input type="text" id="text_author" name="text_author" placeholder="Введите имя автора" required>
 
-        <label for="text_year_creation">Год создания:</label><br>
-        <input type="number" id="text_year_creation" name="text_year_creation" required><br><br>
+        <label for="text_year_creation">Год создания:</label>
+        <input type="number" id="text_year_creation" name="text_year_creation" placeholder="Введите год создания" required>
 
-        <label for="text_genre">Жанр:</label><br>
-        <input type="text" id="text_genre" name="text_genre" required><br><br>
+        <label for="text_genre">Жанр:</label>
+        <input type="text" id="text_genre" name="text_genre" placeholder="Введите жанр текста" required>
 
-        <label for="file_path">Путь к файлу:</label><br>
-        <input type="text" id="file_path" name="file_path" required><br><br>
+        <label for="file_path">Путь к файлу:</label>
+        <input type="text" id="file_path" name="file_path" placeholder="Введите путь к файлу" required>
 
         <button type="submit">Добавить текст</button>
+
+        {% if error %}
+            <div class="error-message">{{ error }}</div>
+        {% endif %}
     </form>
     <br>
     <a href="{{ url_for('index') }}">На главную</a>

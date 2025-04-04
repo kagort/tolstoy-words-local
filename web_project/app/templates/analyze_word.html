@@ -1,85 +1,189 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Анализ слов</title>
     <style>
-        #progress-bar {
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f9f9f9;
+        }
+        h1 {
+            color: #333;
+        }
+        form {
+            max-width: 600px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        label {
+            font-size: 16px;
+            margin-top: 10px;
+            display: block;
+            color: #555;
+        }
+        input[type="text"] {
             width: 100%;
-            height: 20px;
-            background-color: #f3f3f3;
+            padding: 10px;
+            margin: 10px 0;
             border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .progress-bar {
+            width: 100%;
+            background-color: #f3f3f3;
+            border-radius: 5px;
+            margin-top: 20px;
+            overflow: hidden;
+        }
+        .progress-bar-fill {
+            height: 20px;
+            background-color: #28a745;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        .error-message {
+            color: red;
             margin-top: 10px;
         }
-        #progress-fill {
-            height: 100%;
-            background-color: #4caf50;
-            width: 0%;
+        .success-message {
+            color: green;
+            margin-top: 10px;
+        }
+        .text-list {
+            list-style-type: none;
+            padding: 0;
+        }
+        .text-item {
+            margin: 5px 0;
+        }
+        .text-checkbox {
+            margin-right: 10px;
         }
     </style>
 </head>
 <body>
     <h1>Анализ слов</h1>
-    <form id="analysis-form" method="POST">
-        <label>Выберите тексты:</label><br>
-        {% for text in texts %}
-            <input type="checkbox" name="text_ids" value="{{ text.TextID }}"> {{ text.TextTitle }}<br>
-        {% endfor %}
-        <br>
+    <form id="analyze-form" method="POST">
+        <label>
+            <input type="checkbox" id="select-all"> Выбрать все тексты
+        </label>
+        <br><br>
 
-        <label for="search_words">Введите слова (через запятую):</label><br>
-        <input type="text" id="search_words" name="search_words" required><br><br>
+        <div class="text-list">
+            {% for text in texts %}
+                <div class="text-item">
+                    <label>
+                        <input type="checkbox" class="text-checkbox" name="text_ids" value="{{ text.TextID }}">
+                        {{ text.TextTitle }} (Автор: {{ text.Text_Author }}, Год: {{ text.Text_year_creation }})
+                    </label>
+                </div>
+            {% endfor %}
+        </div>
+
+        <br>
+        <label for="search_words">Слова для анализа (через запятую):</label>
+        <input type="text" id="search_words" name="search_words" placeholder="Введите слова через запятую" required>
 
         <button type="submit">Анализировать</button>
+
+        <div class="progress-bar">
+            <div class="progress-bar-fill" id="progress-bar-fill"></div>
+        </div>
+        <div id="message" class="error-message"></div>
+        <div id="success-message" class="success-message"></div>
     </form>
 
-    <!-- Прогресс-бар -->
-    <div id="progress-bar">
-        <div id="progress-fill"></div>
-    </div>
-    <p id="progress-text">Ожидание начала...</p>
-
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script>
-        $(document).ready(function () {
-            $('#analysis-form').on('submit', function (e) {
-                e.preventDefault();
+        // Обработка выбора всех текстов
+        document.getElementById('select-all').addEventListener('change', function() {
+            const checkboxes = document.querySelectorAll('.text-checkbox');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = this.checked;
+            });
+        });
 
-                const selectedTexts = [];
-                $('input[name="text_ids"]:checked').each(function () {
-                    selectedTexts.push($(this).val());
-                });
+        // Отправка формы через AJAX
+        document.getElementById('analyze-form').addEventListener('submit', function(event) {
+            event.preventDefault();
 
-                const formData = {
-                    text_ids: selectedTexts,
-                    search_words: $('#search_words').val()
-                };
+            const textIds = Array.from(document.querySelectorAll('.text-checkbox:checked'))
+                .map(checkbox => parseInt(checkbox.value));
+            const searchWords = document.getElementById('search_words').value.trim();
 
-                $.ajax({
-                    url: '/analyze_word',
-                    type: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify(formData),
-                    success: function (response) {
-                        alert(response.message);
-                    },
-                    error: function (error) {
-                        alert('Ошибка при анализе: ' + error.responseText);
-                    }
-                });
+            const messageElement = document.getElementById('message');
+            const successMessageElement = document.getElementById('success-message');
+            const progressBarFill = document.getElementById('progress-bar-fill');
 
-                updateProgress();
+            // Очистка сообщений
+            messageElement.textContent = '';
+            successMessageElement.textContent = '';
+            progressBarFill.style.width = '0%';
+
+            if (textIds.length === 0) {
+                messageElement.textContent = 'Выберите хотя бы один текст.';
+                return;
+            }
+
+            if (!searchWords) {
+                messageElement.textContent = 'Введите хотя бы одно слово для анализа.';
+                return;
+            }
+
+            // Отправка данных на сервер
+            fetch('/analyze_word', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    text_ids: textIds,
+                    search_words: searchWords
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    messageElement.textContent = data.error;
+                } else {
+                    successMessageElement.textContent = data.message;
+                }
+            })
+            .catch(error => {
+                console.error('Ошибка:', error);
+                messageElement.textContent = 'Произошла ошибка при анализе.';
             });
 
-            function updateProgress() {
-                setInterval(function () {
-                    $.get('/progress', function (data) {
+            // Обновление прогресса
+            const interval = setInterval(() => {
+                fetch('/progress')
+                    .then(response => response.json())
+                    .then(data => {
                         const progress = data.progress;
-                        $('#progress-fill').css('width', progress + '%');
-                        $('#progress-text').text(`Прогресс: ${progress}%`);
+                        progressBarFill.style.width = progress + '%';
+                        if (progress >= 100) {
+                            clearInterval(interval);
+                        }
                     });
-                }, 500);
-            }
+            }, 500);
         });
     </script>
 </body>
