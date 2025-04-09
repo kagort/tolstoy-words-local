@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
 from database.db3_from_csv import *
 from database.model_3 import *
+import re
 # Инициализация базы данных
 
 engine = create_engine('postgresql://postgres:ouganda77@localhost:5432/tolstoy_words_csv')
