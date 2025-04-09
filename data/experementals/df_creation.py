@@ -18,7 +18,7 @@ nlp = spacy.load("ru_core_news_sm")
 if os.getenv("STREAMLIT_CLOUD"):  # Переменная окружения для Streamlit Cloud
     file_path = "Datasets_from_pgAdmin/sentences_with_tokens.csv"  # Относительный путь для Streamlit Cloud
 else:
-    file_path = r"C:\Users\User\PycharmProjects\Tolstoy_words_local\Datasets_from_pgAdmin\sentences_with_tokens.csv"  # Локальный путь
+    file_path = r"C:\Users\User\PycharmProjects\tolstoy-words-local\data\processed\sentences_with_tokens.csv"  # Локальный путь
 
 # Проверка существования файла
 if not os.path.exists(file_path):
