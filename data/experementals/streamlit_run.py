@@ -19,7 +19,7 @@ data["POS"] = data["POS"].apply(lambda x: ", ".join(x) if isinstance(x, list) el
 data["POS_Frequency"] = data["POS_Frequency"].apply(str)
 
 # Заголовок приложения
-st.title("Анализ ольфакторных предложений")
+
 
 # Фильтр по авторам
 st.subheader("Фильтр по авторам")
