@@ -38,10 +38,12 @@ DB_HOST = environ.get('DB_HOST', 'localhost')
 DB_PORT = environ.get('DB_PORT', '5432')
 DB_NAME = environ.get('DB_NAME', 'tolstoy_words_csv')
 
+# DF: global variable will not work if site will have at least two simultaneously working process
 engine = create_engine(f'postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}')
 Session = scoped_session(sessionmaker(bind=engine))
 session = Session()
 
+# DF: global variable will not work if site will have at least two simultaneously working process
 # Глобальная переменная для хранения прогресса
 progress = 0
 
@@ -57,10 +59,14 @@ def clean_text(text):
 @app.route('/')
 def index():
     try:
+        # DF: for future: if DicTexts count will be huge, we will need to load only visible part of 'DicTexts' with possible memoization
         texts = session.query(DicTexts).all()
         if not texts:
             return redirect(url_for('add_text'))
+        
+        # DF: 'texts' already contains numbered IDs: 'dictexts.TextID', doesn't need to do list(enumerate(...)) for performance reason
         numbered_texts = list(enumerate(texts, start=1))
+
         return render_template('index.html', texts=numbered_texts)
     except Exception as e:
         logging.error(f"Ошибка при получении текстов: {e}")
@@ -100,12 +106,15 @@ def add_text():
         except ValueError:
             return "Ошибка: Год создания должен быть числом."
         text_genre = request.form['text_genre'].strip()
+
+        # DF: this will work only on local machine, need to load file from browser
         file_path = request.form['file_path'].strip()
 
         if session.query(DicTexts).filter_by(TextTitle=text_title).first():
             return f"Текст '{text_title}' уже существует в базе."
 
         try:
+            # DF: this will work only on local machine, need to load file from browser
             with open(file_path, 'r', encoding='utf-8') as file:
                 text = clean_text(file.read())
         except FileNotFoundError:
