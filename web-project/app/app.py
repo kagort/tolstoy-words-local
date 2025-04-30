@@ -1,7 +1,6 @@
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker, scoped_session
-from database.model_3 import *
 from collections import defaultdict
 import nltk
 import spacy
@@ -9,7 +8,13 @@ from pymorphy3 import MorphAnalyzer
 from nltk.tokenize import sent_tokenize
 import string
 import logging
-from os import environ
+import os
+import sys
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
+sys.path.append(ROOT_DIR)
+
+from database.model_3 import *
 
 # Инициализация библиотек
 nltk.download('punkt', quiet=True)
@@ -26,11 +31,11 @@ logging.basicConfig(
 app = Flask(__name__)
 
 # Подключение к PostgreSQL
-DB_USER = environ.get('DB_USER', 'postgres')
-DB_PASSWORD = environ.get('DB_PASSWORD', 'ouganda77')
-DB_HOST = environ.get('DB_HOST', 'localhost')
-DB_PORT = environ.get('DB_PORT', '5432')
-DB_NAME = environ.get('DB_NAME', 'tolstoy_words_csv')
+DB_USER = os.environ.get('DB_USER', 'postgres')
+DB_PASSWORD = os.environ.get('DB_PASSWORD', 'ouganda77')
+DB_HOST = os.environ.get('DB_HOST', 'localhost')
+DB_PORT = os.environ.get('DB_PORT', '5432')
+DB_NAME = os.environ.get('DB_NAME', 'tolstoy_words_csv')
 
 engine = create_engine(f'postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}')
 Session = scoped_session(sessionmaker(bind=engine))
