@@ -8,6 +8,7 @@ from pymorphy3 import MorphAnalyzer
 from nltk.tokenize import sent_tokenize
 import string
 import logging
+from os import environ
 import os
 import sys
 
@@ -31,11 +32,11 @@ logging.basicConfig(
 app = Flask(__name__)
 
 # Подключение к PostgreSQL
-DB_USER = os.environ.get('DB_USER', 'postgres')
-DB_PASSWORD = os.environ.get('DB_PASSWORD', 'ouganda77')
-DB_HOST = os.environ.get('DB_HOST', 'localhost')
-DB_PORT = os.environ.get('DB_PORT', '5432')
-DB_NAME = os.environ.get('DB_NAME', 'tolstoy_words_csv')
+DB_USER = environ.get('DB_USER', 'postgres')
+DB_PASSWORD = environ.get('DB_PASSWORD', 'ouganda77')
+DB_HOST = environ.get('DB_HOST', 'localhost')
+DB_PORT = environ.get('DB_PORT', '5432')
+DB_NAME = environ.get('DB_NAME', 'tolstoy_words_csv')
 
 engine = create_engine(f'postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}')
 Session = scoped_session(sessionmaker(bind=engine))
