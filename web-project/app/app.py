@@ -134,10 +134,15 @@ def get_progress():
 
 # Анализ слов
 def analyze_word_in_text(text_id, search_word):
-    # @bugbug: better perform 'morph.parse(...)' only single time for each search_word, i.e. invert for-loops in caller method and move 'morph.parse(...)' there (performance reason)
+    # @bugbug: better perform 'morph.parse(...)' only single time for each search_word
+    # and better perform 'morph.parse(...)' for all input words (because word list length is lower that sentences count)
+    # and than parform for-loop on all texts
     # @bugbug: normal from for word 'стали' according to https://pymorphy2.readthedocs.io/en/stable/user/guide.html#id3 doc is 'стать' but also 'сталь' is a normal form
+    # @todo: maybe allow only word in normal form or show what form was selected and allow to redact words before analysis
     lemma = morph.parse(search_word)[0].normal_form
     existing_token = session.query(TokenID).filter_by(Token_text=lemma, TextID=text_id).first()
+
+    # @bugbug: two simultaneously requests can pass this check and write to DB twice 
     if existing_token:
         return f"Токен '{search_word}' уже существует для текста ID {text_id}."
 
