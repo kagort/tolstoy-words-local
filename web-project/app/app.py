@@ -134,6 +134,8 @@ def get_progress():
 
 # Анализ слов
 def analyze_word_in_text(text_id, search_word):
+    # @bugbug: better perform 'morph.parse(...)' only single time for each search_word, i.e. invert for-loops in caller method and move 'morph.parse(...)' there (performance reason)
+    # @bugbug: normal from for word 'стали' according to https://pymorphy2.readthedocs.io/en/stable/user/guide.html#id3 doc is 'стать' but also 'сталь' is a normal form
     lemma = morph.parse(search_word)[0].normal_form
     existing_token = session.query(TokenID).filter_by(Token_text=lemma, TextID=text_id).first()
     if existing_token:
@@ -144,6 +146,9 @@ def analyze_word_in_text(text_id, search_word):
     session.flush()
     token_id = token_entry.TokenID
 
+    # @bugbug: word in 'Sentences' not in a normal form
+    # @todo: need to get each sentence and on each word get it's own normal form to compare with 'lemma'
+    # @bugbug: @todo: need to reanalyze all texts
     filtered_sentences = session.query(Sentences).filter(
         Sentences.TextID == text_id,
         Sentences.Sentence_text.ilike(f"%{search_word}%")
@@ -156,10 +161,14 @@ def analyze_word_in_text(text_id, search_word):
     total_occurrences = 0
 
     for sentence in filtered_sentences:
+        # @bugbug: this analysis not depends on 'search_word' and may be performed independent (multithreading??)
         doc = nlp(sentence.Sentence_text)
+        
+        # @bugbug: occurrence counting may be performed in for-loop below (performance reason)
         occurrences_in_sentence = sum(1 for token in doc if token.lemma_ == lemma)
         total_occurrences += occurrences_in_sentence
 
+        # @todo: looks like this algorithm can be easily perform under concurrent execution
         for token in doc:
             if token.lemma_ == lemma:
                 if token.head.pos_ == "VERB" and token.head != token:
@@ -169,9 +178,11 @@ def analyze_word_in_text(text_id, search_word):
                     if cleaned_word:
                         pos_data[child.pos_][cleaned_word].append(sentence.SentenceID)
 
+    # @bugbug: this code doesn't reach database because it's not commit to DB
     if total_occurrences > 0:
         token_entry.Token_count = total_occurrences
 
+    # @todo: maybe faster or better will be perform each 'add' + 'commit' in separate request (this will not require any addition variables to store requests data)
     for pos, words in pos_data.items():
         for word, sentence_ids in words.items():
             word_entry = Words(
@@ -200,6 +211,7 @@ def analyze_word_in_text(text_id, search_word):
 def analyze_word():
     if request.method == 'GET':
         try:
+            # @todo: for future: if DicTexts count will be huge, we will need to load only visible part of 'DicTexts' with possible memoization
             texts = session.query(DicTexts).all()
             return render_template('analyze_word.html', texts=texts)
         except Exception as e:
