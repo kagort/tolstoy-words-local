@@ -254,5 +254,6 @@ def analyze_word():
             return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
+    # @todo: use 'debug=False' and just use '--debug' flag while run (see readme.md)
     app.run(debug=True)
 
