@@ -238,6 +238,7 @@ def analyze_word():
             total_steps = len(text_ids) * len(search_words)
             current_step = 0
 
+            progress = 0
             for text_id in text_ids:
                 for search_word in search_words:
                     result = analyze_word_in_text(text_id, search_word)
@@ -246,7 +247,6 @@ def analyze_word():
                     current_step += 1
                     progress = int((current_step / total_steps) * 100)
 
-            progress = 0
             return jsonify({'message': 'Анализ завершен успешно.', 'results': results})
         except Exception as e:
             progress = 0
