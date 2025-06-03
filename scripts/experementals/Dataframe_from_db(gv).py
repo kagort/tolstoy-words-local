@@ -132,4 +132,4 @@ print(grouped[['TokenID', 'Token_text', 'total_token_count', 'sentence_count', '
                'POS_Dependencies']].head(15))
 
 # Сохранение в CSV (опционально)
-# grouped.to_csv("merged_tokens.csv", index=False, encoding='utf-8-sig')
+grouped.to_csv("merged_tokens.csv", index=False, encoding='utf-8-sig')
