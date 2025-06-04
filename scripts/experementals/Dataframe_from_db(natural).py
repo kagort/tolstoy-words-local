@@ -122,7 +122,9 @@ def main():
     # --- Подсчёт количества слов в предложениях ---
     df_sw = data['sentence_words']
     df_sw.columns = ['Token_text', 'Sentence_text']
-    df_sw['word_count'] = df_sw['Sentence_text'].apply(count_words)
+
+    # Нормализуем регистр перед подсчётом
+    df_sw['word_count'] = df_sw['Sentence_text'].str.lower().apply(count_words)
 
     word_stats = (
         df_sw.groupby('Token_text')['word_count']
@@ -189,3 +191,4 @@ def main():
 # --- Точка входа ---
 if __name__ == "__main__":
     main()
+
