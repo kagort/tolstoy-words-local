@@ -62,7 +62,8 @@ def clean_text(text):
 @app.route('/')
 def index():
     try:
-        # @todo: for future: if DicTexts count will be huge, we will need to load only visible part of 'DicTexts' with possible memoization
+        # @todo: for future: if DicTexts count will be huge, we will need to load
+        # only visible part of 'DicTexts' with possible memoization
         texts = session.query(DicTexts).all()
         if not texts:
             return redirect(url_for('add_text'))
