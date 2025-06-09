@@ -31,6 +31,7 @@ logging.basicConfig(
 # Создание Flask-приложения
 app = Flask(__name__)
 
+# @bugbug: open text creds
 # Подключение к PostgreSQL
 DB_USER = environ.get('DB_USER', 'postgres')
 DB_PASSWORD = environ.get('DB_PASSWORD', 'ouganda77')
@@ -41,6 +42,8 @@ DB_NAME = environ.get('DB_NAME', 'tolstoy_words_csv')
 engine = create_engine(f'postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}')
 Session = scoped_session(sessionmaker(bind=engine))
 # @bugbug: global variable will not work if site will have at least two simultaneously working process
+#
+# @bugbug: what about DB transactions?
 session = Session()
 
 # @bugbug: global variable will not work if site will have at least two simultaneously working process
@@ -105,8 +108,6 @@ def add_text():
         except ValueError:
             return "Ошибка: Год создания должен быть числом."
         text_genre = request.form['text_genre'].strip()
-
-        # @bugbug: this will work only on local machine, need to load file from browser
         file_path = request.form['file_path'].strip()
 
         if session.query(DicTexts).filter_by(TextTitle=text_title).first():
@@ -134,11 +135,14 @@ def get_progress():
 
 # Анализ слов
 def analyze_word_in_text(text_id, search_word):
-    # @bugbug: better perform 'morph.parse(...)' only single time for each search_word
+    # @todo: better perform 'morph.parse(...)' only single time for each search_word
     # and better perform 'morph.parse(...)' for all input words (because word list length is lower that sentences count)
-    # and than parform for-loop on all texts
-    # @bugbug: normal from for word 'стали' according to https://pymorphy2.readthedocs.io/en/stable/user/guide.html#id3 doc is 'стать' but also 'сталь' is a normal form
-    # @todo: maybe allow only word in normal form or show what form was selected and allow to redact words before analysis
+    # and than perform for-loop on all morphed words x all selected texts
+    #
+    # @todo: show to user generated lemmas and than allow user to change them
+    #
+    # @bugbug: normal from for word 'стали' according to https://pymorphy2.readthedocs.io/en/stable/user/guide.html#id3
+    # doc is 'стать' but also 'сталь' is a normal form
     lemma = morph.parse(search_word)[0].normal_form
     existing_token = session.query(TokenID).filter_by(Token_text=lemma, TextID=text_id).first()
 
@@ -151,9 +155,11 @@ def analyze_word_in_text(text_id, search_word):
     session.flush()
     token_id = token_entry.TokenID
 
-    # @bugbug: word in 'Sentences' not in a normal form
-    # @todo: need to get each sentence and on each word get it's own normal form to compare with 'lemma'
-    # @bugbug: @todo: need to reanalyze all texts
+    # @bugbug: 'ilike' and 'morph.parse(...)' not always return what we want to.
+    # So if we try to analyze text: 'Сталевары выплавили 10 тон стали.'
+    # * across word 'сталь', we will not select this sentence because of 'ilike'
+    # * across word 'стали' to pass 'ilike', we will not fail with normal form  
+    # in 'morph.parse(...)' because it will return 'стать'
     filtered_sentences = session.query(Sentences).filter(
         Sentences.TextID == text_id,
         Sentences.Sentence_text.ilike(f"%{search_word}%")
@@ -166,14 +172,16 @@ def analyze_word_in_text(text_id, search_word):
     total_occurrences = 0
 
     for sentence in filtered_sentences:
-        # @bugbug: this analysis not depends on 'search_word' and may be performed independent (multithreading??)
+        # @todo: this analysis not depends on 'search_word' and may be performed independent (multithreading??)
+        #
+        # @todo: this is a very expensive operation, maybe need to make 'nlp(...)' on several sentence at one time (test needed)
         doc = nlp(sentence.Sentence_text)
         
-        # @bugbug: occurrence counting may be performed in for-loop below (performance reason)
+        # @todo: occurrence counting may be performed in for-loop below (performance reason)
         occurrences_in_sentence = sum(1 for token in doc if token.lemma_ == lemma)
         total_occurrences += occurrences_in_sentence
 
-        # @todo: looks like this algorithm can be easily perform under concurrent execution
+        # @todo: looks like this algorithm can be easily perform under concurrent execution handling each token independently
         for token in doc:
             if token.lemma_ == lemma:
                 if token.head.pos_ == "VERB" and token.head != token:
@@ -183,11 +191,10 @@ def analyze_word_in_text(text_id, search_word):
                     if cleaned_word:
                         pos_data[child.pos_][cleaned_word].append(sentence.SentenceID)
 
-    # @bugbug: this code doesn't reach database because it's not commit to DB
     if total_occurrences > 0:
         token_entry.Token_count = total_occurrences
 
-    # @todo: maybe faster or better will be perform each 'add' + 'commit' in separate request (this will not require any addition variables to store requests data)
+    # @todo: maybe faster for DB will be perform each 'add' + 'commit' in separate request
     for pos, words in pos_data.items():
         for word, sentence_ids in words.items():
             word_entry = Words(
@@ -216,7 +223,8 @@ def analyze_word_in_text(text_id, search_word):
 def analyze_word():
     if request.method == 'GET':
         try:
-            # @todo: for future: if DicTexts count will be huge, we will need to load only visible part of 'DicTexts' with possible memoization
+            # @todo: for future: if DicTexts count will be huge, we will need to load
+            # only visible part of 'DicTexts' with possible memoization
             texts = session.query(DicTexts).all()
             return render_template('analyze_word.html', texts=texts)
         except Exception as e:
