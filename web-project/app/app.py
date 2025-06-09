@@ -128,6 +128,9 @@ def add_text():
     return render_template('add_text.html')
 
 # Получение текущего прогресса
+# @bugbug: need to use user own link for each job's progress
+# most simple way is to make global JobStorage with tickets for each new request
+# don't forget to clear done tickets in JobStorage, otherwise memory overflow is possible
 @app.route('/progress')
 def get_progress():
     global progress
