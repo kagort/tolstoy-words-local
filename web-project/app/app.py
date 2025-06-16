@@ -147,6 +147,11 @@ def analyze_word_in_text(text_id, search_word):
     #
     # @bugbug: normal from for word 'стали' according to https://pymorphy2.readthedocs.io/en/stable/user/guide.html#id3
     # doc is 'стать' but also 'сталь' is a normal form
+    #
+    # @todo: handle all results from 'morph.parse(search_word)', not only '[0]':
+    # 1. collect all normal forms
+    # 2. for each normal form get all normal forms calling 'inflect' (get all words forms)
+    # 3. search in DB with 'ilike' across all 'inflect' forms of all normal forms  
     lemma = morph.parse(search_word)[0].normal_form
     existing_token = session.query(TokenID).filter_by(Token_text=lemma, TextID=text_id).first()
 
