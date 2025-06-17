@@ -1,14 +1,9 @@
-from sqlalchemy.orm import sessionmaker
-from database.model_3 import *
+from sqlalchemy.orm import scoped_session, sessionmaker
 
-# Создаем сессию для работы с базой данных
-engine = create_engine('postgresql://postgres:ouganda77@localhost:5432/tolstoy_words_csv')
-db_session = scoped_session(sessionmaker(bind=engine))
+from commons.config.db_config import engine_natural
+from database.model import *
 
-Base.metadata.create_all(engine)
-Session = sessionmaker(bind=engine)
-session = Session()
-
+session = scoped_session(sessionmaker(bind=engine_natural))
 
 try:
     # Шаг 1: Получаем все TokenID, связанные с текстами ID 41 и ID 42

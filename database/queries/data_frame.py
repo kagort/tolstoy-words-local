@@ -1,9 +1,13 @@
 import pandas as pd
-from database.model_3 import Words, session
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm.scoping import scoped_session
+
+from commons.config.db_config import engine_natural
+from database.model import Words
 from sqlalchemy import func, desc
 from collections import defaultdict
-from sqlalchemy.sql import text
 
+session = scoped_session(sessionmaker(bind=engine_natural))
 
 # Определяем интересующие нас TokenID
 target_token_ids = [1, 2]  # Пример: список ID токенов
