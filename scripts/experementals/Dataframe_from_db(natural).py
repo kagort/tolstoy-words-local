@@ -1,36 +1,11 @@
 import pandas as pd
 from sqlalchemy import func, select
-from collections import defaultdict
 from itertools import count
-from database.model_3 import *  # твои модели SQLAlchemy
+from database.model import *
 
-
-# --- Функция подсчёта слов ---
-def count_words(text):
-    return len(str(text).split())
-
-
-# --- Функция расширения POS ---
-def expand_pos_column(df, column_name='POS_Dependencies'):
-    expanded_rows = []
-
-    for _, row in df.iterrows():
-        pos_str = row[column_name]
-        pos_dict = {}
-
-        if pd.notna(pos_str) and pos_str != '':
-            items = pos_str.split(', ')
-            for item in items:
-                if ': ' in item:
-                    pos, count = item.split(': ')
-                    pos_dict[pos] = int(count)
-
-        # Добавляем оригинальную строку, чтобы не потерять данные
-        combined = row.to_dict()
-        combined.update(pos_dict)
-        expanded_rows.append(combined)
-
-    return pd.DataFrame(expanded_rows)
+from commons.config.db_config import engine_natural
+from text_processing.base_text_functions import count_words
+from text_processing.dataframe_functions import expand_pos_column
 
 
 # --- SQL-запросы ---
@@ -117,7 +92,7 @@ def main():
     queries = build_queries()
 
     # Подключение к базе и загрузка данных
-    data = load_data(engine, queries)
+    data = load_data(engine_natural, queries)
 
     # --- Подсчёт количества слов в предложениях ---
     df_sw = data['sentence_words']
@@ -184,7 +159,7 @@ def main():
     print(result.head(20))
 
     # Сохраняем в Excel, чтобы избежать интерпретации чисел как дат
-    result.to_excel("merged_tokens_expanded.xlsx", index=False, engine='openpyxl')
+    result.to_excel("merged_tokens_expanded_natural.xlsx", index=False, engine='openpyxl')
     print("\nРезультат с развернутыми POS сохранён в файл: merged_tokens_expanded.xlsx")
 
 

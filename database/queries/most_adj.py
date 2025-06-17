@@ -1,4 +1,9 @@
-from database.model_3 import Words, session
+from database.model import Words
+from sqlalchemy.orm import scoped_session, sessionmaker
+
+from commons.config.db_config import engine_natural
+
+session = scoped_session(sessionmaker(bind=engine_natural))
 
 # Запрос: выбираем Word_text и Frequency для прилагательных, отсортированных по Frequency
 res = session.query(Words.Word_text, Words.Frequency).filter(

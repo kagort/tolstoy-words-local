@@ -1,15 +1,7 @@
-import psycopg2
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# Подключение к базе данных
-conn = psycopg2.connect(
-    dbname="tolstoy_words_csv",
-    user="postgres",
-    password="ouganda77",
-    host="localhost",
-    port="5432"
-)
+from commons.config.db_config import engine_natural
 
 # SQL-запрос для извлечения данных
 query = """
@@ -65,10 +57,10 @@ ORDER BY tm.token_sentences DESC;
 """
 
 # Загрузка данных в DataFrame
-df = pd.read_sql(query, conn)
+df = pd.read_sql(query, engine_natural)
 
 # Закрытие соединения
-conn.close()
+engine_natural.close()
 
 # Построение диаграммы рассеяния
 plt.figure(figsize=(10, 6))

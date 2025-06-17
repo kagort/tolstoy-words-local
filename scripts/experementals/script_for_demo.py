@@ -1,15 +1,15 @@
 import logging
 from flask import Flask, render_template, request, redirect, url_for
-from sqlalchemy.orm import sessionmaker
 from pymorphy3 import MorphAnalyzer
-from database.db3_from_csv import *
-from database.model_3 import *
+from database.model import *
+from database.model import Words
+from sqlalchemy.orm import scoped_session, sessionmaker
+
+from commons.config.db_config import engine_natural
 
 app = Flask(__name__)
 
-# Настройка базы данных
-Session = sessionmaker(bind=engine)
-session = Session()
+session = scoped_session(sessionmaker(bind=engine_natural))
 
 # Инициализация морфологического анализатора
 morph = MorphAnalyzer()

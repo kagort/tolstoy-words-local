@@ -1,36 +1,11 @@
 import pandas as pd
 from sqlalchemy import func, select
-from collections import defaultdict
 from itertools import count
-from generic.database_generic.model_generic import *  # твои модели SQLAlchemy
+from database.model import *
 
-
-# --- Функция подсчёта слов ---
-def count_words(text):
-    return len(str(text).split())
-
-
-# --- Функция расширения POS ---
-def expand_pos_column(df, column_name='POS_Dependencies'):
-    expanded_rows = []
-
-    for _, row in df.iterrows():
-        pos_str = row[column_name]
-        pos_dict = {}
-
-        if pd.notna(pos_str) and pos_str != '':
-            items = pos_str.split(', ')
-            for item in items:
-                if ': ' in item:
-                    pos, count = item.split(': ')
-                    pos_dict[pos] = int(count)
-
-        # Добавляем оригинальную строку, чтобы не потерять данные
-        combined = row.to_dict()
-        combined.update(pos_dict)
-        expanded_rows.append(combined)
-
-    return pd.DataFrame(expanded_rows)
+from commons.config.db_config import engine_generic
+from text_processing.base_text_functions import count_words
+from text_processing.dataframe_functions import expand_pos_column
 
 
 # --- SQL-запросы ---
@@ -117,12 +92,14 @@ def main():
     queries = build_queries()
 
     # Подключение к базе и загрузка данных
-    data = load_data(engine, queries)
+    data = load_data(engine_generic, queries)
 
     # --- Подсчёт количества слов в предложениях ---
     df_sw = data['sentence_words']
     df_sw.columns = ['Token_text', 'Sentence_text']
-    df_sw['word_count'] = df_sw['Sentence_text'].apply(count_words)
+
+    # Нормализуем регистр перед подсчётом
+    df_sw['word_count'] = df_sw['Sentence_text'].str.lower().apply(count_words)
 
     word_stats = (
         df_sw.groupby('Token_text')['word_count']

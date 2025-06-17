@@ -3,14 +3,8 @@ import pandas as pd
 import networkx as nx
 import matplotlib.pyplot as plt
 
-# Подключение к базе данных
-conn = psycopg2.connect(
-    dbname="tolstoy_words_csv",
-    user="postgres",
-    password="ouganda77",
-    host="localhost",
-    port="5432"
-)
+from commons.config.db_config import engine_natural
+
 
 # Запрос к базе данных
 query = """
@@ -153,10 +147,10 @@ ORDER BY tm."TextID";
 """
 
 # Загрузка данных в DataFrame
-df = pd.read_sql(query, conn)
+df = pd.read_sql(query, engine_natural)
 
 # Закрытие соединения
-conn.close()
+engine_natural.close()
 
 # Создание графа
 G = nx.DiGraph()
