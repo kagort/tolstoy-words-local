@@ -10,10 +10,14 @@ from database.model import (
 )
 from text_processing.lemmatization import *
 
-# Инициализация NLP-библиотек
-nltk.download('punkt', quiet=True)
-nlp = spacy.load("ru_core_news_sm")
 morph = MorphAnalyzer()
+nlp = spacy.load("ru_core_news_sm")
+
+def initialization():
+    # Инициализация NLP-библиотек
+    nltk.download('punkt', quiet=True)
+    nltk.download('punkt_tab', quiet=True)
+
 
 # Логирование
 logging.basicConfig(
@@ -29,6 +33,8 @@ class TextAnalysisAPI:
         self.engine   = engine
         self.session  = scoped_session(sessionmaker(bind=self.engine))
         self.progress = 0
+
+        initialization()
 
         # Создаём Flask-приложение
         self.app = Flask(__name__)
