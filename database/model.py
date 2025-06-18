@@ -46,6 +46,3 @@ class Cross(Base):
     SentenceID = Column(Integer, ForeignKey('sentences.SentenceID'))
     TextID = Column(Integer, ForeignKey('dictexts.TextID'))
     TokenID = Column(Integer, ForeignKey('tokenid.TokenID') )
-#
-#     # Создание таблиц
-# Base.metadata.create_all(engine)
