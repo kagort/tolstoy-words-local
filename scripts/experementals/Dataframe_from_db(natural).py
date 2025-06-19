@@ -1,5 +1,5 @@
 import pandas as pd
-from sqlalchemy import func, select
+from sqlalchemy import func, select, distinct
 from itertools import count
 from database.model import *
 
@@ -18,36 +18,40 @@ def build_queries():
         .group_by(TokenID.Token_text)
     )
 
+    # sentence_count
     sentence_count_query = (
         select(
             TokenID.Token_text,
-            func.count(func.distinct(Cross.SentenceID)).label('sentence_count')
+            func.count(distinct(Cross.SentenceID)).label('sentence_count')
         )
-        .join(Cross, Cross.TokenID == TokenID.TokenID)
+        .outerjoin(Cross, Cross.TokenID == TokenID.TokenID)  # <- outer!
         .group_by(TokenID.Token_text)
     )
 
+    # dependent words
     dependent_word_count_query = (
         select(
             TokenID.Token_text,
-            func.count(Words.WordID).label('dependent_word_count')
+            func.count(distinct(Words.WordID)).label('dependent_word_count')
         )
-        .join(Cross, Cross.TokenID == TokenID.TokenID)
+        .outerjoin(Cross, Cross.TokenID == TokenID.TokenID)
         .outerjoin(Words, Words.WordID == Cross.WordID)
         .group_by(TokenID.Token_text)
     )
 
+    # POS
     pos_dependency_query = (
         select(
             TokenID.Token_text,
             Words.Part_of_speech.label('dependent_pos'),
-            func.count(Words.WordID).label('pos_count')
+            func.count(distinct(Words.WordID)).label('pos_count')
         )
         .join(Cross, Cross.TokenID == TokenID.TokenID)
         .join(Words, Words.WordID == Cross.WordID)
         .group_by(TokenID.Token_text, Words.Part_of_speech)
     )
 
+    # sentences (без дублей)
     sentence_with_words_query = (
         select(
             TokenID.Token_text,
@@ -55,6 +59,7 @@ def build_queries():
         )
         .join(Cross, Cross.TokenID == TokenID.TokenID)
         .join(Sentences, Sentences.SentenceID == Cross.SentenceID)
+        .distinct(TokenID.Token_text, Sentences.SentenceID)
     )
 
     return {
@@ -159,7 +164,7 @@ def main():
     print(result.head(20))
 
     # Сохраняем в Excel, чтобы избежать интерпретации чисел как дат
-    result.to_excel("merged_tokens_expanded_natural.xlsx", index=False, engine='openpyxl')
+    result.to_excel("merged_tokens_expanded_natural_new.xlsx", index=False, engine='openpyxl')
     print("\nРезультат с развернутыми POS сохранён в файл: merged_tokens_expanded.xlsx")
 
 
