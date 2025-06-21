@@ -1,19 +1,88 @@
-def remove_duplicate_sentences(input_file, output_file):
+import re
+import pymorphy3
+
+
+def split_text_into_sentences(text):
+    # Простое регулярное выражение для разделения на предложения
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    return [s.strip() for s in sentences if s.strip()]
+
+
+def normalize_sentence(sentence):
+    morph = pymorphy3.MorphAnalyzer()
+    words = re.findall(r'\b\w+\b', sentence.lower())
+    normalized = ' '.join([morph.parse(word)[0].normal_form for word in words])
+    return normalized
+
+
+def remove_and_check_duplicates(input_file, output_file):
     seen = set()
     result = []
+    duplicate_count = 0
+    total_sentences = 0
+    processed = 0
 
+    # Сначала прочитаем весь файл и соберём все предложения
+    all_sentences = []
+
+    print("[INFO] Чтение файла и разделение на предложения...")
     with open(input_file, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()  # Убираем лишние пробелы и переносы
-            if line and line not in seen:
-                seen.add(line)
-                result.append(line + '\n')  # Возвращаем строку с переносом
+        text = f.read()
+        all_sentences = split_text_into_sentences(text)
+        total_sentences = len(all_sentences)
 
+    print(f"[INFO] Найдено предложений: {total_sentences}")
+
+    # Удаление дубликатов
+    print("[INFO] Начинаю обработку предложений...\n")
+    for idx, sentence in enumerate(all_sentences):
+        normalized = normalize_sentence(sentence)
+        processed += 1
+
+        if normalized in seen:
+            duplicate_count += 1
+        else:
+            seen.add(normalized)
+            result.append(sentence + '\n')
+
+        # Прогресс в консоли
+        print(f"\r[PROGRESS] Обработано {processed} из {total_sentences} предложений...", end='', flush=True)
+
+    print(f"\n[INFO] Обработка завершена. Удалено дубликатов: {duplicate_count}")
+
+    # Запись результата
     with open(output_file, 'w', encoding='utf-8') as f:
         f.writelines(result)
 
-# Использование
-input_path = r'C:\Users\User\PycharmProjects\tolstoy-words-local\generic\pretrained_yandex_texts.txt'     # Укажи свой путь к исходному файлу
-output_path = r'C:\Users\User\PycharmProjects\tolstoy-words-local\generic\cleaned_file.txt' # Путь для файла без дубликатов
+    print(f"[INFO] Очищенный файл сохранён как: {output_file}")
 
-remove_duplicate_sentences(input_path, output_path)
+    # Проверка оставшихся дубликатов
+    seen_again = set()
+    duplicates_found = []
+
+    print("[INFO] Проверяю очищенный файл на повторы...")
+
+    with open(output_file, 'r', encoding='utf-8') as f:
+        cleaned_text = f.read()
+        cleaned_sentences = split_text_into_sentences(cleaned_text)
+
+        for idx, sentence in enumerate(cleaned_sentences):
+            normalized = normalize_sentence(sentence)
+            if normalized in seen_again:
+                duplicates_found.append((idx + 1, sentence))
+            else:
+                seen_again.add(normalized)
+
+    if duplicates_found:
+        print("[ERROR] В очищенном файле найдены повторяющиеся предложения:")
+        for line_num, text in duplicates_found:
+            print(f"Предложение {line_num}: {text[:50]}...")
+    else:
+        print("[SUCCESS] Все дубликаты успешно удалены. Повторений не найдено.")
+
+
+# --- Использование ---
+input_path = r'C:\Users\User\PycharmProjects\tolstoy-words-local\generic\pretrained_yandex_texts.txt'
+output_path = r'C:\Users\User\PycharmProjects\tolstoy-words-local\generic\cleaned_file.txt'
+
+remove_and_check_duplicates(input_path, output_path)
