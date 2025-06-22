@@ -1,23 +1,21 @@
 import re
-import pymorphy3
+import unicodedata
 
 
-def split_text_into_sentences(text):
-    # Простое регулярное выражение для разделения на предложения
-    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-    return [s.strip() for s in sentences if s.strip()]
+def split_text_into_sentences(text: str) -> list[str]:
+    return re.compile(r'(?<=[.!?…])').split(text.strip())
 
 
 def normalize_sentence(sentence):
-    morph = pymorphy3.MorphAnalyzer()
-    words = re.findall(r'\b\w+\b', sentence.lower())
-    normalized = ' '.join([morph.parse(word)[0].normal_form for word in words])
-    return normalized
+    s = unicodedata.normalize('NFKC', sentence)
+    s = re.sub(r'\s+', ' ', s)            # несколько пробелов заменяем на один
+    s = s.replace('"', '').strip().lower()
+    return s
 
 
 def remove_and_check_duplicates(input_file, output_file):
-    seen = set()
-    result = []
+    seen            = set()
+    result          = []
     duplicate_count = 0
     total_sentences = 0
     processed = 0
@@ -28,14 +26,15 @@ def remove_and_check_duplicates(input_file, output_file):
     print("[INFO] Чтение файла и разделение на предложения...")
     with open(input_file, 'r', encoding='utf-8') as f:
         text = f.read()
-        all_sentences = split_text_into_sentences(text)
-        total_sentences = len(all_sentences)
+
+    all_sentences   = split_text_into_sentences(text)
+    total_sentences = len(all_sentences)
 
     print(f"[INFO] Найдено предложений: {total_sentences}")
 
     # Удаление дубликатов
     print("[INFO] Начинаю обработку предложений...\n")
-    for idx, sentence in enumerate(all_sentences):
+    for sentence in all_sentences:
         normalized = normalize_sentence(sentence)
         processed += 1
 
@@ -43,7 +42,7 @@ def remove_and_check_duplicates(input_file, output_file):
             duplicate_count += 1
         else:
             seen.add(normalized)
-            result.append(sentence + '\n')
+            result.append(normalized + '\n')
 
         # Прогресс в консоли
         print(f"\r[PROGRESS] Обработано {processed} из {total_sentences} предложений...", end='', flush=True)
@@ -82,7 +81,7 @@ def remove_and_check_duplicates(input_file, output_file):
 
 
 # --- Использование ---
-input_path = r'C:\Users\User\PycharmProjects\tolstoy-words-local\generic\pretrained_yandex_texts.txt'
-output_path = r'C:\Users\User\PycharmProjects\tolstoy-words-local\generic\cleaned_file.txt'
+input_path = "pretrained_yandex_texts.txt"
+output_path = "cleaned.txt"
 
 remove_and_check_duplicates(input_path, output_path)
