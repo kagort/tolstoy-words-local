@@ -24,7 +24,7 @@ def build_queries():
             TokenID.Token_text,
             func.count(distinct(Cross.SentenceID)).label('sentence_count')
         )
-        .join(Cross, Cross.TokenID == TokenID.TokenID)  # <- outer!
+        .outerjoin(Cross, Cross.TokenID == TokenID.TokenID)  # <- outer!
         .group_by(TokenID.Token_text)
     )
 
@@ -34,8 +34,8 @@ def build_queries():
             TokenID.Token_text,
             func.count(distinct(Words.Word_text)).label('dependent_word_count')
         )
-        .join(Cross, Cross.TokenID == TokenID.TokenID)
-        .join(Words, Words.WordID == Cross.WordID)
+        .outerjoin(Cross, Cross.TokenID == TokenID.TokenID)
+        .outerjoin(Words, Words.WordID == Cross.WordID)
         .group_by(TokenID.Token_text)
     )
 
