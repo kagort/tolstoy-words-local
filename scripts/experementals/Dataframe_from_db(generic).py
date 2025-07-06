@@ -41,7 +41,6 @@ def prepare_regex_table(conn):
 
     conn.execute(tmp.insert(), rows)
 
-
 def build_queries(conn):
     # подзапрос с уникальными леммами
     tok_subq = (
@@ -108,13 +107,8 @@ def build_queries(conn):
         .group_by(tok.c.token_text)
     )
 
-    # dependent_word_count: суммарная частота зависимых слов
-    tok2id = join(
-        TokenID,
-        tok,
-        TokenID.Token_text == tok.c.token_text
-    )
-
+    # dependent_word_count — distinct WordID
+    tok2id = join(TokenID, tok, TokenID.Token_text == tok.c.token_text)
     dependent_word_count_query = (
         select(
             tok.c.token_text.label('Token_text'),
@@ -122,24 +116,24 @@ def build_queries(conn):
         )
         .select_from(tok2id)
         .outerjoin(cr, cr.TokenID == TokenID.TokenID)
-        .outerjoin(w, w.WordID == cr.WordID)
+        .outerjoin(w,  w.WordID  == cr.WordID)
         .group_by(tok.c.token_text)
     )
 
-    # pos_dependency: распределение зависимостей по частям речи
+    # pos_dependency = distinct WordID в разрезе POS
     pos_dependency_query = (
         select(
             tok.c.token_text.label('Token_text'),
             w.Part_of_speech.label('dependent_pos'),
-            func.count(distinct(w.Word_text)).label('pos_count')
+            func.count(distinct(w.WordID)).label('pos_count')
         )
         .select_from(tok2id)
-        .join(cr, cr.TokenID == TokenID.TokenID)
-        .join(w,  w.WordID  == cr.WordID)
+        .outerjoin(cr, cr.TokenID == TokenID.TokenID)
+        .outerjoin(w,  w.WordID  == cr.WordID)
         .group_by(tok.c.token_text, w.Part_of_speech)
     )
 
-    # sentence_words: пары «токен — предложение» без дублей
+    # предложения с токенами
     sentence_with_words_query = (
         select(
             tok.c.token_text.label('Token_text'),
