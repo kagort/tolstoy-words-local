@@ -1,6 +1,8 @@
 import logging
+import re
 from collections import defaultdict
 from nltk.tokenize import sent_tokenize
+from sqlalchemy import or_
 
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from sqlalchemy.orm import sessionmaker, scoped_session, Session
@@ -146,65 +148,102 @@ class TextAnalysisAPI:
         self.session.flush()
         tid = entry.TextID
 
-        for sent in sent_tokenize(text, language='russian'):
-            self.session.add(Sentences(Sentence_text=sent, TextID=tid))
+        doc = nlp(text)
+        for sent in doc.sents:
+            self.session.add(Sentences(Sentence_text=sent.text.strip(), TextID=tid))
 
         self.session.commit()
 
     def _analyze_word_in_text(self, text_id, search_word):
-        lemma = morph.parse(search_word)[0].normal_form
-        # проверяем дублирование
+        parsed = morph.parse(search_word)[0]
+        lemma = parsed.normal_form
         if self.session.query(TokenID).filter_by(Token_text=lemma, TextID=text_id).first():
             return f"Токен '{search_word}' уже анализировался для текста {text_id}."
 
+        lexeme_forms = {v.word for v in parsed.lexeme}
+        filters = [
+            Sentences.Sentence_text.ilike(f"%{form}%")
+            for form in lexeme_forms
+        ]
+        sents = (
+            self.session.query(Sentences)
+            .filter(
+                Sentences.TextID == text_id,
+                or_(*filters)
+            )
+            .all()
+        )
+        if not sents:
+            return f"Слово '{search_word}' (лемма '{lemma}') не найдено в тексте {text_id}."
+
+        # 3) Создаем TokenID
         token = TokenID(Token_text=lemma, TextID=text_id, Token_count=0)
         self.session.add(token)
         self.session.flush()
         token_id = token.TokenID
 
-        sents = self.session.query(Sentences).filter(
-            Sentences.TextID==text_id,
-            Sentences.Sentence_text.ilike(f'%{search_word}%')
-        ).all()
-        if not sents:
-            return f"Слово '{search_word}' не найдено в тексте {text_id}."
+        if not hasattr(self, "_nlp_optimized"):
+            for pipe in ("ner", "textcat", "entity_linker"):
+                if pipe in nlp.pipe_names:
+                    nlp.disable_pipe(pipe)
+            self._nlp_optimized = True
 
-        pos_data = defaultdict(lambda: defaultdict(list))
         total = 0
+        pos_data = defaultdict(lambda: defaultdict(set))
+        docs = nlp.pipe((s.Sentence_text for s in sents), batch_size=64)
 
-        for s in sents:
-            doc = nlp(s.Sentence_text)
+        for sent_obj, doc in zip(sents, docs):
             occ = sum(1 for t in doc if t.lemma_ == lemma)
+            if occ == 0:
+                continue
             total += occ
 
             for t in doc:
-                if t.lemma_ == lemma:
-                    # родственники
-                    if t.head.pos_ == "VERB" and t.head != t:
-                        pos_data["VERB_HEAD"][remove_punctuation(t.head.lemma_)].append(s.SentenceID)
-                    for c in t.children:
-                        cw = remove_punctuation(c.lemma_)
-                        if cw:
-                            pos_data[c.pos_][cw].append(s.SentenceID)
+                if t.lemma_ != lemma:
+                    continue
+                if t.head.pos_ == "VERB" and t.head != t:
+                    head = remove_punctuation(t.head.lemma_)
+                    pos_data["VERB_HEAD"][head].add(sent_obj.SentenceID)
+                for c in t.children:
+                    child = remove_punctuation(c.lemma_)
+                    if child:
+                        pos_data[c.pos_][child].add(sent_obj.SentenceID)
+
+        if total == 0:
+            self.session.rollback()
+            return f"Слово '{search_word}' не найдено в тексте {text_id}."
 
         token.Token_count = total
-        for pos, words in pos_data.items():
-            for w, sids in words.items():
-                we = Words(
-                    Word_text=w,
+
+        words = []
+        crosses = []
+        for pos, forms in pos_data.items():
+            for form, sids in forms.items():
+                w = Words(
+                    Word_text=form,
                     Part_of_speech=pos,
                     Frequency=len(sids),
                     TextID=text_id,
                     TokenID=token_id
                 )
-                self.session.add(we)
-                self.session.flush()
-                for sid in sids:
-                    self.session.add(Cross(
-                        WordID=we.WordID,
-                        SentenceID=sid,
-                        TextID=text_id,
-                        TokenID=token_id
-                    ))
+                words.append((w, sids))
+
+        self.session.add_all(w for w, _ in words)
+        self.session.flush()
+
+        for w, sids in words:
+            for sid in sids:
+                crosses.append(Cross(
+                    WordID=w.WordID,
+                    SentenceID=sid,
+                    TextID=text_id,
+                    TokenID=token_id
+                ))
+
+        self.session.bulk_save_objects(crosses)
         self.session.commit()
-        return f"Токен '{search_word}' проанализирован для текста {text_id}."
+
+        return (
+            f"Токен '{search_word}' (лемма '{lemma}') проанализирован: "
+            f"{total} вхождений, {len(pos_data)} зависимых слов."
+        )
