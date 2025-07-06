@@ -1,173 +1,238 @@
 import pandas as pd
-from sqlalchemy import func, select, distinct
-from itertools import count
-from database.model import *
-
+import pymorphy3
+from database.model import Base, TokenID, Sentences, Words, Cross
 from commons.config.db_config import engine_natural
 from text_processing.base_text_functions import count_words
-from text_processing.dataframe_functions import expand_pos_column
+from text_processing.dataframe_functions   import expand_pos_column
+from sqlalchemy import (
+    select, func, distinct, literal_column, true, join, case, Table, MetaData
+)
+from sqlalchemy.orm import aliased
+from sqlalchemy.sql import lateral
+
+def prepare_regex_table(conn):
+    import re
+    from sqlalchemy import Table, Column, Text, MetaData
+
+    morph = pymorphy3.MorphAnalyzer()
+
+    tokens = [t for (t,) in conn.execute(
+        select(TokenID.Token_text).distinct()
+    )]
+
+    rows = []
+    for lemma in tokens:
+        forms = {f.word.lower() for f in morph.parse(lemma)[0].lexeme}
+        # Убираем границы слова, чтобы ловить "веять" и "развеять"
+        regex = r'(?:' + '|'.join(re.escape(w) for w in forms) + r')'
+        rows.append({'token_text': lemma, 'pattern': regex})
+
+    conn.exec_driver_sql("DROP TABLE IF EXISTS tmp_token_regex")
+    conn.exec_driver_sql("""
+        CREATE TEMP TABLE tmp_token_regex (
+            token_text text PRIMARY KEY,
+            pattern    text NOT NULL
+        ) ON COMMIT PRESERVE ROWS
+    """)
+
+    tmp = Table('tmp_token_regex', MetaData(),
+                Column('token_text', Text, primary_key=True),
+                Column('pattern',    Text))
+
+    conn.execute(tmp.insert(), rows)
 
 
-# --- SQL-запросы ---
-def build_queries():
+def build_queries(conn):
+    # подзапрос с уникальными леммами
+    tok_subq = (
+        select(TokenID.Token_text.label('token_text'))
+        .distinct()
+        .subquery(name='tok')
+    )
+    tok = aliased(tok_subq)
+
+    s  = aliased(Sentences)
+    w  = Words
+    cr = Cross
+
+    # временная таблица с regex для всех форм лемм
+    tr = Table('tmp_token_regex', MetaData(), autoload_with=conn)
+
+    # LATERAL: все совпадения regex в одном предложении
+    rm_lateral = lateral(
+        func.regexp_matches(
+            func.lower(s.Sentence_text),
+            tr.c.pattern,
+            literal_column("'g'")
+        )
+    ).alias('rm')
+
+    # LATERAL-подзапрос: для каждого предложения считаем число совпадений форм
+    matches_lateral = (
+        select(
+            s.SentenceID.label('sid'),
+            func.count().label('cnt')
+        )
+        .select_from(
+            join(s, tr, tr.c.token_text == tok.c.token_text)
+            .join(rm_lateral, true())
+        )
+        .group_by(s.SentenceID)
+        .lateral()
+        .alias('m')
+    )
+
+    # total_token_count: сумма всех совпадений по предложениям
     token_freq_query = (
         select(
-            TokenID.Token_text,
-            func.sum(TokenID.Token_count).label('total_token_count')
+            tok.c.token_text.label('Token_text'),
+            func.coalesce(func.sum(matches_lateral.c.cnt), 0)
+                .label('total_token_count')
         )
-        .group_by(TokenID.Token_text)
+        .select_from(tok)
+        .outerjoin(matches_lateral, true())
+        .group_by(tok.c.token_text)
     )
 
-    # sentence_count
+    # sentence_count: число предложений с хотя бы одним совпадением
     sentence_count_query = (
         select(
-            TokenID.Token_text,
-            func.count(distinct(Cross.SentenceID)).label('sentence_count')
+            tok.c.token_text.label('Token_text'),
+            func.coalesce(
+                func.count(distinct(matches_lateral.c.sid)),
+                0
+            ).label('sentence_count')
         )
-        .outerjoin(Cross, Cross.TokenID == TokenID.TokenID)  # <- outer!
-        .group_by(TokenID.Token_text)
+        .select_from(tok)
+        .outerjoin(matches_lateral, true())
+        .group_by(tok.c.token_text)
     )
 
-    # dependent words
+    # dependent_word_count: суммарная частота зависимых слов
+    tok2id = join(
+        TokenID,
+        tok,
+        TokenID.Token_text == tok.c.token_text
+    )
+
     dependent_word_count_query = (
         select(
-            TokenID.Token_text,
-            func.count(distinct(Words.Word_text)).label('dependent_word_count')
+            tok.c.token_text.label('Token_text'),
+            func.count(distinct(w.WordID)).label('dependent_word_count')
         )
-        .outerjoin(Cross, Cross.TokenID == TokenID.TokenID)
-        .outerjoin(Words, Words.WordID == Cross.WordID)
-        .group_by(TokenID.Token_text)
+        .select_from(tok2id)
+        .outerjoin(cr, cr.TokenID == TokenID.TokenID)
+        .outerjoin(w, w.WordID == cr.WordID)
+        .group_by(tok.c.token_text)
     )
 
-    # POS
+    # pos_dependency: распределение зависимостей по частям речи
     pos_dependency_query = (
         select(
-            TokenID.Token_text,
-            Words.Part_of_speech.label('dependent_pos'),
-            func.count(distinct(Words.Word_text)).label('pos_count')
+            tok.c.token_text.label('Token_text'),
+            w.Part_of_speech.label('dependent_pos'),
+            func.count(distinct(w.Word_text)).label('pos_count')
         )
-        .join(Cross, Cross.TokenID == TokenID.TokenID)
-        .join(Words, Words.WordID == Cross.WordID)
-        .group_by(TokenID.Token_text, Words.Part_of_speech)
+        .select_from(tok2id)
+        .join(cr, cr.TokenID == TokenID.TokenID)
+        .join(w,  w.WordID  == cr.WordID)
+        .group_by(tok.c.token_text, w.Part_of_speech)
     )
 
-    # sentences (без дублей)
+    # sentence_words: пары «токен — предложение» без дублей
     sentence_with_words_query = (
         select(
-            TokenID.Token_text,
-            Sentences.Sentence_text
+            tok.c.token_text.label('Token_text'),
+            s.Sentence_text
         )
-        .join(Cross, Cross.TokenID == TokenID.TokenID)
-        .join(Sentences, Sentences.SentenceID == Cross.SentenceID)
-        .distinct(TokenID.Token_text, Sentences.SentenceID)
+        .select_from(tok2id)
+        .join(cr, cr.TokenID == TokenID.TokenID)
+        .join(s,  s.SentenceID == cr.SentenceID)
+        .distinct(tok.c.token_text, s.SentenceID)
     )
 
     return {
-        'token_freq': token_freq_query,
-        'sentence_count': sentence_count_query,
+        'token_freq'          : token_freq_query,
+        'sentence_count'      : sentence_count_query,
         'dependent_word_count': dependent_word_count_query,
-        'pos_dependency': pos_dependency_query,
-        'sentence_words': sentence_with_words_query
+        'pos_dependency'      : pos_dependency_query,
+        'sentence_words'      : sentence_with_words_query
     }
 
-
-# --- Загрузка данных из БД ---
-def load_data(engine, queries):
-    with engine.connect() as conn:
-        df_tokens = pd.DataFrame(conn.execute(queries['token_freq']).fetchall())
-        df_sentences = pd.DataFrame(conn.execute(queries['sentence_count']).fetchall())
-        df_dependents = pd.DataFrame(conn.execute(queries['dependent_word_count']).fetchall())
-        df_pos = pd.DataFrame(conn.execute(queries['pos_dependency']).fetchall())
-        df_sentence_words = pd.DataFrame(conn.execute(queries['sentence_words']).fetchall())
-
+def load_data(conn, queries):
     return {
-        'tokens': df_tokens,
-        'sentences': df_sentences,
-        'dependents': df_dependents,
-        'pos': df_pos,
-        'sentence_words': df_sentence_words
+        name: pd.DataFrame(conn.execute(q).fetchall())
+        for name, q in queries.items()
     }
 
-
-# --- Основная функция ---
 def main():
-    print("Запуск анализа токенов...")
+    print("Запуск анализа токенов…")
 
-    # Построение запросов
-    queries = build_queries()
+    with engine_natural.begin() as conn:
+        prepare_regex_table(conn)
+        queries = build_queries(conn)
+        data = load_data(conn, queries)
 
-    # Подключение к базе и загрузка данных
-    data = load_data(engine_natural, queries)
-
-    # --- Подсчёт количества слов в предложениях ---
+    # длины предложений и статистика по ним
     df_sw = data['sentence_words']
     df_sw.columns = ['Token_text', 'Sentence_text']
-
-    # Нормализуем регистр перед подсчётом
     df_sw['word_count'] = df_sw['Sentence_text'].str.lower().apply(count_words)
 
     word_stats = (
-        df_sw.groupby('Token_text')['word_count']
-        .agg(['mean', 'median'])
-        .rename(columns={'mean': 'avg_word_count', 'median': 'median_word_count'})
-        .reset_index()
+        df_sw
+        .groupby('Token_text', as_index=False)['word_count']
+        .agg(avg_word_count='mean', median_word_count='median')
     )
 
-    # --- Обработка основных метрик ---
-    df_tokens = data['tokens']
-    df_tokens.columns = ['Token_text', 'total_token_count']
+    # прочие метрики: приводим все dataframes к единым именам
+    df_tokens     = data['token_freq']
+    df_tokens.columns     = ['Token_text', 'total_token_count']
 
-    df_sentences = data['sentences']
-    df_sentences.columns = ['Token_text', 'sentence_count']
+    df_sentences  = data['sentence_count']
+    df_sentences.columns  = ['Token_text', 'sentence_count']
 
-    df_dependents = data['dependents']
+    df_dependents = data['dependent_word_count']
     df_dependents.columns = ['Token_text', 'dependent_word_count']
 
-    df_pos = data['pos']
-    df_pos.columns = ['Token_text', 'dependent_pos', 'pos_count']
+    df_pos        = data['pos_dependency']
+    df_pos.columns        = ['Token_text', 'dependent_pos', 'pos_count']
 
-    # --- Форматируем зависимости по частям речи ---
-    def format_pos(group):
-        return ', '.join([f"{row['dependent_pos']}: {row['pos_count']}" for _, row in group.iterrows()])
+    df_pos_grouped = (
+        df_pos
+        .groupby('Token_text', group_keys=False)
+        .apply(lambda g: ', '.join(
+            f"{row.dependent_pos}: {row.pos_count}"
+            for _, row in g.iterrows()
+        ))
+        .reset_index(name='POS_Dependencies')
+    )
 
-    df_pos_grouped = df_pos.groupby("Token_text", group_keys=False).apply(format_pos).reset_index(name="POS_Dependencies")
+    df_final = (
+        df_tokens
+        .merge(df_sentences,   on='Token_text', how='left')
+        .merge(df_dependents,  on='Token_text', how='left')
+        .merge(df_pos_grouped, on='Token_text', how='left')
+        .merge(word_stats,     on='Token_text', how='left')
+    )
 
-    # --- Объединение всех DF ---
-    df_final = df_tokens.merge(df_sentences, on='Token_text', how='left')
-    df_final = df_final.merge(df_dependents, on='Token_text', how='left')
-    df_final = df_final.merge(df_pos_grouped, on='Token_text', how='left')
-    df_final = df_final.merge(word_stats, on='Token_text', how='left')
-
-    # --- Приведение типов ---
-    df_final['sentence_count'] = df_final['sentence_count'].fillna(0).astype(int)
+    df_final['sentence_count']       = df_final['sentence_count'].fillna(0).astype(int)
     df_final['dependent_word_count'] = df_final['dependent_word_count'].fillna(0).astype(int)
-    df_final['avg_word_count'] = df_final['avg_word_count'].fillna(0).round(2)
-    df_final['median_word_count'] = df_final['median_word_count'].fillna(0).astype(int)
+    df_final['avg_word_count']       = df_final['avg_word_count'].fillna(0).round(2)
+    df_final['median_word_count']    = df_final['median_word_count'].fillna(0).astype(int)
 
-    # --- Группировка по Token_text (итоговая агрегация) ---
-    grouped = df_final.sort_values(by='total_token_count', ascending=False).reset_index(drop=True)
+    df_sorted = df_final.sort_values('total_token_count', ascending=False).reset_index(drop=True)
+    df_sorted.insert(0, 'TokenID', range(1, len(df_sorted) + 1))
 
-    # --- Присвоение новых уникальных ID ---
-    id_gen = count(start=1)
-    grouped.insert(0, 'TokenID', [next(id_gen) for _ in range(len(grouped))])
-
-    # --- Расширяем POS в отдельные столбцы ---
-    expanded_df = expand_pos_column(grouped, 'POS_Dependencies')
-
-    # Удаляем старый столбец POS_Dependencies
-    expanded_df.drop(columns=['POS_Dependencies'], inplace=True, errors='ignore')
-
-    # --- Вывод и сохранение ---
-    result = expanded_df
-
-    print("\nТОП 20 токенов:")
-    print(result.head(20))
-
-    # Сохраняем в Excel, чтобы избежать интерпретации чисел как дат
-    result.to_excel("merged_tokens_expanded_natural_new.xlsx", index=False, engine='openpyxl')
-    print("\nРезультат с развернутыми POS сохранён в файл: merged_tokens_expanded.xlsx")
+    expanded = expand_pos_column(df_sorted, 'POS_Dependencies') \
+                 .drop(columns='POS_Dependencies', errors='ignore')
 
 
-# --- Точка входа ---
+    print("\nТОП-20 токенов:")
+    print(expanded.head(20))
+
+    out_file = "natural_tokens_expanded.xlsx"
+    expanded.to_excel(out_file, index=False, engine='openpyxl')
+    print(f"\nРезультат сохранён в «{out_file}»")
+
 if __name__ == "__main__":
     main()
