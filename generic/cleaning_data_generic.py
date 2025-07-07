@@ -27,7 +27,7 @@ def remove_and_check_duplicates(input_file, output_file):
     with open(input_file, 'r', encoding='utf-8') as f:
         text = f.read()
 
-    all_sentences   = split_text_into_sentences(text)
+    all_sentences = split_text_into_sentences(text)
     total_sentences = len(all_sentences)
 
     print(f"[INFO] Найдено предложений: {total_sentences}")
