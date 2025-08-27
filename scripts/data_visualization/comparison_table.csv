@@ -1,4 +1,4 @@
-﻿Токен,total_token_count (Natural),total_token_count (Generic),sentence_count (Natural),sentence_count (Generic),dependent_word_count (Natural),dependent_word_count (Generic),avg_word_count (Natural),avg_word_count (Generic)
+﻿Token_text,total_token_count_Natural,total_token_count_Generic,sentence_count_Natural,sentence_count_Generic,dependent_word_count_Natural,dependent_word_count_Generic,avg_word_count_Natural,avg_word_count_Generic
 запах,1153,2466,1096,2331,2093,652,26.78,15.92
 аромат,151,1805,149,1783,212,546,30.5,16.06
 вонь,690,1151,673,1115,91,122,31.23,16.96
