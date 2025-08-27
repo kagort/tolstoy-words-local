@@ -25,17 +25,22 @@ def prepare_regex_table(conn):
     for lemma in tokens:
         forms = {f.word.lower() for f in morph.parse(lemma)[0].lexeme}
         # Убираем границы слова, чтобы ловить "веять" и "развеять"
-        regex = r'(?:' + '|'.join(re.escape(w) for w in forms) + r')'
+        regex = r'(?:' + '| '.join(re.escape(w) for w in forms) + r')' # Выхватывали куски из середины других слов. Продумать регулярные выражения.
         rows.append({'token_text': lemma, 'pattern': regex})
 
     conn.exec_driver_sql("DROP TABLE IF EXISTS tmp_token_regex")
+    # conn.exec_driver_sql("""
+    #     CREATE TEMP TABLE tmp_token_regex (
+    #         token_text text PRIMARY KEY,
+    #         pattern    text NOT NULL
+    #     ) ON COMMIT PRESERVE ROWS
+    # """)
     conn.exec_driver_sql("""
-        CREATE TEMP TABLE tmp_token_regex (
-            token_text text PRIMARY KEY,
-            pattern    text NOT NULL
-        ) ON COMMIT PRESERVE ROWS
-    """)
-
+           CREATE TABLE tmp_token_regex (
+               token_text text PRIMARY KEY,
+               pattern    text NOT NULL
+           )
+       """)
     tmp = Table('tmp_token_regex', MetaData(),
                 Column('token_text', Text, primary_key=True),
                 Column('pattern',    Text))
