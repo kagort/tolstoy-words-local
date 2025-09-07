@@ -1,8 +1,15 @@
 import logging
-import re
 from collections import defaultdict
-from nltk.tokenize import sent_tokenize
+from sqlalchemy import select, func, literal_column, true, bindparam
+from sqlalchemy.sql import lateral
+from sqlalchemy.orm import aliased
+from collections import defaultdict
+import re
+import pymorphy3
+from sqlalchemy.orm import aliased
+from sqlalchemy.sql import lateral
 from sqlalchemy import or_
+from sqlalchemy import join
 
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from sqlalchemy.orm import sessionmaker, scoped_session, Session
@@ -157,30 +164,52 @@ class TextAnalysisAPI:
     def _analyze_word_in_text(self, text_id, search_word):
         parsed = morph.parse(search_word)[0]
         lemma = parsed.normal_form
-        if self.session.query(TokenID).filter_by(Token_text=lemma, TextID=text_id).first():
-            return f"Токен '{search_word}' уже анализировался для текста {text_id}."
 
-        lexeme_forms = {v.word for v in parsed.lexeme}
-        filters = [
-            Sentences.Sentence_text.ilike(f"%{form}%")
-            for form in lexeme_forms
-        ]
-        sents = (
-            self.session.query(Sentences)
-            .filter(
-                Sentences.TextID == text_id,
-                or_(*filters)
-            )
-            .all()
-        )
-        if not sents:
-            return f"Слово '{search_word}' (лемма '{lemma}') не найдено в тексте {text_id}."
-
-        # 3) Создаем TokenID
-        token = TokenID(Token_text=lemma, TextID=text_id, Token_count=0)
-        self.session.add(token)
-        self.session.flush()
+        token = (self.session.query(TokenID)
+                 .filter_by(Token_text=lemma, TextID=text_id)
+                 .first())
+        if not token:
+            token = TokenID(Token_text=lemma, TextID=text_id, Token_count=0)
+            self.session.add(token)
+            self.session.flush()
         token_id = token.TokenID
+
+        forms = {f.word.lower() for f in parsed.lexeme}
+        pattern = r'(?:' + '|'.join(re.escape(w) for w in forms) + r')'
+
+        s = aliased(Sentences)
+        rm_lat = lateral(
+            func.regexp_matches(
+                func.lower(s.Sentence_text),
+                bindparam('pat'),
+                literal_column("'g'")
+            )
+        ).alias('rm')
+
+        matches_per_sent = (
+            select(s.SentenceID.label('sid'), func.count().label('cnt'))
+            .select_from(join(s, rm_lat, true()))
+            .where(s.TextID == text_id)
+            .group_by(s.SentenceID)
+        ).subquery()
+
+        total = self.session.execute(
+            select(func.coalesce(func.sum(matches_per_sent.c.cnt), 0)).params(pat=pattern)
+        ).scalar_one()
+
+        if total == 0:
+            token.Token_count = 0
+            self.session.commit()
+            return (f"Слово '{search_word}' (лемма '{lemma}') не найдено в тексте {text_id}.")
+
+        sid_list = self.session.execute(
+            select(matches_per_sent.c.sid).params(pat=pattern)
+        ).scalars().all()
+
+        sents = (self.session.query(Sentences)
+                 .filter(Sentences.TextID == text_id,
+                         Sentences.SentenceID.in_(sid_list))
+                 .all())
 
         if not hasattr(self, "_nlp_optimized"):
             for pipe in ("ner", "textcat", "entity_linker"):
@@ -188,62 +217,82 @@ class TextAnalysisAPI:
                     nlp.disable_pipe(pipe)
             self._nlp_optimized = True
 
-        total = 0
+        rx = re.compile(pattern)
         pos_data = defaultdict(lambda: defaultdict(set))
+
         docs = nlp.pipe((s.Sentence_text for s in sents), batch_size=64)
 
         for sent_obj, doc in zip(sents, docs):
-            occ = sum(1 for t in doc if t.lemma_ == lemma)
-            if occ == 0:
-                continue
-            total += occ
-
             for t in doc:
-                if t.lemma_ != lemma:
+                if not t.text:
                     continue
+                if rx.search(t.text.lower()) is None:
+                    continue
+
                 if t.head.pos_ == "VERB" and t.head != t:
                     head = remove_punctuation(t.head.lemma_)
-                    pos_data["VERB_HEAD"][head].add(sent_obj.SentenceID)
+                    if head:
+                        pos_data["VERB_HEAD"][head].add(sent_obj.SentenceID)
+
                 for c in t.children:
                     child = remove_punctuation(c.lemma_)
                     if child:
                         pos_data[c.pos_][child].add(sent_obj.SentenceID)
 
-        if total == 0:
-            self.session.rollback()
-            return f"Слово '{search_word}' не найдено в тексте {text_id}."
+        existing_words = (self.session.query(Words)
+                          .filter_by(TextID=text_id, TokenID=token_id)
+                          .all())
+        word_by_key = {(w.Word_text, w.Part_of_speech): w for w in existing_words}
 
-        token.Token_count = total
+        existing_cross = (self.session.query(Cross.WordID, Cross.SentenceID)
+                          .filter(Cross.TextID == text_id, Cross.TokenID == token_id)
+                          .all())
+        crosses_by_wid = defaultdict(set)
+        for wid, sid in existing_cross:
+            crosses_by_wid[wid].add(sid)
 
-        words = []
-        crosses = []
-        for pos, forms in pos_data.items():
-            for form, sids in forms.items():
-                w = Words(
-                    Word_text=form,
-                    Part_of_speech=pos,
-                    Frequency=len(sids),
-                    TextID=text_id,
-                    TokenID=token_id
-                )
-                words.append((w, sids))
+        new_words = []
+        for pos, forms_map in pos_data.items():
+            for form, sids in forms_map.items():
+                key = (form, pos)
+                w = word_by_key.get(key)
+                if w is None:
+                    w = Words(
+                        Word_text=form,
+                        Part_of_speech=pos,
+                        Frequency=0,
+                        TextID=text_id,
+                        TokenID=token_id
+                    )
+                    self.session.add(w)
+                    new_words.append(w)
+                    word_by_key[key] = w
 
-        self.session.add_all(w for w, _ in words)
-        self.session.flush()
+        if new_words:
+            self.session.flush()
 
-        for w, sids in words:
-            for sid in sids:
-                crosses.append(Cross(
+        to_insert = []
+        for (form, pos), w in word_by_key.items():
+            sids_new = pos_data.get(pos, {}).get(form, set())
+            if not sids_new:
+                continue
+            existing_sids = crosses_by_wid.get(w.WordID, set())
+            add_sids = sids_new - existing_sids
+            for sid in add_sids:
+                to_insert.append(Cross(
                     WordID=w.WordID,
                     SentenceID=sid,
                     TextID=text_id,
                     TokenID=token_id
                 ))
+            w.Frequency = len(existing_sids | sids_new)
 
-        self.session.bulk_save_objects(crosses)
+        if to_insert:
+            self.session.bulk_save_objects(to_insert)
+
+        token.Token_count = int(total)
+
         self.session.commit()
 
-        return (
-            f"Токен '{search_word}' (лемма '{lemma}') проанализирован: "
-            f"{total} вхождений, {len(pos_data)} зависимых слов."
-        )
+        return (f"Токен '{search_word}' (лемма '{lemma}') проанализирован: "
+                f"{total} вхождений, {len(pos_data)} зависимых слов.")
