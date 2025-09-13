@@ -177,6 +177,11 @@ class TextAnalysisAPI:
         forms = {f.word.lower() for f in parsed.lexeme}
         pattern = r'(?:' + '|'.join(re.escape(w) for w in forms) + r')'
 
+        # punctuation = '\s+|[!\"#\$%&\'()\*\+,-\./:;<=>?@\[\]\\\^_`{|}~]+'
+        # start_punctuation = r'(?:^|' + punctuation + ')'
+        # end_punctuation = r'(?:$|' + punctuation + ')'
+        # pattern2 = r'(?:' + '|'.join(start_punctuation + re.escape(w) + end_punctuation for w in forms) + r')'
+
         s = aliased(Sentences)
         rm_lat = lateral(
             func.regexp_matches(
