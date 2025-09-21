@@ -162,8 +162,30 @@ class TextAnalysisAPI:
         self.session.commit()
 
     def _analyze_word_in_text(self, text_id, search_word):
-        parsed = morph.parse(search_word)[0]
+        parses = morph.parse(search_word)
+        parsed = parses[0]
         lemma = parsed.normal_form
+        pos = parsed.tag.POS  # исходная часть речи
+
+        # фильтр словоформ по исходной части речи
+        if pos in ("INFN"):  # если токен - глагол в начальной форме, то берем INFN и главгольные словоформы
+            allowed_pos = ("INFN", "VERB")
+        else:
+            allowed_pos = (pos,)
+
+        forms_main = {wf.word.lower() for p in parses if p.tag.POS in allowed_pos
+                      for wf in p.lexeme
+                      if wf.tag.POS in allowed_pos} or {lemma}
+
+        punctuation = r'\s+|[!"#$%&\'()*+,\-./:;<=>?@\[\]\\^_`{|}~]+'
+        start_punct = rf'(?:^|{punctuation})'
+        end_punct = rf'(?:$|{punctuation})'
+        core = '|'.join(re.escape(w) for w in sorted(forms_main, key=len, reverse=True))
+        sql_pattern = rf'(?:' + '|'.join(f'{start_punct}{re.escape(w)}{end_punct}'
+                                         for w in sorted(forms_main, key=len, reverse=True)) + r')'
+
+        token_pattern = rf'^(?:{core})$'
+        rx_word = re.compile(token_pattern, flags=re.IGNORECASE)
 
         token = (self.session.query(TokenID)
                  .filter_by(Token_text=lemma, TextID=text_id)
@@ -174,32 +196,24 @@ class TextAnalysisAPI:
             self.session.flush()
         token_id = token.TokenID
 
-        forms = {f.word.lower() for f in parsed.lexeme}
-        pattern = r'(?:' + '|'.join(re.escape(w) for w in forms) + r')'
-
-        # punctuation = '\s+|[!\"#\$%&\'()\*\+,-\./:;<=>?@\[\]\\\^_`{|}~]+'
-        # start_punctuation = r'(?:^|' + punctuation + ')'
-        # end_punctuation = r'(?:$|' + punctuation + ')'
-        # pattern2 = r'(?:' + '|'.join(start_punctuation + re.escape(w) + end_punctuation for w in forms) + r')'
-
         s = aliased(Sentences)
         rm_lat = lateral(
             func.regexp_matches(
                 func.lower(s.Sentence_text),
-                bindparam('pat'),
+                bindparam('pat'),  # передаём sql_pattern
                 literal_column("'g'")
             )
         ).alias('rm')
 
         matches_per_sent = (
             select(s.SentenceID.label('sid'), func.count().label('cnt'))
-            .select_from(join(s, rm_lat, true()))
+            .select_from(join(s, rm_lat, true()))  # CROSS JOIN LATERAL
             .where(s.TextID == text_id)
             .group_by(s.SentenceID)
         ).subquery()
 
         total = self.session.execute(
-            select(func.coalesce(func.sum(matches_per_sent.c.cnt), 0)).params(pat=pattern)
+            select(func.coalesce(func.sum(matches_per_sent.c.cnt), 0)).params(pat=sql_pattern)
         ).scalar_one()
 
         if total == 0:
@@ -208,7 +222,7 @@ class TextAnalysisAPI:
             return (f"Слово '{search_word}' (лемма '{lemma}') не найдено в тексте {text_id}.")
 
         sid_list = self.session.execute(
-            select(matches_per_sent.c.sid).params(pat=pattern)
+            select(matches_per_sent.c.sid).params(pat=sql_pattern)
         ).scalars().all()
 
         sents = (self.session.query(Sentences)
@@ -222,16 +236,16 @@ class TextAnalysisAPI:
                     nlp.disable_pipe(pipe)
             self._nlp_optimized = True
 
-        rx = re.compile(pattern)
+        from collections import defaultdict
         pos_data = defaultdict(lambda: defaultdict(set))
 
-        docs = nlp.pipe((s.Sentence_text for s in sents), batch_size=64)
-
+        docs = nlp.pipe((sent.Sentence_text for sent in sents), batch_size=64)
         for sent_obj, doc in zip(sents, docs):
             for t in doc:
-                if not t.text:
+                tt = t.text.strip()
+                if not tt:
                     continue
-                if rx.search(t.text.lower()) is None:
+                if not rx_word.search(tt.lower()):
                     continue
 
                 if t.head.pos_ == "VERB" and t.head != t:
@@ -296,7 +310,6 @@ class TextAnalysisAPI:
             self.session.bulk_save_objects(to_insert)
 
         token.Token_count = int(total)
-
         self.session.commit()
 
         return (f"Токен '{search_word}' (лемма '{lemma}') проанализирован: "
