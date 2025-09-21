@@ -3,7 +3,7 @@ import re
 pattern = "(вонями|(?:^|\s+|[!\"#$%&'()*+,-./:;<=>?@\[\]\\^_`{|}~]+)вонь(?:$|\s+|[!\"#$%&'()*+,-./:;<=>?@\[\]\\^_`{|}~]+)| вонях| воням| воней| вонью| вони)"
 p = re.compile(pattern)
 
-data = open("debug_regex/cleaned.txt", "rt", encoding="utf-8").read()
+data = open("cleaned.txt", "rt", encoding="utf-8").read()
 
 s = p.split(data)
 
