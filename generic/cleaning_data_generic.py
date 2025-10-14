@@ -81,7 +81,7 @@ def remove_and_check_duplicates(input_file, output_file):
 
 
 # --- Использование ---
-input_path = "pretrained_yandex_texts.txt"
-output_path = "cleaned.txt"
+input_path = "raw-qwen_text.txt"
+output_path = "cleaned-raw-qwen_text.txt"
 
 remove_and_check_duplicates(input_path, output_path)
