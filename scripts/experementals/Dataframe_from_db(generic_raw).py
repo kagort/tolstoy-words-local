@@ -201,9 +201,10 @@ def load_data(conn, queries):
 
 
 def main():
-    print("Запуск анализа токенов для TextID = 2…")
+    text_id = 6  # Указываем нужный TextID
+    print(f'Запуск анализа токенов для TextID = {text_id}')
 
-    text_id = 2  # Указываем нужный TextID
+
 
     with engine_generic.begin() as conn:
         prepare_regex_table(conn, text_id)
