@@ -1,16 +1,16 @@
 import dash
 from dash import dcc, html, Input, Output, State, dash_table
 import pandas as pd
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import create_engine
-from database.db3_from_csv import *
-from database.model_3 import *
+from database.model import *
 import re
 # Инициализация базы данных
 
-engine = create_engine('postgresql://postgres:ouganda77@localhost:5432/tolstoy_words_csv')
-db_session = scoped_session(sessionmaker(bind=engine))
-session = Session()
+from database.model import Words
+from sqlalchemy.orm import scoped_session, sessionmaker
+
+from commons.config.db_config import engine_natural
+
+session = scoped_session(sessionmaker(bind=engine_natural))
 
 # Инициализация Dash
 app = dash.Dash(__name__)

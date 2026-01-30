@@ -1,5 +1,12 @@
-from database.model_3 import *
+from api.api import TextAnalysisAPI
+from database.model import *
 from sqlalchemy import func
+from database.model import Words
+from sqlalchemy.orm import scoped_session, sessionmaker
+
+from commons.config.db_config import engine_natural
+
+session = scoped_session(sessionmaker(bind=engine_natural))
 
 # Определяем интересующие нас TokenID (например, существительные)
 target_token_ids = [4, 5]  # Пример: список ID токенов

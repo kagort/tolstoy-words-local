@@ -1,12 +1,10 @@
 import csv
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from database.model_3 import * # Импортируем модели
+from sqlalchemy.orm import scoped_session, sessionmaker
 
-# Подключение к PostgreSQL
-engine = create_engine('postgresql://postgres:ouganda77@localhost:5432/tolstoy_words_csv')
-Session = sessionmaker(bind=engine)
-session = Session()
+from commons.config.db_config import engine_natural
+from database.model import * # Импортируем модели
+
+session = scoped_session(sessionmaker(bind=engine_natural))
 
 # Функция для извлечения предложений и сохранения их в CSV
 def extract_sentences_with_tokens(output_file):

@@ -1,10 +1,10 @@
 from sqlalchemy import create_engine, func
-from sqlalchemy.orm import sessionmaker
-from database.model_3 import *
+from sqlalchemy.orm import scoped_session, sessionmaker
 
-engine = create_engine('your_database_url')
-Session = sessionmaker(bind=engine)
-session = Session()
+from commons.config.db_config import engine_natural
+from database.model import *
+
+session = scoped_session(sessionmaker(bind=engine_natural))
 
 # Метрики для каждого текста
 query = (

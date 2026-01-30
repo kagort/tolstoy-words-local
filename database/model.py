@@ -1,5 +1,7 @@
-from database.db3_from_csv import *
+from sqlalchemy.orm import declarative_base
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, UniqueConstraint
 
+Base = declarative_base()
 
 # Таблицы
 class DicTexts(Base):
@@ -44,6 +46,3 @@ class Cross(Base):
     SentenceID = Column(Integer, ForeignKey('sentences.SentenceID'))
     TextID = Column(Integer, ForeignKey('dictexts.TextID'))
     TokenID = Column(Integer, ForeignKey('tokenid.TokenID') )
-
-    # Создание таблиц
-Base.metadata.create_all(engine)
