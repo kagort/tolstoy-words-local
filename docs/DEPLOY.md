@@ -198,5 +198,6 @@ python -m app.worker                    # окно 2: обработчик за�
 | `exec /entrypoint.sh: no such file or directory` | Скрипт получил концы строк Windows (CRLF). Выполните `git rm --cached -r . ; git reset --hard` (после `.gitattributes` файлы перезапишутся с LF) и пересоберите |
 | `failed to connect to the docker API … dockerDesktopLinuxEngine` | Не запущен Docker Desktop: запустите его и дождитесь «Engine running»; проверка — `docker version` (должен быть раздел Server) |
 | `The "K" variable is not set` (или другая буква) | В `.env` есть символ `$` — замените такие пароли (см. шаг 1.3). Если база уже создавалась со «вырезанным» паролем: `docker compose down -v` (удалит пустую базу) и запустить заново |
+| `ports are not available: exposing port TCP 127.0.0.1:5432 … access permissions` | Порт 5432 занят (установлен PostgreSQL для Windows) или зарезервирован Windows/Hyper-V (`netsh interface ipv4 show excludedportrange protocol=tcp`). В `.env` добавьте `DB_PUBLISH_PORT=15432` и снова `docker compose up -d`. Порт нужен только для DBeaver/pgAdmin — приложение внутри Docker работает с базой напрямую |
 | Порт 5432 или 8000 занят | В `.env`: `DB_PUBLISH_PORT=5433` или `WEB_PORT=8080` |
 | Caddy не получает сертификат | Проверьте, что A-запись домена указывает на IP сервера и порты 80/443 открыты (`ufw status`) |
