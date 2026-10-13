@@ -25,6 +25,7 @@ services:
       args:
         NLP_BACKEND: ${NLP_BACKEND:-stanza}
     image: tolstoy-words:latest
+    pull_policy: build
     restart: unless-stopped
     env_file: .env
     environment:
@@ -40,7 +41,13 @@ services:
         condition: service_healthy
 
   worker:
+    # тот же образ, что и у web; build указан, чтобы Compose не пытался скачать его из Docker Hub
+    build:
+      context: .
+      args:
+        NLP_BACKEND: ${NLP_BACKEND:-stanza}
     image: tolstoy-words:latest
+    pull_policy: build
     restart: unless-stopped
     env_file: .env
     environment:
