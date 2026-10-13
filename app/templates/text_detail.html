@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}{{ doc.title }}{% endblock %}
+{% block content %}
+<p><a href="/texts">← Все тексты</a></p>
+<h1>{{ doc.title }} <span class="badge {{ doc.status }}">{{ STATUS_LABELS.get(doc.status, doc.status) }}</span></h1>
+{% if doc.error %}<div class="flash error"><strong>Ошибка разбора:</strong> {{ doc.error }}</div>{% endif %}
+
+<div class="grid cols-2">
+  <div class="panel">
+    <h2 style="margin-top:0">Сведения</h2>
+    <form method="post" action="/texts/{{ doc.id }}/edit">
+      <label>Название</label><input type="text" name="title" value="{{ doc.title }}" required>
+      <div class="row">
+        <div><label>Автор</label><input type="text" name="author" value="{{ doc.author or '' }}"></div>
+        <div><label>Год(ы)</label><input type="text" name="years" value="{{ doc.years }}"></div>
+      </div>
+      <div class="row">
+        <div><label>Жанр</label><input type="text" name="genre" value="{{ doc.genre or '' }}"></div>
+        <div><label>Тип</label><select name="source_type">{% for k, v in SOURCE_TYPES.items() %}<option value="{{ k }}" {{ 'selected' if doc.source_type == k }}>{{ v }}</option>{% endfor %}</select></div>
+      </div>
+      <label>Модель/промпт (для сгенерированных)</label><input type="text" name="generator" value="{{ doc.generator or '' }}">
+      <label>Корпуса</label>
+      <select name="corpus_ids" multiple size="4">{% set mine = doc.corpora|map(attribute='id')|list %}
+        {% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if c.id in mine }}>{{ c.name }}</option>{% endfor %}</select>
+      <p class="help">Ctrl+щелчок — выбрать несколько.</p>
+      <p><button type="submit">Сохранить</button></p>
+    </form>
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0">Статистика</h2>
+    <table>
+      <tr><td>Предложений</td><td class="num">{{ doc.n_sentences }}</td></tr>
+      <tr><td>Токенов (со знаками препинания)</td><td class="num">{{ doc.n_tokens }}</td></tr>
+      <tr><td>Словоупотреблений</td><td class="num">{{ doc.n_words }}</td></tr>
+      <tr><td>Исходный файл</td><td class="num">{{ doc.source_filename or '' }}</td></tr>
+      <tr><td>Конвейер разбора</td><td class="num small">{{ doc.pipeline_version or '—' }}</td></tr>
+      <tr><td>Загружен</td><td class="num">{{ doc.created_at.strftime('%d.%m.%Y %H:%M') if doc.created_at }}</td></tr>
+    </table>
+    <p class="row">
+      <a class="btn secondary" href="/export/text/{{ doc.id }}.conllu">Скачать разметку (CoNLL-U)</a>
+      <form class="inline shrink" method="post" action="/texts/{{ doc.id }}/reparse"><button class="secondary" type="submit">Разобрать заново</button></form>
+      <form class="inline shrink" method="post" action="/texts/{{ doc.id }}/delete" onsubmit="return confirm('Удалить текст и всю его разметку?')"><button class="danger" type="submit">Удалить</button></form>
+    </p>
+  </div>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Предложения</h2>
+  {% if sents %}
+  <table>
+    <tr><th class="num">№</th><th>Предложение</th><th>Тип</th><th class="num">Слов</th></tr>
+    {% for s in sents %}
+    <tr><td class="num muted">{{ s.idx }}</td><td><a href="/sentences/{{ s.id }}" style="color:inherit">{{ s.text }}</a></td>
+      <td class="small muted">{{ SENT_TYPE_LABELS.get(s.sent_type, s.sent_type) }}</td><td class="num">{{ s.n_words }}</td></tr>
+    {% endfor %}
+  </table>
+  <div class="pager">Страница {{ page }} из {{ pages }}:
+    {% if page > 1 %}<a class="btn small secondary" href="?page={{ page - 1 }}">← назад</a>{% endif %}
+    {% if page < pages %}<a class="btn small secondary" href="?page={{ page + 1 }}">вперёд →</a>{% endif %}
+  </div>
+  {% else %}<p class="muted">Текст ещё не разобран.</p>{% endif %}
+</div>
+{% endblock %}

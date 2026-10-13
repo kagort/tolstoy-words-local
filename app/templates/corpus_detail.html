@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ corpus.name }}{% endblock %}
+{% block content %}
+<p><a href="/corpora">← Все корпуса</a></p>
+<h1>Корпус «{{ corpus.name }}»</h1>
+<form method="post" action="/corpora/{{ corpus.id }}">
+  <div class="panel">
+    <div class="row">
+      <div><label>Название</label><input type="text" name="name" value="{{ corpus.name }}" required></div>
+      <div><label>Описание</label><input type="text" name="description" value="{{ corpus.description or '' }}"></div>
+    </div>
+  </div>
+  <div class="panel table-scroll">
+    <h2 style="margin-top:0">Состав корпуса</h2>
+    <p class="help">Отметьте тексты, которые входят в корпус, и нажмите «Сохранить».
+      <a href="#" onclick="document.querySelectorAll('.tc').forEach(c=>c.checked=true);return false">выбрать все</a> ·
+      <a href="#" onclick="document.querySelectorAll('.tc').forEach(c=>c.checked=false);return false">снять все</a></p>
+    <table>
+      <tr><th></th><th>Название</th><th>Автор</th><th>Год</th><th>Жанр</th><th>Тип</th><th class="num">Слов</th></tr>
+      {% for t in all_texts %}
+      <tr><td><input class="tc" type="checkbox" name="text_ids" value="{{ t.id }}" {{ 'checked' if t.id in member }}></td>
+        <td><a href="/texts/{{ t.id }}">{{ t.title }}</a></td><td>{{ t.author or '' }}</td><td>{{ t.years }}</td>
+        <td>{{ t.genre or '' }}</td><td class="small">{{ SOURCE_TYPES.get(t.source_type, t.source_type) }}</td><td class="num">{{ t.n_words }}</td></tr>
+      {% endfor %}
+    </table>
+    <p><button type="submit">Сохранить</button> <a class="btn secondary" href="/analysis?corpus_id={{ corpus.id }}">Анализ корпуса</a></p>
+  </div>
+</form>
+<form method="post" action="/corpora/{{ corpus.id }}/delete" onsubmit="return confirm('Удалить корпус? Тексты останутся в базе.')">
+  <button class="danger" type="submit">Удалить корпус</button>
+</form>
+{% endblock %}

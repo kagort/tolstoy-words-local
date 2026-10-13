@@ -1,0 +1,6 @@
+# Единые концы строк: скрипты для Linux/Docker всегда с LF, иначе контейнер не запустится на Windows-копии
+* text=auto
+*.sh text eol=lf
+Dockerfile text eol=lf
+deploy/Caddyfile text eol=lf
+*.py text eol=lf

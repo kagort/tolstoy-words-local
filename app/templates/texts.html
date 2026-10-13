@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Тексты{% endblock %}
+{% block content %}
+<h1>Тексты</h1>
+
+<details class="panel" {% if not texts %}open{% endif %}>
+  <summary><strong>Загрузить тексты</strong></summary>
+  <form method="post" action="/texts/upload" enctype="multipart/form-data">
+    <label>Файлы (.txt, .docx, .fb2; до {{ max_mb }} МБ каждый; можно выбрать несколько)</label>
+    <input type="file" name="files" multiple required accept=".txt,.docx,.fb2">
+    <p class="help">Сведения ниже применяются ко всем выбранным файлам. Название берётся из имени файла, если файлов несколько. Потом сведения можно поправить в карточке текста.</p>
+    <div class="row">
+      <div><label>Название (если файл один)</label><input type="text" name="title"></div>
+      <div><label>Автор</label><input type="text" name="author"></div>
+      <div><label>Год или годы (1863 или 1863–1869)</label><input type="text" name="years"></div>
+      <div><label>Жанр</label><input type="text" name="genre"></div>
+    </div>
+    <div class="row">
+      <div><label>Тип текста</label>
+        <select name="source_type">{% for k, v in SOURCE_TYPES.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
+      <div><label>Модель/промпт (для сгенерированных)</label><input type="text" name="generator"></div>
+      <div><label>Добавить в корпуса</label>
+        <select name="corpus_ids" multiple size="3">{% for c in corpora %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
+      <div><label>…или создать новый корпус</label><input type="text" name="new_corpus" placeholder="Название корпуса"></div>
+    </div>
+    <p><button type="submit">Загрузить и разобрать</button></p>
+  </form>
+</details>
+
+<form method="get" class="row" style="margin-bottom:10px">
+  <div style="max-width:320px"><label>Показать корпус</label>
+    <select name="corpus_id" onchange="this.form.submit()"><option value="">Все тексты</option>
+      {% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if corpus_id == c.id }}>{{ c.name }}</option>{% endfor %}</select></div>
+</form>
+
+<div class="panel table-scroll">
+{% if texts %}
+<table>
+  <tr><th>#</th><th>Название</th><th>Автор</th><th>Год</th><th>Жанр</th><th>Тип</th><th>Корпуса</th><th class="num">Предложений</th><th class="num">Слов</th><th>Статус</th></tr>
+  {% for t in texts %}
+  <tr>
+    <td class="muted">{{ t.id }}</td>
+    <td><a href="/texts/{{ t.id }}">{{ t.title }}</a></td>
+    <td>{{ t.author or '' }}</td>
+    <td>{{ t.years }}</td>
+    <td>{{ t.genre or '' }}</td>
+    <td class="small">{{ SOURCE_TYPES.get(t.source_type, t.source_type) }}</td>
+    <td class="small">{% for c in t.corpora %}<span class="badge">{{ c.name }}</span> {% endfor %}</td>
+    <td class="num">{{ t.n_sentences }}</td>
+    <td class="num">{{ t.n_words }}</td>
+    <td><span class="badge {{ t.status }}">{{ STATUS_LABELS.get(t.status, t.status) }}</span></td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}<p class="muted">Текстов пока нет.</p>{% endif %}
+</div>
+{% endblock %}

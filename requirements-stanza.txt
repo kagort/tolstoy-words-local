@@ -1,0 +1,4 @@
+# Точный парсер Stanza (модель SynTagRus). Требует PyTorch:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements-stanza.txt
+stanza==1.15.0

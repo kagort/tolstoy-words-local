@@ -1,0 +1,85 @@
+# Локально:  docker compose up -d --build        → http://localhost:8000
+# На VPS:    docker compose --profile prod up -d --build   (+ Caddy с HTTPS, см. docs/DEPLOY.md)
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Задайте DB_PASSWORD в файле .env}
+      POSTGRES_DB: ${DB_NAME:-tolstoy}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # порт открыт только на этом компьютере (для DBeaver/pgAdmin); из интернета недоступен
+    ports:
+      - "127.0.0.1:${DB_PUBLISH_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-tolstoy}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build:
+      context: .
+      args:
+        NLP_BACKEND: ${NLP_BACKEND:-stanza}
+    image: tolstoy-words:latest
+    pull_policy: build
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+    command: web
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8000}:8000"
+    volumes:
+      - ./data:/app/data:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    # тот же образ, что и у web; build указан, чтобы Compose не пытался скачать его из Docker Hub
+    build:
+      context: .
+      args:
+        NLP_BACKEND: ${NLP_BACKEND:-stanza}
+    image: tolstoy-words:latest
+    pull_policy: build
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+    command: worker
+    volumes:
+      - ./data:/app/data:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_started
+
+  caddy:
+    image: caddy:2
+    profiles: ["prod"]
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
