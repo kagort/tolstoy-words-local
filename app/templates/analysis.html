@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+{% block title %}Анализ{% endblock %}
+{% block head %}<script src="/static-vendor/plotly.min.js"></script>{% endblock %}
+{% block content %}
+<h1>Анализ</h1>
+{% if not dictionaries %}
+<div class="panel">Для анализа нужен словарь. <a href="/dictionaries">Создайте словарь</a> и загрузите <a href="/texts">тексты</a>.</div>
+{% else %}
+<form method="get" class="panel row">
+  <input type="hidden" name="tab" value="{{ tab }}">
+  <div><label>Словарь</label><select name="dictionary_id">{% for d in dictionaries %}<option value="{{ d.id }}" {{ 'selected' if d.id == dict_id }}>{{ d.name }}</option>{% endfor %}</select></div>
+  <div><label>Корпус</label><select name="corpus_id"><option value="">Все тексты</option>{% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if c.id == corpus_id }}>{{ c.name }}</option>{% endfor %}</select></div>
+  <div class="shrink"><button type="submit">Показать</button></div>
+  <div class="shrink muted small">текстов в выборке: {{ n_texts }}</div>
+</form>
+
+{% set base = {'dictionary_id': dict_id, 'corpus_id': corpus_id or ''} %}
+<div class="tabs">
+  {% for key, label in [('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
+  <a class="{{ 'active' if tab == key }}" href="/analysis?tab={{ key }}&dictionary_id={{ dict_id }}&corpus_id={{ corpus_id or '' }}{% if entry_id and key in ('profile','conc','structure','compare') %}&entry_id={{ entry_id }}{% endif %}">{{ label }}</a>
+  {% endfor %}
+</div>
+
+{# ============================================================== ЧАСТОТЫ #}
+{% if tab == 'freq' and freq %}
+<div class="row" style="margin-bottom:10px">
+  <div class="muted">Корпус «{{ corpus_name }}»: {{ freq.n_texts }} текстов, {{ "{:,}".format(freq.corpus_words).replace(",", " ") }} словоупотреблений.</div>
+  <div class="shrink">Скачать: <a href="/export/frequency.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/frequency.csv{{ qs(request) }}">CSV</a> · <a href="/export/frequency.json{{ qs(request) }}">JSON</a></div>
+</div>
+<div class="panel"><div id="chart-freq" class="chart"></div></div>
+<div class="panel table-scroll">
+  <table>
+    <tr><th>Слово</th><th>Лемма</th><th>Категория</th><th class="num">Вхождений</th><th class="num">ipm</th><th class="num">Предложений</th><th class="num">Текстов</th>
+      <th class="num" title="Мера неравномерности Грайса: 0 — равномерно по текстам, ближе к 1 — сосредоточено в немногих">DP</th><th></th></tr>
+    {% for r in freq.rows %}
+    <tr><td><strong>{{ r.word }}</strong></td><td>{{ r.lemma }} <span class="muted small">{{ r.upos }}</span></td><td>{{ r.category }}</td>
+      <td class="num">{{ r.count }}</td><td class="num">{{ r.ipm }}</td><td class="num">{{ r.sentences }}</td><td class="num">{{ r.texts }}</td>
+      <td class="num">{{ r.dp if r.dp is not none else '' }}</td>
+      <td class="num small">{% if r.count %}<a href="/analysis?tab=profile&dictionary_id={{ dict_id }}&corpus_id={{ corpus_id or '' }}&entry_id={{ r.entry_id }}">профиль</a> ·
+        <a href="/analysis?tab=conc&dictionary_id={{ dict_id }}&corpus_id={{ corpus_id or '' }}&entry_id={{ r.entry_id }}">примеры</a>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% if heat.words and heat.texts|length > 1 %}
+<div class="panel"><h3 style="margin-top:0">Частота по текстам (ipm)</h3><div id="chart-heat" class="chart" style="min-height:{{ 160 + 26 * heat.words|length }}px"></div></div>
+{% endif %}
+{% endif %}
+
+{# ============================================================== КОНКОРДАНС #}
+{% if tab == 'conc' and conc %}
+<form method="get" class="panel row">
+  <input type="hidden" name="tab" value="conc"><input type="hidden" name="dictionary_id" value="{{ dict_id }}"><input type="hidden" name="corpus_id" value="{{ corpus_id or '' }}">
+  <div><label>Слово</label><select name="entry_id"><option value="">все слова словаря</option>{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
+  <div><label>Роль слова в предложении</label><select name="role"><option value="">любая</option>{% for k, v in ROLE_LABELS.items() %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('role') == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div><label>Тип связи</label><select name="rel_type"><option value="">любой</option>{% for k, v in REL_LABELS.items() %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('rel_type') == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div><label>Связанное слово (лемма)</label><input type="text" name="related" value="{{ request.query_params.get('related', '') }}" placeholder="например: сладкий"></div>
+  <div class="shrink"><label class="check"><input type="checkbox" name="invalid" value="1" {{ 'checked' if request.query_params.get('invalid') }}> показать ложные</label></div>
+  <div class="shrink"><button type="submit">Найти</button></div>
+</form>
+<div class="row" style="margin-bottom:6px">
+  <div class="muted">Найдено: {{ conc.total }}</div>
+  <div class="shrink">Скачать: <a href="/export/concordance.xlsx{{ qs(request, page=None) }}">XLSX</a> · <a href="/export/concordance.csv{{ qs(request, page=None) }}">CSV</a> · <a href="/export/hits.conllu{{ qs(request, page=None) }}">CoNLL-U</a></div>
+</div>
+<div class="panel table-scroll">
+  <table class="kwic">
+    {% for i in conc['items'] %}
+    <tr class="{{ 'invalid' if i.is_valid == false }}">
+      <td class="left">{{ i.left }}</td>
+      <td class="kw"><a href="/sentences/{{ i.sentence_id }}">{{ i.kw }}</a></td>
+      <td class="right">{{ i.right }}</td>
+      <td class="small"><span class="role-{{ i.role }}">{{ i.role_label }}</span><div class="muted">{{ i.role_subtype }}</div></td>
+      <td class="small muted">{{ i.source }}</td>
+      <td class="num">
+        <button class="small {{ '' if i.is_valid == true else 'secondary' }}" data-valid title="верное вхождение" onclick="setValid({{ i.hit_id }}, true, this)">✓</button>
+        <button class="small {{ '' if i.is_valid == false else 'secondary' }}" data-valid title="ложное вхождение (омоним, ошибка разбора)" onclick="setValid({{ i.hit_id }}, false, this)">✗</button>
+      </td>
+    </tr>
+    {% else %}<tr><td class="muted">Ничего не найдено.</td></tr>{% endfor %}
+  </table>
+</div>
+<div class="pager">Страница {{ conc.page }} из {{ conc.pages }}
+  {% if conc.page > 1 %}<a class="btn small secondary" href="/analysis{{ qs(request, page=conc.page - 1) }}">← назад</a>{% endif %}
+  {% if conc.page < conc.pages %}<a class="btn small secondary" href="/analysis{{ qs(request, page=conc.page + 1) }}">вперёд →</a>{% endif %}
+</div>
+{% endif %}
+
+{# ============================================================== ПРОФИЛЬ #}
+{% if tab == 'profile' %}
+<form method="get" class="panel row">
+  <input type="hidden" name="tab" value="profile"><input type="hidden" name="dictionary_id" value="{{ dict_id }}"><input type="hidden" name="corpus_id" value="{{ corpus_id or '' }}">
+  <div><label>Слово</label><select name="entry_id">{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
+  <div class="shrink"><label class="check"><input type="checkbox" name="uncertain" value="1" {{ 'checked' if request.query_params.get('uncertain') }}> учитывать спорные связи через однородные ряды</label></div>
+  <div class="shrink"><label class="check"><input type="checkbox" name="negated" value="1" {{ 'checked' if request.query_params.get('negated') }}> учитывать члены под отрицанием («не запах, а…»)</label></div>
+  <div class="shrink"><button type="submit">Показать</button></div>
+</form>
+{% if profile and profile.total %}
+<div class="row" style="margin-bottom:10px">
+  <div><strong style="font-size:18px">«{{ profile.entry.surface }}»</strong> <span class="muted">— {{ profile.total }} вхождений в корпусе «{{ corpus_name }}»</span></div>
+  <div class="shrink">Скачать: <a href="/export/profile.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/profile.csv{{ qs(request) }}">CSV</a> · <a href="/export/profile.json{{ qs(request) }}">JSON</a></div>
+</div>
+<div class="grid cols-2">
+  <div class="panel"><h3 style="margin-top:0">Синтаксические роли слова</h3><div id="chart-roles" class="chart" style="min-height:280px"></div></div>
+  <div class="panel"><h3 style="margin-top:0">Словоформы и грамматика</h3>
+    <table>{% for f, c in forms.forms[:12] %}<tr><td>{{ f }}</td><td class="num">{{ c }}</td></tr>{% endfor %}</table>
+    {% for k, vals in forms.feats.items() %}<div class="small" style="margin-top:6px"><span class="muted">{{ k }}:</span> {% for v, c in vals %}{{ v }} {{ c }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endfor %}
+  </div>
+</div>
+<p class="help">logDice — сила связи (до 14): чем выше, тем характернее сочетание именно для этого слова. Связи через однородные ряды учтены как «общий член ряда» (§5.6 ТЗ). Щелчок по слову открывает примеры.</p>
+<div class="grid cols-2">
+  {% for rt, block in profile.relations.items() %}
+  <div class="panel">
+    <h3 style="margin-top:0">{{ block.label|capitalize }} <span class="muted small">— {{ block.total }} связей, {{ block.distinct }} разных слов</span></h3>
+    <table>
+      <tr><th>Слово</th><th class="num">Частота</th><th class="num">Текстов</th>{% if rt != 'case' %}<th class="num">logDice</th>{% endif %}</tr>
+      {% for x in block['items'] %}
+      <tr><td><a href="/analysis?tab=conc&dictionary_id={{ dict_id }}&corpus_id={{ corpus_id or '' }}&entry_id={{ entry_id }}&rel_type={{ rt }}&related={{ x.lemma|urlencode }}">{{ x.lemma }}</a></td>
+        <td class="num">{{ x.count }}</td><td class="num">{{ x.texts }}</td>{% if rt != 'case' %}<td class="num">{{ x.logdice }}</td>{% endif %}</tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endfor %}
+</div>
+{% elif entry_id %}<div class="panel muted">У этого слова нет вхождений в выбранном корпусе.</div>{% endif %}
+{% endif %}
+
+{# ============================================================== СРАВНЕНИЕ #}
+{% if tab == 'compare' %}
+<form method="get" class="panel row">
+  <input type="hidden" name="tab" value="compare"><input type="hidden" name="dictionary_id" value="{{ dict_id }}"><input type="hidden" name="corpus_id" value="{{ corpus_id or '' }}">
+  <div><label>Корпус A</label><input type="text" value="{{ corpus_name }}" disabled></div>
+  <div><label>Корпус B</label><select name="corpus_b"><option value="">Все тексты</option>{% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if c.id == corpus_b }}>{{ c.name }}</option>{% endfor %}</select></div>
+  <div><label>Сравнить связи слова</label><select name="entry_id"><option value="">—</option>{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
+  <div><label>Тип связи</label><select name="rel_type">{% for k, v in REL_LABELS.items() %}<option value="{{ k }}" {{ 'selected' if (request.query_params.get('rel_type') or 'attribute') == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div class="shrink"><button type="submit">Сравнить</button></div>
+</form>
+{% if cmp %}
+<div class="row" style="margin-bottom:6px">
+  <div class="muted">A = «{{ corpus_name }}» ({{ cmp.words_a }} слов), B = «{{ corpus_b_name }}» ({{ cmp.words_b }} слов). G² ≥ 3,84 — различие значимо (p &lt; 0,05). Log-ratio &gt; 0 — чаще в A.</div>
+  <div class="shrink">Скачать: <a href="/export/compare.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/compare.csv{{ qs(request) }}">CSV</a></div>
+</div>
+<div class="panel"><div id="chart-cmp" class="chart"></div></div>
+<div class="panel table-scroll">
+  <table>
+    <tr><th>Слово</th><th class="num">A</th><th class="num">B</th><th class="num">ipm A</th><th class="num">ipm B</th><th class="num">G²</th><th class="num">Log-ratio</th><th></th></tr>
+    {% for r in cmp.rows %}
+    <tr><td>{{ r.word }}</td><td class="num">{{ r.count_a }}</td><td class="num">{{ r.count_b }}</td><td class="num">{{ r.ipm_a }}</td><td class="num">{{ r.ipm_b }}</td>
+      <td class="num">{{ r.ll }}</td><td class="num">{{ r.log_ratio }}</td><td>{% if r.significant %}<span class="badge warn">значимо</span>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+{% if cmp_profile %}
+<div class="panel table-scroll">
+  <h3 style="margin-top:0">{{ cmp_profile.rel_label|capitalize }}: A ({{ cmp_profile.hits_a }} вхождений) против B ({{ cmp_profile.hits_b }})</h3>
+  <table>
+    <tr><th>Лемма</th><th class="num">A</th><th class="num">B</th><th class="num">на 100 вхожд. A</th><th class="num">на 100 вхожд. B</th><th class="num">G²</th><th class="num">Log-ratio</th><th></th></tr>
+    {% for r in cmp_profile.rows %}
+    <tr><td>{{ r.lemma }}</td><td class="num">{{ r.count_a }}</td><td class="num">{{ r.count_b }}</td><td class="num">{{ r.per100_a }}</td><td class="num">{{ r.per100_b }}</td>
+      <td class="num">{{ r.ll }}</td><td class="num">{{ r.log_ratio }}</td><td>{% if r.significant %}<span class="badge warn">значимо</span>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+{% endif %}
+
+{# ============================================================== СТРУКТУРА #}
+{% if tab == 'structure' and structure %}
+<form method="get" class="panel row">
+  <input type="hidden" name="tab" value="structure"><input type="hidden" name="dictionary_id" value="{{ dict_id }}"><input type="hidden" name="corpus_id" value="{{ corpus_id or '' }}">
+  <div><label>Предложения со словом</label><select name="entry_id"><option value="">любым словом словаря</option>{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
+  <div class="shrink"><button type="submit">Показать</button></div>
+  <div class="shrink">Скачать: <a href="/export/structure.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/structure.csv{{ qs(request) }}">CSV</a></div>
+</form>
+{% set h, a = structure.hits, structure.all %}
+<div class="grid cols-2">
+  <div class="panel">
+    <table>
+      <tr><th>Показатель</th><th class="num">Предложения со словами</th><th class="num">Все предложения</th></tr>
+      {% for k, label in [('n','Предложений'),('avg_len','Средняя длина, слов'),('median_len','Медиана длины'),('stdev_len','Ст. отклонение длины'),('avg_depth','Глубина дерева (средняя)'),('avg_clauses','Клауз на предложение'),('direct_speech','% прямой речи'),('homogeneous','% с однородными членами'),('participial','% с причастными оборотами'),('gerund','% с деепричастиями')] %}
+      <tr><td>{{ label }}</td><td class="num">{{ h.get(k, '—') }}</td><td class="num">{{ a.get(k, '—') }}</td></tr>
+      {% endfor %}
+      {% for t in a.get('types', {}) %}<tr><td>% {{ t }}</td><td class="num">{{ h.get('types', {}).get(t, 0) }}</td><td class="num">{{ a['types'][t] }}</td></tr>{% endfor %}
+    </table>
+  </div>
+  <div class="panel"><h3 style="margin-top:0">Распределение длины предложений</h3><div id="chart-len" class="chart"></div></div>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+{% if tab == 'freq' and freq %}
+(function () {
+  const rows = {{ freq.rows[:40]|tojson }}.filter(r => r.count > 0);
+  drawChart('chart-freq', [{ type: 'bar', x: rows.map(r => r.word), y: rows.map(r => r.ipm), text: rows.map(r => r.count + ' вхожд.'),
+    hovertemplate: '%{x}: %{y} ipm (%{text})<extra></extra>', marker: { color: cssVar('--accent') } }],
+    { title: { text: 'Частота на миллион слов (ipm)', font: { size: 14 } }, yaxis: { title: 'ipm' } });
+  {% if heat.words and heat.texts|length > 1 %}
+  const heat = {{ heat|tojson }};
+  drawChart('chart-heat', [{ type: 'heatmap', z: heat.z, x: heat.texts, y: heat.words, colorscale: 'Blues', hovertemplate: '%{y} — %{x}: %{z} ipm<extra></extra>' }],
+    { margin: { l: 110, r: 20, t: 10, b: 160 } });
+  {% endif %}
+})();
+{% endif %}
+{% if tab == 'profile' and profile and profile.total %}
+(function () {
+  const roles = {{ profile.roles|tojson }};
+  drawChart('chart-roles', [{ type: 'bar', orientation: 'h', y: roles.map(r => r.label), x: roles.map(r => r.count),
+    marker: { color: roles.map(r => cssVar('--r-' + r.role) || cssVar('--accent')) }, hovertemplate: '%{y}: %{x}<extra></extra>' }],
+    { margin: { l: 190, r: 20, t: 10, b: 40 }, yaxis: { autorange: 'reversed' } });
+})();
+{% endif %}
+{% if tab == 'compare' and cmp %}
+(function () {
+  const rows = {{ cmp.rows|tojson }}.filter(r => r.count_a + r.count_b > 0);
+  drawChart('chart-cmp', [{ type: 'scatter', mode: 'markers+text', x: rows.map(r => r.log_ratio), y: rows.map(r => r.ll),
+    text: rows.map(r => r.word), textposition: 'top center', marker: { size: 9, color: rows.map(r => r.significant ? cssVar('--err') : cssVar('--muted')) },
+    hovertemplate: '%{text}<br>log-ratio %{x}<br>G² %{y}<extra></extra>' }],
+    { xaxis: { title: '← чаще в B   log-ratio   чаще в A →', zeroline: true }, yaxis: { title: 'G² (значимость)' },
+      shapes: [{ type: 'line', x0: 0, x1: 1, xref: 'paper', y0: 3.84, y1: 3.84, line: { dash: 'dot', color: cssVar('--muted') } }] });
+})();
+{% endif %}
+{% if tab == 'structure' and structure and structure.all.n %}
+(function () {
+  const h = {{ structure.hits.get('hist', {})|tojson }}, a = {{ structure.all.get('hist', {})|tojson }};
+  const keys = [...new Set([...Object.keys(h), ...Object.keys(a)].map(Number))].sort((x, y) => x - y);
+  const lab = keys.map(k => k >= 100 ? '100+' : `${k}–${k + 4}`);
+  drawChart('chart-len', [
+    { type: 'bar', name: 'со словами словаря', x: lab, y: keys.map(k => h[k] || 0), marker: { color: cssVar('--accent') } },
+    { type: 'bar', name: 'все предложения', x: lab, y: keys.map(k => a[k] || 0), marker: { color: cssVar('--muted') } }],
+    { barmode: 'group', xaxis: { title: 'длина предложения, слов' }, yaxis: { title: '% предложений' } });
+})();
+{% endif %}
+</script>
+{% endblock %}

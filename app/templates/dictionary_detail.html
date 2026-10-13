@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}{{ d.name }}{% endblock %}
+{% block content %}
+<p><a href="/dictionaries">← Все словари</a></p>
+<h1>Словарь «{{ d.name }}»</h1>
+{% if pending %}<div class="flash info">Идёт пересчёт вхождений (задач в очереди: {{ pending }}). Числа обновятся после завершения — см. <a href="/jobs">Задачи</a>.</div>{% endif %}
+
+<div class="panel table-scroll">
+  <h2 style="margin-top:0">Слова и их разбор</h2>
+  <p class="help">Система определяет лемму и часть речи по словарю pymorphy3. <strong>Подсвеченные</strong> слова неоднозначны — проверьте вариант
+    (например, «духи» — это <em>духи</em> (парфюм) или <em>дух</em>?). В скобках — сколько токенов с такой леммой уже есть в базе.
+    Режим «по формам» ищет перечисленные словоформы, а не лемму: полезно, если парсер лемматизирует слово иначе.</p>
+  <table>
+    <tr><th>Слово</th><th>Разбор (лемма · часть речи)</th><th>Режим</th><th>Категория</th><th class="num">Вхождений</th><th></th></tr>
+    {% for e in d.entries %}
+    <tr id="e{{ e.id }}" class="{{ 'ambiguous' if e.ambiguous and not e.verified }}">
+      <td><form id="f{{ e.id }}" method="post" action="/dictionaries/{{ d.id }}/entries/{{ e.id }}"></form><strong>{{ e.surface }}</strong>{% if e.verified %} <span class="badge ready" title="проверено">✓</span>{% elif e.ambiguous %} <span class="badge warn">проверить</span>{% endif %}</td>
+      <td>
+        <select name="option" form="f{{ e.id }}">
+          {% set cur = e.lemma ~ '|' ~ (e.upos or '') %}
+          {% set ns = namespace(found=false) %}
+          {% for o in e.options %}{% set key = o.lemma ~ '|' ~ o.upos %}{% if key == cur %}{% set ns.found = true %}{% endif %}
+          <option value="{{ key }}" {{ 'selected' if key == cur }}>{{ o.lemma }} · {{ POS_LABELS.get(o.upos, o.upos) }} ({{ (o.score * 100)|round|int }}%{% if opt_counts.get(e.id) %}; в базе {{ opt_counts[e.id].get(key, 0) }}{% endif %})</option>
+          {% endfor %}
+          {% if not ns.found %}<option value="{{ cur }}" selected>{{ e.lemma }} · {{ POS_LABELS.get(e.upos, e.upos or 'любая') }}</option>{% endif %}
+        </select>
+        <details class="small"><summary>своя лемма</summary><input form="f{{ e.id }}" type="text" name="lemma" placeholder="например: духи"></details>
+      </td>
+      <td><select name="match_mode" form="f{{ e.id }}"><option value="lemma" {{ 'selected' if e.match_mode == 'lemma' }}>по лемме</option><option value="forms" {{ 'selected' if e.match_mode == 'forms' }}>по формам</option></select></td>
+      <td><input form="f{{ e.id }}" type="text" name="category" value="{{ e.category or '' }}"></td>
+      <td class="num"><a href="/analysis?tab=conc&dictionary_id={{ d.id }}&entry_id={{ e.id }}">{{ hits.get(e.id, 0) }}</a></td>
+      <td class="num"><button form="f{{ e.id }}" class="small" type="submit">Сохранить</button></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="grid cols-2">
+  <div class="panel">
+    <h2 style="margin-top:0">Добавить слова</h2>
+    <form method="post" action="/dictionaries/{{ d.id }}/add" enctype="multipart/form-data">
+      <textarea name="words" placeholder="слово1, слово2"></textarea>
+      <label>или файл</label><input type="file" name="file" accept=".csv,.txt,.tsv,.xlsx">
+      <p><button type="submit">Добавить</button></p>
+    </form>
+    <h3>Удалить слово</h3>
+    <form method="post" id="delform" onsubmit="this.action='/dictionaries/{{ d.id }}/entries/'+this.eid.value+'/delete'; return confirm('Удалить слово и его вхождения?')">
+      <div class="row"><div><select name="eid">{% for e in d.entries %}<option value="{{ e.id }}">{{ e.surface }}</option>{% endfor %}</select></div>
+      <div class="shrink"><button class="danger" type="submit">Удалить</button></div></div>
+    </form>
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0">Настройки</h2>
+    <form method="post" action="/dictionaries/{{ d.id }}/settings">
+      <label>Название</label><input type="text" name="name" value="{{ d.name }}" required>
+      <label>Описание</label><input type="text" name="description" value="{{ d.description or '' }}">
+      <label class="check"><input type="checkbox" name="include_participles" {{ 'checked' if d.settings.get('include_participles') }}> причастия считать формами глагола</label>
+      <label class="check"><input type="checkbox" name="include_gerunds" {{ 'checked' if d.settings.get('include_gerunds') }}> деепричастия считать формами глагола</label>
+      <label class="check"><input type="checkbox" name="merge_propn" {{ 'checked' if d.settings.get('merge_propn', True) }}> существительные искать и среди имён собственных</label>
+      <p><button type="submit">Сохранить и пересчитать</button></p>
+    </form>
+    <p class="row">
+      <form class="inline shrink" method="post" action="/dictionaries/{{ d.id }}/rematch"><button class="secondary" type="submit">Пересчитать вхождения</button></form>
+      <a class="btn secondary shrink" href="/export/dictionary/{{ d.id }}.csv">Скачать словарь (CSV)</a>
+      <form class="inline shrink" method="post" action="/dictionaries/{{ d.id }}/delete" onsubmit="return confirm('Удалить словарь целиком?')"><button class="danger" type="submit">Удалить словарь</button></form>
+    </p>
+  </div>
+</div>
+{% endblock %}

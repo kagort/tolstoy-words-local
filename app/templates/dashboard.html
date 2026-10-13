@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Главная{% endblock %}
+{% block content %}
+<h1>Обзор</h1>
+<div class="grid cols-4">
+  <div class="stat"><div class="v">{{ stats.ready }} / {{ stats.texts }}</div><div class="l">текстов готово / всего</div></div>
+  <div class="stat"><div class="v">{{ "{:,}".format(stats.words).replace(",", " ") }}</div><div class="l">словоупотреблений</div></div>
+  <div class="stat"><div class="v">{{ "{:,}".format(stats.sentences).replace(",", " ") }}</div><div class="l">предложений</div></div>
+  <div class="stat"><div class="v">{{ stats.corpora }}</div><div class="l">корпусов</div></div>
+  <div class="stat"><div class="v">{{ stats.dictionaries }}</div><div class="l">словарей</div></div>
+  <div class="stat"><div class="v">{{ "{:,}".format(stats.hits).replace(",", " ") }}</div><div class="l">найденных вхождений</div></div>
+</div>
+
+{% if not stats.texts %}
+<div class="panel" style="margin-top:16px">
+  <h2 style="margin-top:0">С чего начать</h2>
+  <ol>
+    <li><a href="/texts">Загрузите тексты</a> (.txt, .docx, .fb2) и укажите автора, год, жанр.</li>
+    <li><a href="/corpora">Объедините их в корпуса</a> — например, «Литература» и «Тексты нейросетей».</li>
+    <li><a href="/dictionaries">Загрузите словарь</a> — список слов, которые вы исследуете.</li>
+    <li>Откройте <a href="/analysis">Анализ</a>: частоты, конкорданс, синтаксический профиль слова, сравнение корпусов.</li>
+  </ol>
+</div>
+{% endif %}
+
+<div class="grid cols-2" style="margin-top:16px">
+  <div class="panel">
+    <h2 style="margin-top:0">Быстрый анализ</h2>
+    {% if dictionaries %}
+    <form method="get" action="/analysis">
+      <div class="row">
+        <div><label>Словарь</label><select name="dictionary_id">{% for d in dictionaries %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></div>
+        <div><label>Корпус</label><select name="corpus_id"><option value="">Все тексты</option>{% for c in corpora %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
+        <div class="shrink"><button type="submit">Открыть</button></div>
+      </div>
+    </form>
+    {% else %}<p class="muted">Словарей пока нет. <a href="/dictionaries">Создать словарь</a>.</p>{% endif %}
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0">Последние задачи</h2>
+    {% if jobs %}
+    <table>{% for j in jobs %}
+      <tr><td>{{ j.title }}</td><td><span class="badge {{ j.status }}">{{ STATUS_LABELS.get(j.status, j.status) }}</span></td>
+      <td class="num">{{ (j.progress * 100)|round|int }}%</td></tr>{% endfor %}
+    </table>
+    <p><a href="/jobs">Все задачи →</a></p>
+    {% else %}<p class="muted">Задач нет.</p>{% endif %}
+  </div>
+</div>
+{% endblock %}

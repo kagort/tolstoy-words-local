@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Словари{% endblock %}
+{% block content %}
+<h1>Словари</h1>
+<div class="grid cols-2">
+  <div class="panel">
+    {% if dictionaries %}
+    <table>
+      <tr><th>Словарь</th><th class="num">Слов</th><th class="num">Вхождений</th><th>Пересчитан</th><th></th></tr>
+      {% for d in dictionaries %}
+      <tr><td><a href="/dictionaries/{{ d.id }}">{{ d.name }}</a><div class="small muted">{{ d.description or '' }}</div></td>
+        <td class="num">{{ d.entries|length }}</td><td class="num">{{ counts.get(d.id, 0) }}</td>
+        <td class="small">{{ d.matched_at.strftime('%d.%m.%Y %H:%M') if d.matched_at else '—' }}</td>
+        <td class="num"><a href="/analysis?dictionary_id={{ d.id }}">анализ →</a></td></tr>
+      {% endfor %}
+    </table>
+    {% else %}<p class="muted">Словарей пока нет.</p>{% endif %}
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0">Новый словарь</h2>
+    <form method="post" action="/dictionaries" enctype="multipart/form-data">
+      <label>Название</label><input type="text" name="name" required>
+      <label>Описание</label><input type="text" name="description">
+      <label>Файл (CSV, TXT или XLSX)</label><input type="file" name="file" accept=".csv,.txt,.tsv,.xlsx">
+      <p class="help">CSV: колонки <code>слово;категория;часть речи;комментарий</code> (обязательна только первая).
+        Часть речи — в обозначениях UD: NOUN, VERB, ADJ, ADV… TXT: по слову в строке или через запятую.</p>
+      <label>…или впишите слова</label>
+      <textarea name="words" placeholder="запах, аромат, вонь, пахнуть"></textarea>
+      <label class="check"><input type="checkbox" name="include_participles"> учитывать причастия как формы глагола</label>
+      <label class="check"><input type="checkbox" name="include_gerunds"> учитывать деепричастия как формы глагола</label>
+      <p><button type="submit">Создать словарь</button></p>
+    </form>
+  </div>
+</div>
+{% endblock %}

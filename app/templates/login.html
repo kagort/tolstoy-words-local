@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Вход{% endblock %}
+{% block content %}
+<div class="panel" style="max-width:420px;margin:60px auto">
+  <h1>Вход</h1>
+  {% if no_password %}
+  <div class="flash error">Пароль администратора не задан. Укажите <code>ADMIN_PASSWORD</code> в файле <code>.env</code> и перезапустите приложение.</div>
+  {% endif %}
+  <form method="post" action="/login">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label for="u">Логин</label>
+    <input id="u" type="text" name="username" autocomplete="username" required autofocus>
+    <label for="p">Пароль</label>
+    <input id="p" type="password" name="password" autocomplete="current-password" required>
+    <p><button type="submit">Войти</button></p>
+  </form>
+</div>
+{% endblock %}

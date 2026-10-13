@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Корпуса{% endblock %}
+{% block content %}
+<h1>Корпуса</h1>
+<p class="help">Корпус — именованный набор текстов. Один текст может входить в несколько корпусов. Анализ и сравнение выполняются по корпусам.</p>
+<div class="grid cols-2">
+  <div class="panel">
+    {% if corpora %}
+    <table>
+      <tr><th>Название</th><th class="num">Текстов</th><th class="num">Слов</th><th></th></tr>
+      {% for c in corpora %}
+      <tr><td><a href="/corpora/{{ c.id }}">{{ c.name }}</a><div class="small muted">{{ c.description or '' }}</div></td>
+        <td class="num">{{ sizes[c.id][0] }}</td><td class="num">{{ sizes[c.id][1] }}</td>
+        <td class="num"><a href="/analysis?corpus_id={{ c.id }}">анализ →</a></td></tr>
+      {% endfor %}
+    </table>
+    {% else %}<p class="muted">Корпусов пока нет.</p>{% endif %}
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0">Новый корпус</h2>
+    <form method="post" action="/corpora">
+      <label>Название</label><input type="text" name="name" required>
+      <label>Описание</label><textarea name="description"></textarea>
+      <p><button type="submit">Создать</button></p>
+    </form>
+  </div>
+</div>
+{% endblock %}

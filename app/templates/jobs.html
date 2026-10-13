@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Задачи{% endblock %}
+{% block content %}
+<h1>Задачи</h1>
+<p class="help">Разбор текстов и пересчёт словарей выполняются в фоне. Страница обновляется сама, пока есть активные задачи.</p>
+<div class="panel table-scroll" {% if active %}id="jobs-live"{% endif %}>
+  {% if jobs %}
+  <table>
+    <tr><th>#</th><th>Задача</th><th>Статус</th><th>Прогресс</th><th>Сообщение</th><th>Создана</th><th>Завершена</th><th></th></tr>
+    {% for j in jobs %}
+    <tr data-job="{{ j.id }}">
+      <td class="muted">{{ j.id }}</td><td>{{ j.title }}</td>
+      <td><span class="badge {{ j.status }}">{{ STATUS_LABELS.get(j.status, j.status) }}</span></td>
+      <td><div class="progress"><div style="width:{{ (j.progress * 100)|round|int }}%"></div></div></td>
+      <td class="small job-msg">{{ j.message or '' }}
+        {% if j.error %}<details><summary>текст ошибки</summary><pre class="conllu">{{ j.error }}</pre></details>{% endif %}</td>
+      <td class="small">{{ j.created_at.strftime('%d.%m %H:%M') if j.created_at }}</td>
+      <td class="small">{{ j.finished_at.strftime('%d.%m %H:%M') if j.finished_at }}</td>
+      <td>{% if j.status == 'error' %}<form class="inline" method="post" action="/jobs/{{ j.id }}/retry"><button class="small secondary">Повторить</button></form>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">Задач нет.</p>{% endif %}
+</div>
+{% endblock %}
