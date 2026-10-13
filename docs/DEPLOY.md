@@ -34,6 +34,12 @@ code .env
 - `ADMIN_PASSWORD` — пароль для входа в веб-интерфейс (логин — `admin`);
 - `SECRET_KEY` — любая длинная случайная строка (например, 40 случайных букв и цифр).
 
+⚠️ **Не используйте символ `$` в значениях `.env`**: Docker Compose считает его началом имени переменной и молча вырезает часть пароля (признак — предупреждение `The "…" variable is not set`). Безопасный пароль из букв и цифр в PowerShell:
+```powershell
+-join ((48..57) + (65..90) + (97..122) | Get-Random -Count 32 | ForEach-Object { [char]$_ })
+```
+Проверить файл: `docker compose config --quiet` — если ничего не вывелось, всё в порядке.
+
 Остальное можно не трогать. `NLP_BACKEND=stanza` — точный парсер (образ соберётся дольше и будет весить ~2 ГБ). Для быстрой пробы можно поставить `NLP_BACKEND=natasha`.
 
 ### 1.4. Запустить
@@ -190,5 +196,7 @@ python -m app.worker                    # окно 2: обработчик за�
 | Страница входа: «Пароль администратора не задан» | Задайте `ADMIN_PASSWORD` в `.env`, затем `docker compose up -d` |
 | Тексты висят «в очереди» | Не запущен обработчик: `docker compose ps`, `docker compose logs worker` |
 | `exec /entrypoint.sh: no such file or directory` | Скрипт получил концы строк Windows (CRLF). Выполните `git rm --cached -r . ; git reset --hard` (после `.gitattributes` файлы перезапишутся с LF) и пересоберите |
+| `failed to connect to the docker API … dockerDesktopLinuxEngine` | Не запущен Docker Desktop: запустите его и дождитесь «Engine running»; проверка — `docker version` (должен быть раздел Server) |
+| `The "K" variable is not set` (или другая буква) | В `.env` есть символ `$` — замените такие пароли (см. шаг 1.3). Если база уже создавалась со «вырезанным» паролем: `docker compose down -v` (удалит пустую базу) и запустить заново |
 | Порт 5432 или 8000 занят | В `.env`: `DB_PUBLISH_PORT=5433` или `WEB_PORT=8080` |
 | Caddy не получает сертификат | Проверьте, что A-запись домена указывает на IP сервера и порты 80/443 открыты (`ufw status`) |
