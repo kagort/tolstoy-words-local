@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block title %}Портрет: {{ doc.title }}{% endblock %}
+{% block head %}<script src="/static-vendor/plotly.min.js"></script>{% endblock %}
+{% macro bars(values, key='pct', label='label') %}
+  <table class="small">
+  {% for v in values %}
+    <tr><td style="width:42%">{{ v[label] }}</td>
+      <td><div class="pbar"><span style="width:{{ [v[key], 100]|min }}%"></span></div></td>
+      <td class="num">{{ v[key] }}%</td><td class="num muted">{{ v.count }}</td></tr>
+  {% endfor %}
+  </table>
+{% endmacro %}
+{% block content %}
+<p><a href="/texts/{{ doc.id }}">← Карточка текста</a></p>
+<h1>📊 Статистический портрет: «{{ doc.title }}»</h1>
+<p class="muted">{{ doc.author or '' }}{{ ', ' ~ doc.years if doc.years }}{{ ', ' ~ doc.genre if doc.genre }} · конвейер: {{ doc.pipeline_version }}</p>
+
+{% if not st %}
+<div class="panel muted">Текст ещё не разобран — статистика появится после завершения разбора.</div>
+{% else %}
+<div class="row" style="margin-bottom:12px">
+  <div class="muted small">Все показатели считаются по словоупотреблениям (без знаков препинания) и леммам. Наведите на <span style="border-bottom:1px dotted">подчёркнутый</span> термин — появится пояснение.</div>
+  <div class="shrink">Скачать: <a href="/export/text/{{ doc.id }}/stats.xlsx">XLSX</a> · <a href="/export/text/{{ doc.id }}/stats.json">JSON</a> ·
+    <a href="?refresh=1" title="пересчитать статистику">пересчитать</a></div>
+</div>
+
+{% set sz, lx, sx, mo, rd = st.size, st.lexical, st.syntax, st.morphology, st.readability %}
+<div class="grid cols-4">
+  <div class="stat"><div class="v">{{ "{:,}".format(sz.words).replace(",", " ") }}</div><div class="l">словоупотреблений ({{ "{:,}".format(sz.tokens).replace(",", " ") }} токенов)</div></div>
+  <div class="stat"><div class="v">{{ "{:,}".format(lx.n_lemmas).replace(",", " ") }}</div><div class="l">разных лемм ({{ "{:,}".format(lx.n_forms).replace(",", " ") }} словоформ)</div></div>
+  <div class="stat"><div class="v">{{ "{:,}".format(sz.sentences).replace(",", " ") }}</div><div class="l">предложений · {{ sz.paragraphs }} абзацев</div></div>
+  <div class="stat"><div class="v">{{ sx.avg_len }}</div><div class="l">слов в предложении (медиана {{ sx.median_len }})</div></div>
+  <div class="stat"><div class="v">{{ lx.mattr }}</div><div class="l" title="Средний TTR в скользящем окне 500 слов; не зависит от длины текста">лексическое разнообразие, MATTR</div></div>
+  <div class="stat"><div class="v">{{ lx.density }}%</div><div class="l" title="Доля знаменательных слов: существительные, имена собственные, глаголы, прилагательные, наречия">лексическая плотность</div></div>
+  <div class="stat"><div class="v">{{ mo.noun_verb }}</div><div class="l" title="Больше 1,5 — именной стиль, меньше 1 — глагольный">существительных на глагол</div></div>
+  <div class="stat"><div class="v">{{ rd.flesch_oborneva }}</div><div class="l" title="Формула Флеша в адаптации И. В. Оборневой: выше — легче читать">удобочитаемость (Флеш–Оборнева)</div></div>
+</div>
+
+<h2>Лексика и лексическое разнообразие</h2>
+<div class="grid cols-2">
+  <div class="panel">
+    <table>
+      <tr><td><span class="term" title="Type-Token Ratio: разных словоформ / всех словоупотреблений. Сильно зависит от длины текста — сравнивайте только тексты близкого объёма">TTR словоформ</span></td><td class="num">{{ lx.ttr_forms }}</td></tr>
+      <tr><td><span class="term" title="То же для лемм">TTR лемм</span></td><td class="num">{{ lx.ttr_lemmas }}</td></tr>
+      <tr><td><span class="term" title="Moving-Average TTR (окно 500 лемм): средняя доля разных лемм в окне. Пригоден для сравнения текстов разной длины">MATTR</span></td><td class="num">{{ lx.mattr }}</td></tr>
+      <tr><td><span class="term" title="Леммы, встретившиеся ровно один раз">Hapax legomena</span></td><td class="num">{{ lx.hapax }} ({{ lx.hapax_pct }}% лемм)</td></tr>
+      <tr><td><span class="term" title="Леммы, встретившиеся ровно два раза">Dis legomena</span></td><td class="num">{{ lx.dis }}</td></tr>
+      <tr><td><span class="term" title="Мера повторяемости лексики; чем больше, тем чаще повторяются одни и те же слова. Мало зависит от длины текста">K Юла</span></td><td class="num">{{ lx.yule_k }}</td></tr>
+      <tr><td><span class="term" title="log(лемм) / log(слов)">C Хердана</span></td><td class="num">{{ lx.herdan_c }}</td></tr>
+      <tr><td><span class="term" title="леммы / √слов">Индекс Гиро</span></td><td class="num">{{ lx.guiraud }}</td></tr>
+      <tr><td><span class="term" title="Доля знаменательных слов (NOUN, PROPN, VERB, ADJ, ADV)">Лексическая плотность</span></td><td class="num">{{ lx.density }}%</td></tr>
+      <tr><td><span class="term" title="Наклон зависимости log(частота) от log(ранг) для 1000 первых лемм. Для естественных текстов близок к −1">Наклон Ципфа</span></td><td class="num">{{ lx.zipf_slope }}</td></tr>
+      <tr><td>Средняя длина слова</td><td class="num">{{ sz.avg_word_len }} букв · {{ sz.avg_syllables }} слога</td></tr>
+      <tr><td>Длинные слова (4 и более слогов)</td><td class="num">{{ sz.long_words_pct }}%</td></tr>
+    </table>
+  </div>
+  <div class="panel"><h3 style="margin-top:0">Закон Ципфа: частота леммы от её ранга (логарифмические шкалы)</h3><div id="ch-zipf" class="chart" style="min-height:300px"></div></div>
+</div>
+<div class="grid cols-2">
+  <div class="panel"><h3 style="margin-top:0">Частотный спектр: сколько лемм встречается 1, 2, 3… раза</h3><div id="ch-spectrum" class="chart" style="min-height:280px"></div></div>
+  <div class="panel"><h3 style="margin-top:0">Длина слова, букв</h3><div id="ch-wordlen" class="chart" style="min-height:280px"></div></div>
+</div>
+
+<h2>Частотный словарь</h2>
+<div class="panel"><h3 style="margin-top:0">30 самых частых лемм (все части речи)</h3><div id="ch-top" class="chart" style="min-height:620px"></div></div>
+<div class="grid cols-2">
+  {% for key, title in [('top_noun', 'Существительные (NOUN)'), ('top_verb', 'Глаголы (VERB)'), ('top_adj', 'Прилагательные (ADJ)'), ('top_adv', 'Наречия (ADV)'), ('top_propn', 'Имена собственные (PROPN)')] %}
+  {% if st.frequency[key] %}
+  <div class="panel">
+    <h3 style="margin-top:0">{{ title }}</h3>
+    <table class="small">
+      <tr><th>№</th><th>Лемма</th><th class="num">Частота</th><th class="num">ipm</th></tr>
+      {% for x in st.frequency[key] %}<tr><td class="muted">{{ loop.index }}</td><td>{{ x.lemma }}</td><td class="num">{{ x.count }}</td><td class="num">{{ x.ipm }}</td></tr>{% endfor %}
+    </table>
+  </div>
+  {% endif %}
+  {% endfor %}
+</div>
+
+<h2>Морфология</h2>
+<div class="grid cols-2">
+  <div class="panel"><h3 style="margin-top:0">Части речи</h3><div id="ch-pos" class="chart" style="min-height:420px"></div></div>
+  <div class="panel">
+    <h3 style="margin-top:0">Соотношения</h3>
+    <table>
+      <tr><td><span class="term" title="Больше 1,5 — именной стиль (описание, научная проза), меньше 1 — глагольный (действие, повествование)">Существительных на глагол</span></td><td class="num">{{ mo.noun_verb }}</td></tr>
+      <tr><td><span class="term" title="Насыщенность описаниями: сколько прилагательных приходится на одно существительное">Прилагательных на существительное</span></td><td class="num">{{ mo.adj_noun }}</td></tr>
+      <tr><td>Местоимения</td><td class="num">{{ mo.pron_share }}% слов</td></tr>
+    </table>
+    {% for g in mo.features[:3] %}
+    <h3>{{ g.title }} <span class="muted small">({{ g.feature }}, всего {{ g.total }})</span></h3>
+    {{ bars(g['values']) }}
+    {% endfor %}
+  </div>
+</div>
+<div class="grid cols-2">
+  {% for g in mo.features[3:] %}
+  <div class="panel">
+    <h3 style="margin-top:0">{{ g.title }} <span class="muted small">({{ g.feature }}, всего {{ g.total }})</span></h3>
+    {{ bars(g['values']) }}
+  </div>
+  {% endfor %}
+</div>
+
+<h2>Синтаксис</h2>
+<div class="grid cols-2">
+  <div class="panel">
+    <table>
+      <tr><td>Средняя длина предложения</td><td class="num">{{ sx.avg_len }} слов (медиана {{ sx.median_len }}, σ = {{ sx.stdev_len }})</td></tr>
+      <tr><td>Самое длинное предложение</td><td class="num">{{ sx.max_len }} слов</td></tr>
+      <tr><td><span class="term" title="Число уровней от корня до самого глубокого слова">Глубина синтаксического дерева</span></td><td class="num">{{ sx.avg_depth }}</td></tr>
+      <tr><td><span class="term" title="Простых предикативных единиц в предложении (однородные сказуемые — одна клауза)">Клауз на предложение</span></td><td class="num">{{ sx.avg_clauses }}</td></tr>
+      <tr><td><span class="term" title="Mean Dependency Distance: среднее расстояние (в словах) между главным и зависимым словом. Мера синтаксической сложности и нагрузки на память читателя">Средняя дистанция зависимости (MDD)</span></td><td class="num">{{ sx.mdd }}</td></tr>
+      <tr><td>Предложения с прямой речью</td><td class="num">{{ sx.direct_speech }}%</td></tr>
+      <tr><td>…с однородными членами</td><td class="num">{{ sx.homogeneous }}%</td></tr>
+      <tr><td>…с причастными оборотами</td><td class="num">{{ sx.participial }}%</td></tr>
+      <tr><td>…с деепричастиями</td><td class="num">{{ sx.gerund }}%</td></tr>
+    </table>
+    <h3>Типы предложений</h3>
+    {% set types = [] %}{% for t in sx.types %}{% set _ = types.append({'label': SENT_TYPE_LABELS.get(t.type, t.type), 'pct': t.pct, 'count': t.count}) %}{% endfor %}
+    {{ bars(types) }}
+  </div>
+  <div class="panel"><h3 style="margin-top:0">Длина предложений, слов</h3><div id="ch-sentlen" class="chart" style="min-height:300px"></div>
+    <h3>Синтаксические связи UD (доля от слов)</h3>
+    {% set rels = [] %}{% for d in sx.deprels[:15] %}{% set _ = rels.append({'label': d.deprel, 'pct': d.pct, 'count': d.count}) %}{% endfor %}
+    {{ bars(rels) }}
+  </div>
+</div>
+
+<div class="grid cols-2">
+  <div class="panel"><h3 style="margin-top:0">Пунктуация (на 1000 слов)</h3><div id="ch-punct" class="chart" style="min-height:320px"></div></div>
+  <div class="panel">
+    <h3 style="margin-top:0">Удобочитаемость</h3>
+    <p>Индекс Флеша в адаптации И. В. Оборневой: <strong style="font-size:20px">{{ rd.flesch_oborneva }}</strong></p>
+    <p class="small">206,835 − 1,3 × (слов в предложении = {{ rd.asl }}) − 60,1 × (слогов в слове = {{ rd.asw }}).
+      Ориентиры: выше 80 — очень легко, 50–80 — средне, ниже 30 — трудно. Формула грубая: она учитывает только длину слов и предложений.</p>
+  </div>
+</div>
+
+<h2>Динамика по ходу текста</h2>
+<div class="panel">
+  <p class="help">Текст разбит на 20 равных частей по предложениям (5% каждая). Видно, где повествование ускоряется (короче предложения), где больше диалогов и где сгущается лексика словарей.</p>
+  <div id="ch-dyn" class="chart" style="min-height:340px"></div>
+  {% if st.dynamics.dictionaries %}<h3>Слова словарей (ipm в каждой части)</h3><div id="ch-dyn-dict" class="chart" style="min-height:300px"></div>{% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if st %}
+<script>
+(function () {
+  const st = {{ st|tojson }};
+  const posLabels = {{ POS_LABELS|tojson }};
+  const accent = cssVar('--accent'), muted = cssVar('--muted');
+  const zipf = st.frequency.zipf;
+  drawChart('ch-zipf', [{ type: 'scatter', mode: 'markers', x: zipf.map(p => p[0]), y: zipf.map(p => p[1]), marker: { size: 4, color: accent },
+    hovertemplate: 'ранг %{x}: частота %{y}<extra></extra>' }],
+    { xaxis: { type: 'log', title: 'ранг (log)' }, yaxis: { type: 'log', title: 'частота (log)' }, margin: { l: 60, r: 10, t: 10, b: 50 } });
+  const sp = st.frequency.spectrum;
+  drawChart('ch-spectrum', [{ type: 'bar', x: sp.map(p => p[0]), y: sp.map(p => p[1]), marker: { color: accent },
+    hovertemplate: '%{y} лемм встречаются %{x} раз<extra></extra>' }],
+    { xaxis: { title: 'сколько раз встречается лемма', dtick: 1 }, yaxis: { title: 'число лемм' }, margin: { l: 60, r: 10, t: 10, b: 50 } });
+  const wl = st.size.word_len_hist;
+  drawChart('ch-wordlen', [{ type: 'bar', x: wl.map(p => p[0] >= 15 ? '15+' : p[0]), y: wl.map(p => p[1]), marker: { color: accent } }],
+    { xaxis: { title: 'букв в слове', type: 'category' }, yaxis: { title: 'слов' }, margin: { l: 60, r: 10, t: 10, b: 50 } });
+  const top = st.frequency.top_all.slice().reverse();
+  drawChart('ch-top', [{ type: 'bar', orientation: 'h', y: top.map(x => `${x.lemma} (${x.pos})`), x: top.map(x => x.count), marker: { color: accent },
+    hovertemplate: '%{y}: %{x}<extra></extra>' }], { margin: { l: 150, r: 20, t: 10, b: 40 } });
+  const pos = st.morphology.pos.slice().reverse();
+  drawChart('ch-pos', [{ type: 'bar', orientation: 'h', y: pos.map(p => `${posLabels[p.upos] || p.upos} (${p.upos})`), x: pos.map(p => p.pct),
+    text: pos.map(p => p.count), marker: { color: accent }, hovertemplate: '%{y}: %{x}% (%{text})<extra></extra>' }],
+    { xaxis: { title: '% слов' }, margin: { l: 230, r: 20, t: 10, b: 40 } });
+  const sl = st.syntax.hist;
+  drawChart('ch-sentlen', [{ type: 'bar', x: sl.map(p => p[0] >= 100 ? '100+' : `${p[0]}–${p[0] + 4}`), y: sl.map(p => p[1]), marker: { color: accent } }],
+    { xaxis: { title: 'слов в предложении', type: 'category' }, yaxis: { title: '% предложений' }, margin: { l: 60, r: 10, t: 10, b: 60 } });
+  const pu = st.punctuation;
+  drawChart('ch-punct', [{ type: 'bar', x: pu.map(p => p.mark), y: pu.map(p => p.per1000), marker: { color: accent } }],
+    { yaxis: { title: 'на 1000 слов' }, margin: { l: 60, r: 10, t: 10, b: 90 } });
+  const dyn = st.dynamics;
+  drawChart('ch-dyn', [
+    { type: 'scatter', mode: 'lines+markers', name: 'средняя длина предложения, слов', x: dyn.segments, y: dyn.avg_len },
+    { type: 'scatter', mode: 'lines+markers', name: '% предложений с прямой речью', x: dyn.segments, y: dyn.direct_speech, yaxis: 'y2' }],
+    { yaxis: { title: 'слов' }, yaxis2: { title: '% прямой речи', overlaying: 'y', side: 'right', showgrid: false },
+      xaxis: { title: 'часть текста' }, margin: { l: 60, r: 60, t: 40, b: 50 } });
+  if (dyn.dictionaries.length) {
+    drawChart('ch-dyn-dict', dyn.dictionaries.map(d => ({ type: 'scatter', mode: 'lines+markers', name: d.name, x: dyn.segments, y: d.ipm })),
+      { yaxis: { title: 'ipm' }, xaxis: { title: 'часть текста' }, margin: { l: 60, r: 20, t: 40, b: 50 } });
+  }
+})();
+</script>
+{% endif %}
+{% endblock %}

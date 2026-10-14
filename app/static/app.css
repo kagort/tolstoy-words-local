@@ -109,3 +109,7 @@ ul.dep-tree, ul.dep-tree ul { list-style: none; margin: 0; padding-left: 22px; b
 ul.dep-tree { padding-left: 4px; border-left: none; }
 ul.dep-tree li { margin: 3px 0; }
 ul.dep-tree code { font-size: 12px; }
+/* статистический портрет */
+.pbar { height: 10px; background: var(--border); border-radius: 99px; overflow: hidden; min-width: 80px; }
+.pbar > span { display: block; height: 100%; background: var(--accent); }
+.term { border-bottom: 1px dotted var(--muted); cursor: help; }

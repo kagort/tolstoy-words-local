@@ -242,6 +242,57 @@ def export_text_conllu(text_id: int, db: Session = Depends(get_session)):
                              headers={"Content-Disposition": f'attachment; filename="text-{text_id}.conllu"'})
 
 
+@router.get("/text/{text_id}/stats.{fmt}")
+def export_text_stats(text_id: int, fmt: str, request: Request, db: Session = Depends(get_session)):
+    from app.nlp.morph import pos_label
+    from app.services.textstats import get_stats
+
+    if fmt not in FORMATS:
+        raise HTTPException(400)
+    doc = db.get(TextDoc, text_id)
+    st = get_stats(db, text_id) if doc else None
+    if not st:
+        raise HTTPException(404, "Текст не найден или ещё не разобран")
+    summary = [("Токенов", st["size"]["tokens"]), ("Словоупотреблений", st["size"]["words"]),
+               ("Предложений", st["size"]["sentences"]), ("Абзацев", st["size"]["paragraphs"]), ("Знаков", st["size"]["chars"]),
+               ("Средняя длина слова, букв", st["size"]["avg_word_len"]), ("Средняя длина слова, слогов", st["size"]["avg_syllables"]),
+               ("Слов из 4+ слогов, %", st["size"]["long_words_pct"])]
+    lx = st["lexical"]
+    summary += [("Словоформ (разных)", lx["n_forms"]), ("Лемм (разных)", lx["n_lemmas"]), ("TTR словоформ", lx["ttr_forms"]),
+                ("TTR лемм", lx["ttr_lemmas"]), (f"MATTR (окно 500)", lx["mattr"]), ("Hapax legomena", lx["hapax"]),
+                ("Hapax, % лемм", lx["hapax_pct"]), ("Dis legomena", lx["dis"]), ("K Юла", lx["yule_k"]),
+                ("C Хердана", lx["herdan_c"]), ("Индекс Гиро", lx["guiraud"]), ("Лексическая плотность, %", lx["density"]),
+                ("Наклон Ципфа", lx["zipf_slope"])]
+    sx = st["syntax"]
+    summary += [("Средняя длина предложения, слов", sx["avg_len"]), ("Медиана длины предложения", sx["median_len"]),
+                ("Ст. отклонение длины", sx["stdev_len"]), ("Самое длинное предложение, слов", sx["max_len"]),
+                ("Глубина дерева (средняя)", sx["avg_depth"]), ("Клауз на предложение", sx["avg_clauses"]),
+                ("Средняя дистанция зависимости (MDD)", sx["mdd"]), ("% прямой речи", sx["direct_speech"]),
+                ("% с однородными членами", sx["homogeneous"]), ("% с причастными оборотами", sx["participial"]),
+                ("% с деепричастиями", sx["gerund"]), ("Существительные / глаголы", st["morphology"]["noun_verb"]),
+                ("Прилагательные / существительные", st["morphology"]["adj_noun"]), ("Местоимения, %", st["morphology"]["pron_share"]),
+                ("Удобочитаемость (Флеш–Оборнева)", st["readability"]["flesch_oborneva"])]
+    frames = {"Сводка": pd.DataFrame(summary, columns=["Показатель", "Значение"])}
+    fq = st["frequency"]
+    for key, title in (("top_all", "Частотные леммы"), ("top_noun", "Существительные"), ("top_verb", "Глаголы"),
+                       ("top_adj", "Прилагательные"), ("top_adv", "Наречия"), ("top_propn", "Имена собственные")):
+        frames[title] = pd.DataFrame([{"Лемма": x["lemma"], "Часть речи": pos_label(x["pos"]), "Частота": x["count"], "ipm": x["ipm"]} for x in fq[key]])
+    frames["Части речи"] = pd.DataFrame([{"Часть речи": pos_label(x["upos"]), "Количество": x["count"], "%": x["pct"]} for x in st["morphology"]["pos"]])
+    frames["Граммемы"] = pd.DataFrame([{"Категория": g["title"], "Значение": f"{v['label']} ({v['value']})", "Количество": v["count"], "%": v["pct"]}
+                                      for g in st["morphology"]["features"] for v in g["values"]])
+    frames["Связи UD"] = pd.DataFrame([{"Связь": d["deprel"], "Количество": d["count"], "% слов": d["pct"]} for d in sx["deprels"]])
+    frames["Пунктуация"] = pd.DataFrame([{"Знак": p["mark"], "Количество": p["count"], "На 1000 слов": p["per1000"]} for p in st["punctuation"]])
+    dyn = st["dynamics"]
+    dd = {"Часть текста": dyn["segments"], "Средняя длина предложения": dyn["avg_len"], "Глубина дерева": dyn["avg_depth"],
+          "% прямой речи": dyn["direct_speech"]}
+    for ds in dyn["dictionaries"]:
+        dd[f"ipm: {ds['name']}"] = ds["ipm"]
+    frames["Динамика"] = pd.DataFrame(dd)
+    params = {"Текст": doc.title, "Автор": doc.author or "", "Год": doc.years, "Конвейер разбора": doc.pipeline_version or "",
+              "Дата выгрузки": datetime.now().strftime("%Y-%m-%d %H:%M"), "Версия приложения": __version__}
+    return _send(frames, fmt, f"text-{text_id}-stats", params)
+
+
 @router.get("/dictionary/{dict_id}.csv")
 def export_dictionary(dict_id: int, db: Session = Depends(get_session)):
     d = db.get(Dictionary, dict_id)
