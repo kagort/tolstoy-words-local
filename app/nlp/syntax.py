@@ -74,6 +74,42 @@ ROLE_LABELS = {
     "other": "вне структуры",
 }
 
+# Метки UD, из которых выводится член предложения (показываются рядом с русским названием)
+ROLE_UD = {
+    "subject": "nsubj, csubj",
+    "predicate": "root, cop, xcomp",
+    "main_member": "root",
+    "attribute": "amod, det, nmod, acl",
+    "object": "obj, iobj, obl",
+    "adverbial": "advmod, obl, advcl",
+    "apposition": "appos, flat",
+    "vocative": "vocative",
+    "other": "прочие",
+}
+
+REL_UD = {
+    "attribute": "amod, nmod, acl",
+    "predicate": "голова nsubj; cop, xcomp",
+    "governor": "голова obj / iobj / obl",
+    "subject_of_pred": "nsubj",
+    "adverbial": "advmod, obl, advcl",
+    "conj": "conj",
+    "case": "case",
+}
+
+
+def role_label_ud(role: str, deprel: str | None = None) -> str:
+    """«подлежащее (nsubj)» — с конкретной меткой UD, если она известна, иначе с типичными."""
+    label = ROLE_LABELS.get(role, role)
+    if deprel == "conj":  # роль унаследована от вершины однородного ряда
+        return f"{label} (однородный член, conj)"
+    return f"{label} ({deprel or ROLE_UD.get(role, '')})"
+
+
+def rel_label_ud(rel_type: str) -> str:
+    return f"{REL_LABELS.get(rel_type, rel_type)} ({REL_UD.get(rel_type, '')})"
+
+
 REL_LABELS = {
     "attribute": "определения",
     "predicate": "сказуемое при подлежащем",

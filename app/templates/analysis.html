@@ -33,7 +33,7 @@
     <tr><th>Слово</th><th>Лемма</th><th>Категория</th><th class="num">Вхождений</th><th class="num">ipm</th><th class="num">Предложений</th><th class="num">Текстов</th>
       <th class="num" title="Мера неравномерности Грайса: 0 — равномерно по текстам, ближе к 1 — сосредоточено в немногих">DP</th><th></th></tr>
     {% for r in freq.rows %}
-    <tr><td><strong>{{ r.word }}</strong></td><td>{{ r.lemma }} <span class="muted small">{{ r.upos }}</span></td><td>{{ r.category }}</td>
+    <tr><td><strong>{{ r.word }}</strong></td><td>{{ r.lemma }} <span class="muted small">{{ pos_label(r.upos) }}</span></td><td>{{ r.category }}</td>
       <td class="num">{{ r.count }}</td><td class="num">{{ r.ipm }}</td><td class="num">{{ r.sentences }}</td><td class="num">{{ r.texts }}</td>
       <td class="num">{{ r.dp if r.dp is not none else '' }}</td>
       <td class="num small">{% if r.count %}<a href="/analysis?tab=profile&dictionary_id={{ dict_id }}&corpus_id={{ corpus_id or '' }}&entry_id={{ r.entry_id }}">профиль</a> ·
@@ -51,24 +51,27 @@
 <form method="get" class="panel row">
   <input type="hidden" name="tab" value="conc"><input type="hidden" name="dictionary_id" value="{{ dict_id }}"><input type="hidden" name="corpus_id" value="{{ corpus_id or '' }}">
   <div><label>Слово</label><select name="entry_id"><option value="">все слова словаря</option>{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
-  <div><label>Роль слова в предложении</label><select name="role"><option value="">любая</option>{% for k, v in ROLE_LABELS.items() %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('role') == k }}>{{ v }}</option>{% endfor %}</select></div>
-  <div><label>Тип связи</label><select name="rel_type"><option value="">любой</option>{% for k, v in REL_LABELS.items() %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('rel_type') == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div><label>Роль слова в предложении</label><select name="role"><option value="">любая</option>{% for k in ROLE_LABELS %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('role') == k }}>{{ role_label(k) }}</option>{% endfor %}</select></div>
+  <div><label>Тип связи</label><select name="rel_type"><option value="">любой</option>{% for k in REL_LABELS %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('rel_type') == k }}>{{ rel_label(k) }}</option>{% endfor %}</select></div>
   <div><label>Связанное слово (лемма)</label><input type="text" name="related" value="{{ request.query_params.get('related', '') }}" placeholder="например: сладкий"></div>
   <div class="shrink"><label class="check"><input type="checkbox" name="invalid" value="1" {{ 'checked' if request.query_params.get('invalid') }}> показать ложные</label></div>
   <div class="shrink"><button type="submit">Найти</button></div>
 </form>
 <div class="row" style="margin-bottom:6px">
-  <div class="muted">Найдено: {{ conc.total }}</div>
+  <div class="muted">Найдено: {{ conc.total }}. Наведите курсор на строку — появится окно с соседними предложениями; ID или выделенное слово открывают разбор предложения 🌳.</div>
+  <form class="shrink" method="get" action="/go/sentence" style="display:flex;gap:6px;align-items:center"><input type="text" name="id" placeholder="ID предложения" style="width:150px"><button class="small secondary" type="submit">Открыть разбор</button></form>
   <div class="shrink">Скачать: <a href="/export/concordance.xlsx{{ qs(request, page=None) }}">XLSX</a> · <a href="/export/concordance.csv{{ qs(request, page=None) }}">CSV</a> · <a href="/export/hits.conllu{{ qs(request, page=None) }}">CoNLL-U</a></div>
 </div>
 <div class="panel table-scroll">
   <table class="kwic">
+    <tr><th>ID</th><th class="num">Левый контекст</th><th>Слово</th><th>Правый контекст</th><th>Член предложения (связь UD)</th><th>Источник</th><th></th></tr>
     {% for i in conc['items'] %}
-    <tr class="{{ 'invalid' if i.is_valid == false }}">
+    <tr class="{{ 'invalid' if i.is_valid == false }}" data-ctx="{{ i.sentence_id }}" data-start="{{ i.start }}" data-end="{{ i.end }}">
+      <td class="small"><a href="/sentences/{{ i.sentence_id }}" title="открыть разбор предложения">🌳&nbsp;{{ i.sentence_id }}</a><div class="muted">№&nbsp;{{ i.sentence_no }}</div></td>
       <td class="left">{{ i.left }}</td>
-      <td class="kw"><a href="/sentences/{{ i.sentence_id }}">{{ i.kw }}</a></td>
+      <td class="kw"><a href="/sentences/{{ i.sentence_id }}" title="открыть разбор предложения">{{ i.kw }}</a><div class="muted small" style="font-weight:normal">{{ i.upos }}</div></td>
       <td class="right">{{ i.right }}</td>
-      <td class="small"><span class="role-{{ i.role }}">{{ i.role_label }}</span><div class="muted">{{ i.role_subtype }}</div></td>
+      <td class="small"><span class="role-{{ i.role }}">{{ role_label(i.role, i.deprel) }}</span><div class="muted">{{ i.role_subtype }}</div></td>
       <td class="small muted">{{ i.source }}</td>
       <td class="num">
         <button class="small {{ '' if i.is_valid == true else 'secondary' }}" data-valid title="верное вхождение" onclick="setValid({{ i.hit_id }}, true, this)">✓</button>
@@ -130,7 +133,7 @@
   <div><label>Корпус A</label><input type="text" value="{{ corpus_name }}" disabled></div>
   <div><label>Корпус B</label><select name="corpus_b"><option value="">Все тексты</option>{% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if c.id == corpus_b }}>{{ c.name }}</option>{% endfor %}</select></div>
   <div><label>Сравнить связи слова</label><select name="entry_id"><option value="">—</option>{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
-  <div><label>Тип связи</label><select name="rel_type">{% for k, v in REL_LABELS.items() %}<option value="{{ k }}" {{ 'selected' if (request.query_params.get('rel_type') or 'attribute') == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div><label>Тип связи</label><select name="rel_type">{% for k in REL_LABELS %}<option value="{{ k }}" {{ 'selected' if (request.query_params.get('rel_type') or 'attribute') == k }}>{{ rel_label(k) }}</option>{% endfor %}</select></div>
   <div class="shrink"><button type="submit">Сравнить</button></div>
 </form>
 {% if cmp %}

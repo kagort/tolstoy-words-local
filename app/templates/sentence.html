@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Предложение{% endblock %}
 {% block content %}
-<p><a href="javascript:history.back()">← Назад</a> · <a href="/texts/{{ doc.id }}">{{ doc.author ~ ', ' if doc.author }}«{{ doc.title }}»</a>, предложение № {{ row.idx }}
+<h1 style="margin-bottom:4px">Предложение ID {{ row.id }}</h1>
+<p><a href="javascript:history.back()">← Назад</a> · <a href="/texts/{{ doc.id }}">{{ doc.author ~ ', ' if doc.author }}«{{ doc.title }}»</a>, № {{ row.idx }} в тексте
   {% if prev_id %}· <a href="/sentences/{{ prev_id }}">предыдущее</a>{% endif %} {% if next_id %}· <a href="/sentences/{{ next_id }}">следующее</a>{% endif %}</p>
 
 <div class="panel">
   <div class="sentence-text">
-    {% for t in sent.tokens %}<a class="tok role-{{ roles[t.idx].role }} {{ 'focus' if t.idx == focus }}" href="?token={{ t.idx }}" title="{{ roles[t.idx].label }}{{ ' — ' ~ roles[t.idx].subtype if roles[t.idx].subtype }}" style="color:inherit;text-decoration:none">{{ t.form }}</a> {% endfor %}
+    {% for t in sent.tokens %}<a class="tok role-{{ roles[t.idx].role }} {{ 'focus' if t.idx == focus }}" href="?token={{ t.idx }}" title="{{ role_label(roles[t.idx].role, t.deprel) }}{{ ' — ' ~ roles[t.idx].subtype if roles[t.idx].subtype }} · {{ pos_label(t.upos) }}" style="color:inherit;text-decoration:none">{{ t.form }}</a> {% endfor %}
   </div>
   <div class="legend small muted" style="margin-top:8px">
     <span class="role-subject">— подлежащее</span><span class="role-predicate">═ сказуемое</span><span class="role-object">- - дополнение</span>
@@ -17,14 +18,37 @@
     {% if groups %}· однородные ряды: {% for g in groups %}[{{ g.members|join(', ') }}] <span class="badge">{{ g.type }}</span> {% endfor %}{% endif %}</div>
 </div>
 
+
+{% macro node(i) %}
+  {% set t = sent.tok(i) %}
+  <li><a href="?token={{ i }}" class="role-{{ roles[i].role }}" style="{{ 'font-weight:700' if i == focus }}">{{ t.form }}</a>
+    <span class="muted small">{{ t.upos }} · <code>{{ t.deprel }}</code>{% if roles[i].role not in ('other',) %} · {{ roles[i].label }}{% endif %}</span>
+    {% if tree_children.get(i) %}<ul>{% for c in tree_children[i] if sent.tok(c).upos != 'PUNCT' %}{{ node(c) }}{% endfor %}</ul>{% endif %}
+  </li>
+{% endmacro %}
+<div class="panel">
+  <div class="row" style="align-items:center">
+    <h2 style="margin:0">🌳 Синтаксическое дерево (Universal Dependencies)</h2>
+    <div class="shrink">
+      <button class="small secondary" type="button" onclick="showTree('arcs')">дуги</button>
+      <button class="small secondary" type="button" onclick="showTree('list')">иерархия</button>
+      <label class="check shrink" style="display:inline-flex;margin-left:8px"><input type="checkbox" id="punct" onchange="redrawTree()"> знаки препинания</label>
+    </div>
+  </div>
+  <p class="help">Стрелка идёт от главного слова к зависимому, подпись — тип связи UD. Цвет слова — член предложения. Щёлкните по слову, чтобы увидеть его связи. Длинное дерево прокручивается вправо.</p>
+  <div id="view-arcs" class="tree-wrap"><div id="tree"></div></div>
+  <div id="view-list" style="display:none">
+    <ul class="dep-tree">{% for r in tree_children.get(0, []) %}{{ node(r) }}{% endfor %}</ul>
+  </div>
+</div>
 {% if focus %}
 <div class="panel">
-  <h2 style="margin-top:0">«{{ sent.tok(focus).form }}» — {{ roles[focus].label }}{{ ', ' ~ roles[focus].subtype if roles[focus].subtype }} {{ roles[focus].detail }}</h2>
+  <h2 style="margin-top:0">«{{ sent.tok(focus).form }}» · {{ pos_label(sent.tok(focus).upos) }} — {{ role_label(roles[focus].role, sent.tok(focus).deprel) }}{{ ', ' ~ roles[focus].subtype if roles[focus].subtype }} {{ roles[focus].detail }}</h2>
   {% if rels %}
   <table>
     <tr><th>Тип связи</th><th>Слово</th><th>Подробности</th><th>Как получено</th><th class="num">Уверенность</th></tr>
     {% for r in rels %}
-    <tr><td>{{ REL_LABELS.get(r.rel_type, r.rel_type) }}</td>
+    <tr><td>{{ rel_label(r.rel_type) }}</td>
       <td><a href="?token={{ r.related_idx }}">{{ sent.tok(r.related_idx).form }}</a> <span class="muted small">({{ r.related_lemma }})</span>{% if r.negated %} <span class="badge warn">под отрицанием</span>{% endif %}</td>
       <td class="small">{{ r.detail }}</td>
       <td class="small">{{ SCOPE_LABELS.get(r.scope, r.scope) }}{% if r.rule %} <span class="muted">· правило: {{ r.rule }}</span>{% endif %}{% if r.source == 'enhanced' %} <span class="badge">восстановлено</span>{% endif %}</td>
@@ -36,9 +60,15 @@
 {% endif %}
 
 <div class="panel">
-  <h2 style="margin-top:0">Дерево зависимостей (Universal Dependencies)</h2>
-  <div class="tree-wrap"><div id="tree"></div></div>
+  <h2 style="margin-top:0">Контекст в тексте</h2>
+  {% set ns = namespace(par=None) %}
+  {% for c in context %}
+    {% if ns.par is not none and c.paragraph_idx != ns.par %}<div class="ctx-par" title="новый абзац"></div>{% endif %}{% set ns.par = c.paragraph_idx %}
+    <div class="ctx-sent {{ 'current' if c.id == row.id }}"><a class="ctx-id" href="/sentences/{{ c.id }}">ID {{ c.id }} · № {{ c.idx }}</a> {{ c.text }}</div>
+  {% endfor %}
 </div>
+
+
 
 <details class="panel">
   <summary>Таблица разметки (CoNLL-U)</summary>
@@ -46,13 +76,23 @@
   <table>
     <tr><th class="num">№</th><th>Слово</th><th>Лемма</th><th>Часть речи</th><th>Граммемы</th><th class="num">Голова</th><th>Связь</th><th>Член предложения</th></tr>
     {% for t in sent.tokens %}
-    <tr class="{{ 'focus' if t.idx == focus }}"><td class="num">{{ t.idx }}</td><td>{{ t.form }}</td><td>{{ t.lemma }}</td><td>{{ t.upos }}</td>
+    <tr class="{{ 'focus' if t.idx == focus }}"><td class="num">{{ t.idx }}</td><td>{{ t.form }}</td><td>{{ t.lemma }}</td><td>{{ pos_label(t.upos) }}</td>
       <td class="small">{% for k, v in t.feats|dictsort %}{{ k }}={{ v }}{{ '|' if not loop.last }}{% endfor %}</td>
-      <td class="num">{{ t.head }}</td><td>{{ t.deprel }}</td><td class="role-{{ roles[t.idx].role }}">{{ roles[t.idx].label }}</td></tr>
+      <td class="num">{{ t.head }}</td><td>{{ t.deprel }}</td><td class="role-{{ roles[t.idx].role }}">{{ role_label(roles[t.idx].role, t.deprel) }}</td></tr>
     {% endfor %}
   </table>
   </div>
   <pre class="conllu">{{ conllu }}</pre>
 </details>
 {% endblock %}
-{% block scripts %}<script>drawTree('tree', {{ tree_json|safe }}, {{ focus or 0 }});</script>{% endblock %}
+{% block scripts %}<script>
+const TREE = {{ tree_json|safe }}, FOCUS = {{ focus or 0 }};
+function redrawTree() { drawTree('tree', TREE, FOCUS, document.getElementById('punct').checked); }
+function showTree(v) {
+  document.getElementById('view-arcs').style.display = v === 'arcs' ? '' : 'none';
+  document.getElementById('view-list').style.display = v === 'list' ? '' : 'none';
+  try { localStorage.setItem('treeView', v); } catch (e) {}
+}
+redrawTree();
+try { const v = localStorage.getItem('treeView'); if (v) showTree(v); } catch (e) {}
+</script>{% endblock %}

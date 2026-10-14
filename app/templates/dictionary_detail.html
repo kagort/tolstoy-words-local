@@ -20,9 +20,9 @@
           {% set cur = e.lemma ~ '|' ~ (e.upos or '') %}
           {% set ns = namespace(found=false) %}
           {% for o in e.options %}{% set key = o.lemma ~ '|' ~ o.upos %}{% if key == cur %}{% set ns.found = true %}{% endif %}
-          <option value="{{ key }}" {{ 'selected' if key == cur }}>{{ o.lemma }} · {{ POS_LABELS.get(o.upos, o.upos) }} ({{ (o.score * 100)|round|int }}%{% if opt_counts.get(e.id) %}; в базе {{ opt_counts[e.id].get(key, 0) }}{% endif %})</option>
+          <option value="{{ key }}" {{ 'selected' if key == cur }}>{{ o.lemma }} · {{ pos_label(o.upos) }} ({{ (o.score * 100)|round|int }}%{% if opt_counts.get(e.id) %}; в базе {{ opt_counts[e.id].get(key, 0) }}{% endif %})</option>
           {% endfor %}
-          {% if not ns.found %}<option value="{{ cur }}" selected>{{ e.lemma }} · {{ POS_LABELS.get(e.upos, e.upos or 'любая') }}</option>{% endif %}
+          {% if not ns.found %}<option value="{{ cur }}" selected>{{ e.lemma }} · {{ pos_label(e.upos) }}</option>{% endif %}
         </select>
         <details class="small"><summary>своя лемма</summary><input form="f{{ e.id }}" type="text" name="lemma" placeholder="например: духи"></details>
       </td>

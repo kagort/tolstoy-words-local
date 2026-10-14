@@ -10,8 +10,8 @@ from fastapi.templating import Jinja2Templates
 
 from app import __version__
 from app.config import settings
-from app.nlp.morph import POS_LABELS
-from app.nlp.syntax import REL_LABELS, ROLE_LABELS, SENT_TYPE_LABELS
+from app.nlp.morph import POS_LABELS, pos_label
+from app.nlp.syntax import REL_LABELS, ROLE_LABELS, SENT_TYPE_LABELS, rel_label_ud, role_label_ud
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -45,6 +45,9 @@ templates.env.globals.update(
     SCOPE_LABELS=SCOPE_LABELS,
     SENT_TYPE_LABELS=SENT_TYPE_LABELS,
     qs=_qs,
+    pos_label=pos_label,
+    role_label=role_label_ud,
+    rel_label=rel_label_ud,
 )
 
 

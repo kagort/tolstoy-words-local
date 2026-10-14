@@ -112,7 +112,7 @@ def export_concordance(fmt: str, request: Request, db: Session = Depends(get_ses
                       include_invalid=bool(qp.get("invalid")), page=1, per_page=100_000, context_chars=10_000)
     df = pd.DataFrame([{
         "Слово словаря": i["word"], "Левый контекст": i["left"], "Словоформа": i["kw"], "Правый контекст": i["right"],
-        "Роль": i["role_label"], "Подтип роли": i["role_subtype"], "Источник": i["source"], "№ предложения": i["sentence_no"],
+        "Роль": i["role_label"], "Связь UD": i["deprel"], "Часть речи UD": i["upos"], "Подтип роли": i["role_subtype"], "Источник": i["source"], "№ предложения": i["sentence_no"],
         "ID предложения": i["sentence_id"], "Проверено": {None: "", True: "верно", False: "ложное"}[i["is_valid"]],
     } for i in c["items"]])
     return _send({"Конкорданс": df}, fmt, "concordance", _params(db, request) | {"Строк": c["total"]})

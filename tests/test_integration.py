@@ -99,7 +99,15 @@ def test_full_flow(client):
     with SessionLocal() as s:
         assert A.frequency(s, dict_id, ids)["rows"][0]["count"] >= 1
 
-    assert client.get(f"/sentences/{sent_id}").status_code == 200
+    page = client.get(f"/sentences/{sent_id}")
+    assert page.status_code == 200 and f"Предложение ID {sent_id}" in page.text and "(NOUN)" in page.text
+    ctx = client.get(f"/api/sentences/{sent_id}/context?n=2").json()
+    assert any(x["current"] and x["id"] == sent_id for x in ctx["sentences"]) and len(ctx["sentences"]) >= 2
+    r = client.get(f"/go/sentence?id={sent_id}", follow_redirects=False)
+    assert r.headers["location"] == f"/sentences/{sent_id}"
+    conc = client.get(f"/analysis?tab=conc&{base}").text
+    assert f'data-ctx="{sent_id}"' in conc or "data-ctx=" in conc
+    assert "(nsubj" in conc or "(obj" in conc or "(obl" in conc
 
     for url in (f"/export/frequency.xlsx?{base}", f"/export/frequency.csv?{base}", f"/export/concordance.xlsx?{base}",
                 f"/export/profile.json?{base}&entry_id={entry.id}", f"/export/compare.xlsx?{base}&corpus_b=",

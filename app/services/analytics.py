@@ -17,7 +17,7 @@ from app.models import (
     TokenRow,
     corpus_texts,
 )
-from app.nlp.syntax import REL_LABELS, ROLE_LABELS, SENT_TYPE_LABELS
+from app.nlp.syntax import ROLE_LABELS, SENT_TYPE_LABELS, rel_label_ud, role_label_ud
 from app.nlp.tree import norm, parse_feats
 from app.services.stats import SIGNIFICANCE_LL, gries_dp, ipm, log_dice, log_likelihood, log_ratio
 
@@ -150,7 +150,7 @@ def concordance(
 ) -> dict:
     q = (
         select(Hit.id, Hit.sentence_id, Hit.role, Hit.role_subtype, Hit.is_valid, Hit.form,
-               TokenRow.start_char, TokenRow.end_char, SentenceRow.text, SentenceRow.idx,
+               TokenRow.start_char, TokenRow.end_char, TokenRow.deprel, TokenRow.upos, SentenceRow.text, SentenceRow.idx,
                TextDoc.id.label("text_id"), TextDoc.title, TextDoc.author, TextDoc.year_from,
                DictionaryEntry.surface)
         .join(TokenRow, TokenRow.id == Hit.token_id)
@@ -188,6 +188,10 @@ def concordance(
             "sentence": text,
             "role": r.role,
             "role_label": ROLE_LABELS.get(r.role, r.role),
+            "deprel": r.deprel,
+            "upos": r.upos,
+            "start": r.start_char,
+            "end": r.end_char,
             "role_subtype": r.role_subtype or "",
             "is_valid": r.is_valid,
             "word": r.surface,
@@ -241,12 +245,12 @@ def word_profile(session: Session, entry_id: int, text_ids: list[int], scopes=DE
         for x in items:
             x["logdice"] = round(log_dice(x["count"], total, fy.get(norm(x["lemma"]), x["count"])), 2) if rt != "case" else None
         items.sort(key=lambda x: (-x["count"], -(x["logdice"] or 0)))
-        relations[rt] = {"label": REL_LABELS.get(rt, rt), "items": items[:top], "distinct": len(items),
+        relations[rt] = {"label": rel_label_ud(rt), "items": items[:top], "distinct": len(items),
                          "total": sum(x["count"] for x in items)}
     return {
         "entry": entry,
         "total": total,
-        "roles": [{"role": r, "label": ROLE_LABELS.get(r, r), "count": c} for r, c in roles],
+        "roles": [{"role": r, "label": role_label_ud(r), "count": c} for r, c in roles],
         "relations": relations,
     }
 
@@ -297,7 +301,7 @@ def compare_profile(session: Session, entry_id: int, ids_a: list[int], ids_b: li
                      "ll": round(ll, 2), "log_ratio": round(log_ratio(a, b, max(ha, 1), max(hb, 1)), 2),
                      "significant": ll >= SIGNIFICANCE_LL})
     rows.sort(key=lambda r: (-r["ll"], -(r["count_a"] + r["count_b"])))
-    return {"rows": rows[:top], "hits_a": ha, "hits_b": hb, "rel_label": REL_LABELS.get(rel_type, rel_type)}
+    return {"rows": rows[:top], "hits_a": ha, "hits_b": hb, "rel_label": rel_label_ud(rel_type)}
 
 
 # ------------------------------------------------------------------ структура предложений
