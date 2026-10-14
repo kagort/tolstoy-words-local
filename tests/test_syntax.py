@@ -1,6 +1,6 @@
 """Синтаксический слой на вручную размеченных деревьях (эталонных разборах)."""
 
-from app.nlp.parsers import Parsed, sanitize_tree
+from app.nlp.parsers import Parsed, fix_lemma, sanitize_tree
 from app.nlp.syntax import SentenceAnalysis
 from app.nlp.tree import sentence_from_rows
 
@@ -247,3 +247,10 @@ def test_relative_pronoun_subject_resolves_to_antecedent():
     # «из сада»: субъект действия «шёл» — не «который», а «запах»
     subj = [r for r in an.relations(10) if r.rel_type == "subject_of_pred"][0]
     assert (subj.related_lemma, subj.rule) == ("запах", "relcl")
+
+
+def test_fix_lemma_replaces_nonexistent_lemma_only():
+    past = {"Gender": "Masc", "Number": "Sing", "Tense": "Past", "VerbForm": "Fin"}
+    assert fix_lemma("шёл", "ийти", "VERB", past) == "идти"  # ошибка лемматизатора Stanza
+    assert fix_lemma("наполнял", "наполнять", "VERB", past) == "наполнять"  # верная лемма не меняется
+    assert fix_lemma("Rome", "Rome", "PROPN", {}) == "Rome"  # латиница и имена собственные не трогаем
