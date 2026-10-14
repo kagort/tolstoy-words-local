@@ -48,9 +48,9 @@
   <h2 style="margin-top:0">Предложения</h2>
   {% if sents %}
   <table>
-    <tr><th class="num">№</th><th>Предложение</th><th>Тип</th><th class="num">Слов</th></tr>
+    <tr><th class="num">№</th><th class="num">ID</th><th>Предложение</th><th>Тип</th><th class="num">Слов</th></tr>
     {% for s in sents %}
-    <tr><td class="num muted">{{ s.idx }}</td><td><a href="/sentences/{{ s.id }}" style="color:inherit">{{ s.text }}</a></td>
+    <tr data-ctx="{{ s.id }}"><td class="num muted">{{ s.idx }}</td><td class="num small"><a href="/sentences/{{ s.id }}" title="разбор предложения">🌳&nbsp;{{ s.id }}</a></td><td><a href="/sentences/{{ s.id }}" style="color:inherit">{{ s.text }}</a></td>
       <td class="small muted">{{ SENT_TYPE_LABELS.get(s.sent_type, s.sent_type) }}</td><td class="num">{{ s.n_words }}</td></tr>
     {% endfor %}
   </table>

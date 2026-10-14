@@ -31,49 +31,66 @@ async function setValid(hitId, value, btn) {
   btn.classList.remove('secondary');
 }
 
-// Дуговая диаграмма зависимостей (SVG) для страницы предложения
-function drawTree(containerId, tokens, focus) {
+// Дуговая диаграмма зависимостей (SVG) для страницы предложения.
+// Высота дуги — по вложенности (как в displaCy), а не по расстоянию: так длинные предложения остаются читаемыми.
+function drawTree(containerId, tokens, focus, showPunct) {
   const el = document.getElementById(containerId);
   if (!el) return;
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const ctx = document.createElement('canvas').getContext('2d');
   ctx.font = '15px sans-serif';
-  const gap = 18, pad = 10;
+  const gap = 16, pad = 12;
   let x = pad;
   const pos = {};
   tokens.forEach(t => {
-    const w = Math.max(ctx.measureText(t.form).width, ctx.measureText(t.upos).width, 30);
-    pos[t.i] = { x: x + w / 2, w };
+    const w = Math.max(ctx.measureText(t.form).width, 34);
+    pos[t.i] = x + w / 2;
     x += w + gap;
   });
   const width = x + pad;
-  let maxDist = 1;
-  tokens.forEach(t => { if (t.head) maxDist = Math.max(maxDist, Math.abs(t.head - t.i)); });
-  const levelH = 26, baseY = Math.min(maxDist, 12) * levelH + 40;
-  const height = baseY + 50;
+  const arcs = tokens.filter(t => t.head && (showPunct || t.upos !== 'PUNCT'))
+    .map(t => ({ t, lo: Math.min(t.i, t.head), hi: Math.max(t.i, t.head), level: 1 }))
+    .sort((a, b) => (a.hi - a.lo) - (b.hi - b.lo));
+  arcs.forEach((a, k) => {
+    const placed = arcs.slice(0, k);
+    placed.forEach(b => { if (b.lo >= a.lo && b.hi <= a.hi) a.level = Math.max(a.level, b.level + 1); });
+    // пересекающиеся дуги не должны лежать на одной высоте
+    while (placed.some(b => b.level === a.level && a.lo < b.hi && b.lo < a.hi)) a.level += 1;
+  });
+  const maxLevel = Math.max(1, ...arcs.map(a => a.level));
+  const levelH = 24, baseY = maxLevel * levelH + 46, height = baseY + 44;
   const text = cssVar('--text'), muted = cssVar('--muted'), accent = cssVar('--accent');
   const roleColor = { subject: cssVar('--r-subject'), predicate: cssVar('--r-predicate'), attribute: cssVar('--r-attribute'),
     object: cssVar('--r-object'), adverbial: cssVar('--r-adverbial') };
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" font-family="sans-serif">`;
-  svg += `<defs><marker id="arr" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${muted}"/></marker></defs>`;
-  tokens.forEach(t => {
-    if (!t.head) {
-      svg += `<line x1="${pos[t.i].x}" y1="10" x2="${pos[t.i].x}" y2="${baseY - 18}" stroke="${muted}" marker-end="url(#arr)"/>`;
-      svg += `<text x="${pos[t.i].x + 4}" y="22" font-size="11" fill="${muted}">root</text>`;
-      return;
-    }
-    const x1 = pos[t.head].x, x2 = pos[t.i].x;
-    const h = Math.min(Math.abs(t.head - t.i), 12) * levelH;
-    const y = baseY - 18;
-    const hl = (t.i === focus || t.head === focus);
+  svg += `<defs><marker id="arr" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${muted}"/></marker>`;
+  svg += `<marker id="arrA" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${accent}"/></marker></defs>`;
+  const y0 = baseY - 20;
+  tokens.filter(t => !t.head).forEach(t => {
+    svg += `<line x1="${pos[t.i]}" y1="14" x2="${pos[t.i]}" y2="${y0}" stroke="${accent}" stroke-width="1.5" marker-end="url(#arrA)"/>`;
+    svg += `<text x="${pos[t.i] + 5}" y="24" font-size="11" fill="${accent}">root</text>`;
+  });
+  arcs.forEach(a => {
+    const x1 = pos[a.t.head], x2 = pos[a.t.i];
+    const h = a.level * levelH;
+    const hl = (a.t.i === focus || a.t.head === focus);
     const color = hl ? accent : muted;
-    svg += `<path d="M${x1},${y} C${x1},${y - h} ${x2},${y - h} ${x2},${y}" fill="none" stroke="${color}" stroke-width="${hl ? 2 : 1}" marker-end="url(#arr)"/>`;
-    svg += `<text x="${(x1 + x2) / 2}" y="${y - h * 0.75 - 3}" font-size="11" text-anchor="middle" fill="${color}">${t.rel}</text>`;
+    const r = Math.min(12, Math.abs(x2 - x1) / 2);
+    const dir = x2 > x1 ? 1 : -1;
+    // прямоугольная дуга со скруглёнными углами — подписи не налезают друг на друга
+    svg += `<path d="M${x1},${y0} L${x1},${y0 - h + r} Q${x1},${y0 - h} ${x1 + dir * r},${y0 - h} L${x2 - dir * r},${y0 - h} Q${x2},${y0 - h} ${x2},${y0 - h + r} L${x2},${y0}" fill="none" stroke="${color}" stroke-width="${hl ? 2 : 1}" marker-end="url(#${hl ? 'arrA' : 'arr'})"/>`;
+    const label = esc(a.t.rel);
+    const lx = (x1 + x2) / 2, ly = y0 - h;
+    const lw = label.length * 6.2 + 6;
+    svg += `<rect x="${lx - lw / 2}" y="${ly - 7}" width="${lw}" height="13" fill="${cssVar('--panel')}"/>`;
+    svg += `<text x="${lx}" y="${ly + 4}" font-size="11" text-anchor="middle" fill="${color}">${label}</text>`;
   });
   tokens.forEach(t => {
     const c = roleColor[t.role] || text;
     const weight = t.i === focus ? 'bold' : 'normal';
-    svg += `<text x="${pos[t.i].x}" y="${baseY + 4}" font-size="15" text-anchor="middle" fill="${c}" font-weight="${weight}">${t.form.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</text>`;
-    svg += `<text x="${pos[t.i].x}" y="${baseY + 22}" font-size="11" text-anchor="middle" fill="${muted}">${t.upos}</text>`;
+    svg += `<a href="?token=${t.i}"><text x="${pos[t.i]}" y="${baseY + 4}" font-size="15" text-anchor="middle" fill="${c}" font-weight="${weight}">${esc(t.form)}</text></a>`;
+    svg += `<text x="${pos[t.i]}" y="${baseY + 21}" font-size="11" text-anchor="middle" fill="${muted}">${esc(t.upos)}</text>`;
+    svg += `<text x="${pos[t.i]}" y="${baseY + 35}" font-size="10" text-anchor="middle" fill="${muted}">${t.i}</text>`;
   });
   svg += '</svg>';
   el.innerHTML = svg;
@@ -98,3 +115,82 @@ function watchJobs() {
   }, 2500);
 }
 document.addEventListener('DOMContentLoaded', watchJobs);
+
+// Всплывающее окно с соседними предложениями: наведите курсор на строку с атрибутом data-ctx
+(function () {
+  const cache = {};
+  let box = null, timer = null, current = null, lastEvent = null;
+
+  function popup() {
+    if (!box) { box = document.createElement('div'); box.className = 'ctx-popup'; document.body.appendChild(box); }
+    return box;
+  }
+  async function load(id) {
+    if (!(id in cache)) {
+      try {
+        const res = await fetch(`/api/sentences/${id}/context?n=2`);
+        cache[id] = res.ok ? await res.json() : null;
+      } catch (e) { cache[id] = null; }
+    }
+    return cache[id];
+  }
+  function render(data, start, end) {
+    const b = popup();
+    b.textContent = '';
+    const src = document.createElement('div');
+    src.className = 'ctx-src';
+    src.textContent = data.source + ' · контекст ±2 предложения';
+    b.appendChild(src);
+    let par = null;
+    data.sentences.forEach(s => {
+      if (par !== null && s.paragraph !== par) { const hr = document.createElement('div'); hr.className = 'ctx-par'; b.appendChild(hr); }
+      par = s.paragraph;
+      const div = document.createElement('div');
+      div.className = 'ctx-sent' + (s.current ? ' current' : '');
+      const id = document.createElement('span');
+      id.className = 'ctx-id';
+      id.textContent = `ID ${s.id} · № ${s.idx}`;
+      div.appendChild(id);
+      if (s.current && start !== '' && end !== '' && !isNaN(+start)) {
+        div.appendChild(document.createTextNode(s.text.slice(0, +start)));
+        const m = document.createElement('mark');
+        m.textContent = s.text.slice(+start, +end);
+        div.appendChild(m);
+        div.appendChild(document.createTextNode(s.text.slice(+end)));
+      } else {
+        div.appendChild(document.createTextNode(s.text));
+      }
+      b.appendChild(div);
+    });
+  }
+  function place(ev) {
+    if (!box || box.style.display !== 'block' || !ev) return;
+    const pad = 18, w = box.offsetWidth, h = box.offsetHeight;
+    let x = ev.clientX + pad, y = ev.clientY + pad;
+    if (x + w > window.innerWidth - 8) x = Math.max(8, ev.clientX - w - pad);
+    if (y + h > window.innerHeight - 8) y = Math.max(8, ev.clientY - h - pad);
+    box.style.left = x + 'px';
+    box.style.top = y + 'px';
+  }
+  function hide() { clearTimeout(timer); current = null; if (box) box.style.display = 'none'; }
+
+  document.addEventListener('mouseover', ev => {
+    const row = ev.target.closest('[data-ctx]');
+    if (!row || row === current) return;
+    hide();
+    current = row;
+    timer = setTimeout(async () => {
+      const data = await load(row.dataset.ctx);
+      if (!data || current !== row) return;
+      render(data, row.dataset.start ?? '', row.dataset.end ?? '');
+      popup().style.display = 'block';
+      place(lastEvent);
+    }, 350);
+  });
+  document.addEventListener('mousemove', ev => { lastEvent = ev; place(ev); });
+  document.addEventListener('mouseout', ev => {
+    if (current && !current.contains(ev.relatedTarget)) hide();
+  });
+  document.addEventListener('keydown', ev => { if (ev.key === 'Escape') hide(); });
+  window.addEventListener('scroll', hide, { passive: true });
+})();

@@ -39,11 +39,22 @@ POS_LABELS = {
     "PRON": "местоимение",
     "DET": "местоимение-прилагательное",
     "ADP": "предлог",
-    "CCONJ": "союз",
+    "CCONJ": "сочинительный союз",
     "SCONJ": "подчинительный союз",
     "PART": "частица",
     "INTJ": "междометие",
+    "PUNCT": "знак препинания",
+    "SYM": "символ",
+    "X": "другое",
 }
+
+
+def pos_label(upos: str | None) -> str:
+    """«существительное (NOUN)»."""
+    if not upos:
+        return "любая часть речи"
+    name = POS_LABELS.get(upos)
+    return f"{name} ({upos})" if name else upos
 
 
 @dataclass

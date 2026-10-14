@@ -460,6 +460,43 @@ async def hit_valid(hit_id: int, request: Request, db: Session = Depends(get_ses
 # ------------------------------------------------------------------ предложение
 
 
+def _context_rows(db: Session, row: SentenceRow, n: int) -> list[SentenceRow]:
+    return list(db.scalars(
+        select(SentenceRow)
+        .where(SentenceRow.text_id == row.text_id, SentenceRow.idx.between(row.idx - n, row.idx + n))
+        .order_by(SentenceRow.idx)
+    ))
+
+
+@router.get("/api/sentences/{sentence_id}/context")
+def sentence_context(sentence_id: int, n: int = 2, db: Session = Depends(get_session)):
+    """Предложение и n соседних с каждой стороны — для всплывающего окна в конкордансе."""
+    row = db.get(SentenceRow, sentence_id)
+    if row is None:
+        return JSONResponse({"error": "нет такого предложения"}, status_code=404)
+    n = max(0, min(n, 10))
+    doc = db.get(TextDoc, row.text_id)
+    source = f"{doc.author + ', ' if doc.author else ''}«{doc.title}»" if doc else ""
+    return {
+        "id": row.id,
+        "source": source,
+        "sentences": [
+            {"id": r.id, "idx": r.idx, "paragraph": r.paragraph_idx, "text": r.text, "current": r.id == row.id}
+            for r in _context_rows(db, row, n)
+        ],
+    }
+
+
+@router.get("/go/sentence")
+def go_sentence(request: Request, id: str = "", db: Session = Depends(get_session)):
+    sid = _int(id.strip().lstrip("#"))
+    if sid and db.get(SentenceRow, sid):
+        return redirect(f"/sentences/{sid}")
+    flash(request, f"Предложение с ID «{id}» не найдено", "error")
+    return redirect(request.headers.get("referer") or "/analysis")
+
+
+
 @router.get("/sentences/{sentence_id}")
 def sentence_view(request: Request, sentence_id: int, token: int | None = None, db: Session = Depends(get_session)):
     row = db.get(SentenceRow, sentence_id)
@@ -475,11 +512,18 @@ def sentence_view(request: Request, sentence_id: int, token: int | None = None, 
     tree = [{"i": t.idx, "form": t.form, "lemma": t.lemma, "upos": t.upos, "head": t.head, "rel": t.deprel,
              "role": roles[t.idx].role} for t in sent.tokens]
     groups = [{"members": [sent.tok(m).form for m in g.members], "type": g.conj_type} for g in an.groups]
+    # иерархическое дерево (вложенный список) — читается и для длинных предложений
+    children: dict[int, list[int]] = {}
+    for t in sent.tokens:
+        children.setdefault(t.head, []).append(t.idx)
+    tree_children = {k: sorted(v) for k, v in children.items()}
+    context = _context_rows(db, row, 3)
     prev_id = db.scalar(select(SentenceRow.id).where(SentenceRow.text_id == row.text_id, SentenceRow.idx == row.idx - 1))
     next_id = db.scalar(select(SentenceRow.id).where(SentenceRow.text_id == row.text_id, SentenceRow.idx == row.idx + 1))
     return render(request, "sentence.html", row=row, sent=sent, doc=doc, roles=roles, rels=rels, focus=focus,
                   tree_json=json.dumps(tree, ensure_ascii=False).replace("</", "<\\/"), groups=groups, hit_tokens=hit_tokens,
-                  conllu=sent.to_conllu(sentence_id), prev_id=prev_id, next_id=next_id)
+                  conllu=sent.to_conllu(sentence_id), prev_id=prev_id, next_id=next_id, context=context,
+                  tree_children=tree_children)
 
 
 # ------------------------------------------------------------------ задачи
