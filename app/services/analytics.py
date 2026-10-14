@@ -360,3 +360,122 @@ def sentence_structure(session: Session, dictionary_id: int, text_ids: list[int]
         "hits": _structure_stats(session, SentenceRow.id.in_(hit_sids)),
         "all": _structure_stats(session, SentenceRow.text_id.in_(ids)),
     }
+
+
+# ------------------------------------------------------------------ обзор по текстам / авторам / жанрам / периодам
+
+DIMENSIONS = {"author": "Автор", "text": "Текст", "genre": "Жанр", "source_type": "Тип текста", "period": "Период"}
+PERIOD_STEPS = (1, 5, 10, 25, 50, 100)
+NO_DATE = -1
+
+
+def facets(session: Session, text_ids: list[int]) -> dict:
+    """Значения для фильтров обзора: авторы, жанры, диапазон лет."""
+    ids = text_ids or [-1]
+    authors = [a for a in session.scalars(select(TextDoc.author).where(TextDoc.id.in_(ids)).distinct().order_by(TextDoc.author)) if a]
+    genres = [g for g in session.scalars(select(TextDoc.genre).where(TextDoc.id.in_(ids)).distinct().order_by(TextDoc.genre)) if g]
+    y_min, y_max = session.execute(select(func.min(TextDoc.year_from), func.max(TextDoc.year_from)).where(TextDoc.id.in_(ids))).one()
+    return {"authors": authors, "genres": genres, "year_min": y_min, "year_max": y_max}
+
+
+def filter_texts(session: Session, text_ids: list[int], *, year_from: int | None = None, year_to: int | None = None,
+                 authors: list[str] | None = None, genres: list[str] | None = None,
+                 source_types: list[str] | None = None) -> list[int]:
+    """Сужает выборку текстов по годам, авторам, жанрам, типу. Тексты без года при фильтре по годам исключаются."""
+    q = select(TextDoc.id).where(TextDoc.id.in_(text_ids or [-1]))
+    if year_from:
+        q = q.where(TextDoc.year_from >= year_from)
+    if year_to:
+        q = q.where(TextDoc.year_from <= year_to)
+    if authors:
+        q = q.where(TextDoc.author.in_(authors))
+    if genres:
+        q = q.where(TextDoc.genre.in_(genres))
+    if source_types:
+        q = q.where(TextDoc.source_type.in_(source_types))
+    return list(session.scalars(q.order_by(TextDoc.id)))
+
+
+def _group_expr(dim: str, step: int):
+    if dim == "text":
+        return TextDoc.id
+    if dim == "author":
+        return func.coalesce(TextDoc.author, "—")
+    if dim == "genre":
+        return func.coalesce(TextDoc.genre, "—")
+    if dim == "source_type":
+        return TextDoc.source_type
+    # period: начало интервала; тексты без года → NO_DATE
+    return func.coalesce(func.floor(TextDoc.year_from / float(step)) * step, NO_DATE)
+
+
+def _period_label(start: int, step: int) -> str:
+    if start == NO_DATE:
+        return "без даты"
+    return str(start) if step == 1 else f"{start}–{start + step - 1}"
+
+
+def overview(session: Session, dictionary_id: int, text_ids: list[int], entry_ids: list[int],
+             dim: str = "author", step: int = 10) -> dict:
+    """Матрица «группа × слово»: вхождения, ipm, доля текстов группы со словом; плюс сумма по выбранным словам."""
+    from app.web.deps import SOURCE_TYPES  # подписи типов текста
+
+    dim = dim if dim in DIMENSIONS else "author"
+    step = step if step in PERIOD_STEPS else 10
+    ids = text_ids or [-1]
+    key = _group_expr(dim, step).label("g")
+    sizes = session.execute(
+        select(key, func.coalesce(func.sum(TextDoc.n_words), 0), func.count(TextDoc.id)).where(TextDoc.id.in_(ids)).group_by(key)
+    ).all()
+    groups = []
+    titles = {}
+    if dim == "text":
+        titles = {t.id: (f"{t.author}, " if t.author else "") + f"«{t.title}»" + (f" ({t.year_from})" if t.year_from else "")
+                  for t in session.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.year_from).where(TextDoc.id.in_(ids)))}
+    for g, n_words, n_texts in sizes:
+        g = int(g) if dim in ("text", "period") and g is not None else g
+        if dim == "text":
+            label = titles.get(g, str(g))
+        elif dim == "period":
+            label = _period_label(g, step)
+        elif dim == "source_type":
+            label = SOURCE_TYPES.get(g, g)
+        else:
+            label = g
+        groups.append({"key": g, "label": label, "n_words": int(n_words or 0), "n_texts": n_texts})
+    if dim == "period":
+        groups.sort(key=lambda x: (x["key"] == NO_DATE, x["key"]))
+    else:
+        groups.sort(key=lambda x: -x["n_words"])
+
+    entries = list(session.scalars(select(DictionaryEntry).where(DictionaryEntry.id.in_(entry_ids or [-1]))))
+    order = {eid: k for k, eid in enumerate(entry_ids)}
+    entries.sort(key=lambda e: order.get(e.id, 0))
+    counts, texts_with = defaultdict(dict), defaultdict(dict)
+    total_counts, total_texts = {}, {}
+    if entries:
+        base = (select(key, Hit.entry_id, func.count(), func.count(func.distinct(Hit.text_id)))
+                .join(TextDoc, TextDoc.id == Hit.text_id)
+                .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), Hit.entry_id.in_([e.id for e in entries]), VALID))
+        for g, eid, c, t in session.execute(base.group_by(key, Hit.entry_id)):
+            g = int(g) if dim in ("text", "period") and g is not None else g
+            counts[eid][g], texts_with[eid][g] = c, t
+        tot = (select(key, func.count(), func.count(func.distinct(Hit.text_id)))
+               .join(TextDoc, TextDoc.id == Hit.text_id)
+               .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), Hit.entry_id.in_([e.id for e in entries]), VALID)
+               .group_by(key))
+        for g, c, t in session.execute(tot):
+            g = int(g) if dim in ("text", "period") and g is not None else g
+            total_counts[g], total_texts[g] = c, t
+
+    def row(cmap, tmap):
+        return {
+            "count": [cmap.get(gr["key"], 0) for gr in groups],
+            "ipm": [round(ipm(cmap.get(gr["key"], 0), gr["n_words"]), 2) for gr in groups],
+            "share": [round(100 * tmap.get(gr["key"], 0) / gr["n_texts"], 1) if gr["n_texts"] else 0 for gr in groups],
+        }
+
+    words = [{"entry_id": e.id, "word": e.surface, **row(counts[e.id], texts_with[e.id])} for e in entries]
+    total = {"word": "все выбранные слова", **row(total_counts, total_texts)}
+    return {"dim": dim, "dim_label": DIMENSIONS[dim], "step": step, "groups": groups, "words": words, "total": total,
+            "corpus_words": sum(g["n_words"] for g in groups), "n_texts": sum(g["n_texts"] for g in groups)}

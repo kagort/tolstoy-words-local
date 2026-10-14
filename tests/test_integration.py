@@ -55,12 +55,32 @@ def test_full_flow(client):
     assert r.status_code == 303
     corpus_id = int(r.headers["location"].rsplit("/", 1)[1])
 
-    files = {"files": ("sirень.txt", io.BytesIO(TEXT.encode("utf-8")), "text/plain")}
-    r = client.post("/texts/upload", files=files, data={"title": "Сирень", "author": "Тест", "years": "1900",
-                                                       "corpus_ids": str(corpus_id), "source_type": "natural"})
+    # несколько файлов сразу: у каждого свои сведения (форма) или из таблицы метаданных
+    files = [
+        ("files", ("siren.txt", io.BytesIO(TEXT.encode("utf-8")), "text/plain")),
+        ("files", ("dym.txt", io.BytesIO("Пахло дымом. Запах гари стоял над рекой.".encode("utf-8")), "text/plain")),
+        ("files", ("gen.txt", io.BytesIO("Аромат кофе наполнял кухню.".encode("utf-8")), "text/plain")),
+    ]
+    meta_csv = "файл;название;автор;год;жанр;тип\ngen;Текст модели;Qwen;2025;эссе;нейросеть\n".encode("utf-8")
+    files.append(("meta_file", ("meta.csv", io.BytesIO(meta_csv), "text/csv")))
+    data = {"author": "Общий Автор", "years": "1900", "genre": "рассказ", "source_type": "natural",
+            "corpus_ids": str(corpus_id),
+            "f_names": ["siren.txt", "dym.txt", "gen.txt"], "f_titles": ["Сирень", "Дым", ""],
+            "f_authors": ["Автор Сирени", "", ""], "f_years": ["1880", "", ""], "f_genres": ["", "очерк", ""],
+            "f_types": ["", "", ""], "f_generators": ["", "", ""]}
+    r = client.post("/texts/upload", files=files, data=data)
     assert r.status_code == 200
     run_jobs()
     assert "готов" in client.get("/texts").text
+    from app.db import SessionLocal as _S
+    from app.models import TextDoc as _T
+
+    with _S() as s:
+        by_title = {t.title: t for t in s.query(_T).all()}
+        assert by_title["Сирень"].author == "Автор Сирени" and by_title["Сирень"].year_from == 1880
+        assert by_title["Сирень"].genre == "рассказ"  # общее поле
+        assert by_title["Дым"].author == "Общий Автор" and by_title["Дым"].genre == "очерк"
+        assert by_title["Текст модели"].author == "Qwen" and by_title["Текст модели"].source_type == "generated"
 
     r = client.post("/dictionaries", data={"name": "Запахи", "words": "запах, аромат, вонь, пахнуть, дым"},
                     follow_redirects=False)
@@ -72,7 +92,7 @@ def test_full_flow(client):
     assert page.status_code == 200 and "запах" in page.text
 
     base = f"dictionary_id={dict_id}&corpus_id={corpus_id}"
-    for tab in ("freq", "conc", "profile", "compare", "structure"):
+    for tab in ("overview", "freq", "conc", "profile", "compare", "structure"):
         r = client.get(f"/analysis?tab={tab}&{base}")
         assert r.status_code == 200, tab
 
@@ -109,7 +129,15 @@ def test_full_flow(client):
     assert f'data-ctx="{sent_id}"' in conc or "data-ctx=" in conc
     assert "(nsubj" in conc or "(obj" in conc or "(obl" in conc
 
-    for url in (f"/export/frequency.xlsx?{base}", f"/export/frequency.csv?{base}", f"/export/concordance.xlsx?{base}",
+    for dim in ("author", "text", "genre", "source_type", "period"):
+        r = client.get(f"/analysis?tab=overview&{base}&dim={dim}&step=10&metric=ipm&words={entry.id}")
+        assert r.status_code == 200 and "chart-ov" in r.text, dim
+    with SessionLocal() as s:
+        ov = A.overview(s, dict_id, ids, [entry.id], "author", 10)
+        now = {row["word"]: row["count"] for row in A.frequency(s, dict_id, ids)["rows"]}
+        assert sum(ov["words"][0]["count"]) == now["запах"]  # одно вхождение уже отмечено ложным
+        assert A.filter_texts(s, ids, year_from=1870, year_to=1890) and not A.filter_texts(s, ids, year_from=3000)
+    for url in (f"/export/overview.xlsx?{base}&dim=period&step=25", f"/export/frequency.xlsx?{base}", f"/export/frequency.csv?{base}", f"/export/concordance.xlsx?{base}",
                 f"/export/profile.json?{base}&entry_id={entry.id}", f"/export/compare.xlsx?{base}&corpus_b=",
                 f"/export/structure.csv?{base}", f"/export/hits.conllu?{base}", f"/export/dictionary/{dict_id}.csv"):
         r = client.get(url)

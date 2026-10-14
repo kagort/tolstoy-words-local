@@ -26,6 +26,7 @@ from app.services.dictionaries import (
     update_entry,
 )
 from app.services.ingest import create_text
+from app.services.metadata import lookup, normalize_source_type, parse_meta_table, parse_years
 from app.services.jobs import enqueue
 from app.services.matching import load_sentences
 from app.web.deps import flash, render
@@ -42,11 +43,6 @@ def _int(v: str | None) -> int | None:
         return int(v) if v not in (None, "") else None
     except ValueError:
         return None
-
-
-def _years(v: str | None) -> tuple[int | None, int | None]:
-    ys = [int(y) for y in re.findall(r"\d{3,4}", v or "")]
-    return (ys[0], ys[-1]) if ys else (None, None)
 
 
 # ------------------------------------------------------------------ вход
@@ -112,17 +108,31 @@ def texts_list(request: Request, corpus_id: str | None = None, db: Session = Dep
 async def texts_upload(
     request: Request,
     files: list[UploadFile] = File(...),
-    title: str = Form(""),
+    # общие сведения — для всех файлов, если для файла не указано своё
     author: str = Form(""),
     years: str = Form(""),
     genre: str = Form(""),
     source_type: str = Form("natural"),
     generator: str = Form(""),
+    # сведения по каждому файлу (в порядке выбора файлов)
+    f_names: list[str] = Form([]),
+    f_titles: list[str] = Form([]),
+    f_authors: list[str] = Form([]),
+    f_years: list[str] = Form([]),
+    f_genres: list[str] = Form([]),
+    f_types: list[str] = Form([]),
+    f_generators: list[str] = Form([]),
+    meta_file: UploadFile | None = File(None),
     corpus_ids: list[str] = Form([]),
     new_corpus: str = Form(""),
     db: Session = Depends(get_session),
 ):
-    y1, y2 = _years(years)
+    meta: dict = {}
+    if meta_file is not None and meta_file.filename:
+        try:
+            meta = parse_meta_table(meta_file.filename, await meta_file.read())
+        except Exception as exc:  # noqa: BLE001
+            flash(request, f"Таблица метаданных не прочитана: {exc}", "error")
     cids = [int(c) for c in corpus_ids if c.isdigit()]
     if new_corpus.strip():
         c = db.scalar(select(Corpus).where(Corpus.name == new_corpus.strip()))
@@ -131,19 +141,32 @@ async def texts_upload(
             db.add(c)
             db.flush()
         cids.append(c.id)
+    # строки формы сопоставляются с файлами по имени файла (надёжнее, чем по порядку)
+    per_file = {}
+    for k, name in enumerate(f_names):
+        def at(lst, k=k):
+            return lst[k].strip() if k < len(lst) else ""
+        per_file[name] = {"title": at(f_titles), "author": at(f_authors), "years": at(f_years), "genre": at(f_genres),
+                          "source_type": at(f_types), "generator": at(f_generators)}
     created, errors = 0, []
-    real_files = [f for f in files if f.filename]
-    for f in real_files:
+    for f in [f for f in files if f.filename]:
         data = await f.read()
         if len(data) > settings.upload_max_mb * 1024 * 1024:
             errors.append(f"{f.filename}: файл больше {settings.upload_max_mb} МБ")
             continue
+        row = per_file.get(f.filename, {})
+        m = lookup(meta, f.filename)
+
+        def pick(field, common="", row=row, m=m):
+            return row.get(field) or m.get(field) or common
+
+        y1, y2 = parse_years(pick("years", years))
+        stype = normalize_source_type(pick("source_type")) or source_type or "natural"
         try:
             create_text(
-                db, filename=f.filename, data=data,
-                title=title if (title and len(real_files) == 1) else None,
-                author=author, year_from=y1, year_to=y2, genre=genre, source_type=source_type,
-                generator=generator, corpus_ids=cids,
+                db, filename=f.filename, data=data, title=pick("title") or None,
+                author=pick("author", author), year_from=y1, year_to=y2, genre=pick("genre", genre),
+                source_type=stype, generator=pick("generator", generator), corpus_ids=cids,
             )
             created += 1
         except UnsupportedFormat as exc:
@@ -179,7 +202,7 @@ def text_edit(request: Request, text_id: int, title: str = Form(...), author: st
     if doc is None:
         raise HTTPException(404)
     doc.title, doc.author, doc.genre = title.strip(), author.strip() or None, genre.strip() or None
-    doc.year_from, doc.year_to = _years(years)
+    doc.year_from, doc.year_to = parse_years(years)
     doc.source_type, doc.generator = source_type, generator.strip() or None
     ids = [int(c) for c in corpus_ids if c.isdigit()]
     doc.corpora = list(db.scalars(select(Corpus).where(Corpus.id.in_(ids)))) if ids else []
@@ -401,7 +424,35 @@ def _analysis_context(db: Session, request: Request) -> dict:
     corpus_id = _int(qp.get("corpus_id"))
     entries = list(db.scalars(select(DictionaryEntry).where(DictionaryEntry.dictionary_id == dict_id).order_by(DictionaryEntry.surface))) if dict_id else []
     return dict(dictionaries=dictionaries, corpora=corpora, dict_id=dict_id, corpus_id=corpus_id, entries=entries,
-                corpus_name=A.corpus_label(db, corpus_id), tab=qp.get("tab", "freq"))
+                corpus_name=A.corpus_label(db, corpus_id), tab=qp.get("tab", "overview"))
+
+
+def _overview_params(request: Request) -> dict:
+    qp = request.query_params
+    return {
+        "entry_ids": [int(x) for x in qp.getlist("words") if x.isdigit()],
+        "dim": qp.get("dim") or "author",
+        "step": _int(qp.get("step")) or 10,
+        "metric": qp.get("metric") or "ipm",
+        "year_from": _int(qp.get("year_from")),
+        "year_to": _int(qp.get("year_to")),
+        "authors": [a for a in qp.getlist("authors") if a],
+        "genres": [g for g in qp.getlist("genres") if g],
+        "stypes": [t for t in qp.getlist("stypes") if t],
+    }
+
+
+def _overview_context(db: Session, request: Request, dict_id: int, text_ids: list[int]) -> dict:
+    p = _overview_params(request)
+    facets = A.facets(db, text_ids)
+    ids = A.filter_texts(db, text_ids, year_from=p["year_from"], year_to=p["year_to"], authors=p["authors"],
+                         genres=p["genres"], source_types=p["stypes"])
+    entry_ids = p["entry_ids"]
+    if not entry_ids:  # по умолчанию — пять самых частых слов
+        entry_ids = [r["entry_id"] for r in A.frequency(db, dict_id, ids)["rows"] if r["count"]][:5]
+    ov = A.overview(db, dict_id, ids, entry_ids, p["dim"], p["step"])
+    return {"ov": ov, "ov_params": p, "ov_entry_ids": entry_ids, "facets": facets,
+            "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
 
 
 @router.get("/analysis")
@@ -416,7 +467,9 @@ def analysis(request: Request, db: Session = Depends(get_session)):
     entry_id = _int(qp.get("entry_id"))
     ctx["entry_id"] = entry_id
     scopes = ("direct", "shared", "uncertain") if qp.get("uncertain") else ("direct", "shared")
-    if tab == "freq":
+    if tab == "overview":
+        ctx.update(_overview_context(db, request, dict_id, text_ids))
+    elif tab == "freq":
         ctx["freq"] = A.frequency(db, dict_id, text_ids)
         ctx["heat"] = A.frequency_by_text(db, dict_id, text_ids)
     elif tab == "conc":

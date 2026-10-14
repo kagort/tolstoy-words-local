@@ -1,7 +1,7 @@
 #!/bin/sh
 # Резервная копия базы: ./deploy/backup.sh  (запускать из папки проекта)
 # Для ежедневного запуска на VPS добавьте в crontab (crontab -e):
-#   15 3 * * * cd /opt/tolstoy-words && ./deploy/backup.sh >> backups/backup.log 2>&1
+#   15 3 * * * cd /opt/quotverba && ./deploy/backup.sh >> backups/backup.log 2>&1
 set -e
 cd "$(dirname "$0")/.."
 . ./.env 2>/dev/null || true
