@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Protocol
@@ -94,6 +95,27 @@ def _lemmatize_cached(form: str, upos: str, feats_key: tuple) -> str:
 
 def lemmatize(form: str, upos: str, feats: dict[str, str]) -> str:
     return _lemmatize_cached(form, upos, tuple(sorted(feats.items())))
+
+
+_FIXABLE_UPOS = {"NOUN", "VERB", "AUX", "ADJ", "ADV", "NUM", "PRON", "DET"}
+_CYRILLIC = re.compile(r"^[а-яё-]+$", re.IGNORECASE)
+
+
+def fix_lemma(form: str, lemma: str, upos: str, feats: dict[str, str]) -> str:
+    """Исправляет несуществующие леммы нейросетевого лемматизатора (Stanza: «шёл» → «ийти»).
+
+    Если лемма неизвестна словарю pymorphy3, а pymorphy3 даёт для словоформы известную
+    лемму той же части речи — берём её. Редкие слова, которых нет в словаре, не трогаем.
+    """
+    if upos not in _FIXABLE_UPOS or not lemma or not _CYRILLIC.match(lemma):
+        return lemma
+    morph = _morph()
+    if morph.word_is_known(lemma.lower()):
+        return lemma
+    alt = lemmatize(form, upos, feats)
+    if alt and alt.lower() != lemma.lower() and morph.word_is_known(alt.lower()):
+        return alt
+    return lemma
 
 
 # ---------------------------------------------------------------- починка дерева
@@ -224,7 +246,7 @@ class StanzaParser:
                 words.append(
                     Parsed(
                         form=w.text,
-                        lemma=w.lemma or w.text,
+                        lemma=fix_lemma(w.text, w.lemma or w.text, w.upos or "X", feats),
                         upos=w.upos or "X",
                         feats=feats,
                         head=int(w.head or 0),
