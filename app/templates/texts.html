@@ -5,20 +5,37 @@
 
 <details class="panel" {% if not texts %}open{% endif %}>
   <summary><strong>Загрузить тексты</strong></summary>
-  <form method="post" action="/texts/upload" enctype="multipart/form-data">
-    <label>Файлы (.txt, .docx, .fb2; до {{ max_mb }} МБ каждый; можно выбрать несколько)</label>
-    <input type="file" name="files" multiple required accept=".txt,.docx,.fb2">
-    <p class="help">Сведения ниже применяются ко всем выбранным файлам. Название берётся из имени файла, если файлов несколько. Потом сведения можно поправить в карточке текста.</p>
-    <div class="row">
-      <div><label>Название (если файл один)</label><input type="text" name="title"></div>
-      <div><label>Автор</label><input type="text" name="author"></div>
-      <div><label>Год или годы (1863 или 1863–1869)</label><input type="text" name="years"></div>
-      <div><label>Жанр</label><input type="text" name="genre"></div>
+  <form method="post" action="/texts/upload" enctype="multipart/form-data" id="upload-form">
+    <label>1. Выберите файлы (.txt, .docx, .fb2; до {{ max_mb }} МБ каждый). Можно сразу несколько: Ctrl+щелчок или Shift+щелчок в окне выбора.</label>
+    <input type="file" name="files" id="upload-files" multiple required accept=".txt,.docx,.fb2">
+
+    <div id="per-file" style="display:none">
+      <label style="margin-top:14px">2. Сведения о каждом файле. Пустое поле — берётся из общих сведений ниже (или из таблицы метаданных).</label>
+      <div class="table-scroll">
+        <table id="per-file-table">
+          <tr><th>Файл</th><th>Название</th><th>Автор</th><th>Год(ы)</th><th>Жанр</th><th>Тип</th><th>Модель/промпт</th></tr>
+        </table>
+      </div>
     </div>
+
+    <label style="margin-top:14px">3. Общие сведения — для всех файлов, у которых поле выше не заполнено</label>
     <div class="row">
+      <div><label>Автор</label><input type="text" name="author" id="c-author"></div>
+      <div><label>Год или годы (1863 или 1863–1869)</label><input type="text" name="years" id="c-years"></div>
+      <div><label>Жанр</label><input type="text" name="genre" id="c-genre"></div>
       <div><label>Тип текста</label>
         <select name="source_type">{% for k, v in SOURCE_TYPES.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
       <div><label>Модель/промпт (для сгенерированных)</label><input type="text" name="generator"></div>
+    </div>
+
+    <details style="margin-top:10px">
+      <summary>…или таблица метаданных для многих файлов (CSV / XLSX)</summary>
+      <p class="help">Колонки: <code>файл;название;автор;год;жанр;тип;модель</code> — обязательна только «файл» (имя файла с расширением или без).
+        Тип: «литература» или «нейросеть». Поля, заполненные в таблице «Сведения о каждом файле», важнее таблицы метаданных.</p>
+      <input type="file" name="meta_file" accept=".csv,.txt,.tsv,.xlsx">
+    </details>
+
+    <div class="row" style="margin-top:10px">
       <div><label>Добавить в корпуса</label>
         <select name="corpus_ids" multiple size="3">{% for c in corpora %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
       <div><label>…или создать новый корпус</label><input type="text" name="new_corpus" placeholder="Название корпуса"></div>
@@ -54,4 +71,38 @@
 </table>
 {% else %}<p class="muted">Текстов пока нет.</p>{% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Таблица «сведения о каждом файле» строится при выборе файлов
+(function () {
+  const input = document.getElementById('upload-files');
+  const table = document.getElementById('per-file-table');
+  const box = document.getElementById('per-file');
+  const types = {{ SOURCE_TYPES|tojson }};
+  function text(name, value, placeholder) {
+    const i = document.createElement('input'); i.type = 'text'; i.name = name; i.value = value || ''; i.placeholder = placeholder || '';
+    return i;
+  }
+  input.addEventListener('change', () => {
+    table.querySelectorAll('tr.f').forEach(r => r.remove());
+    const files = Array.from(input.files);
+    box.style.display = files.length ? '' : 'none';
+    files.forEach(f => {
+      const tr = document.createElement('tr'); tr.className = 'f';
+      const td0 = document.createElement('td'); td0.className = 'small'; td0.textContent = f.name;
+      const hidden = document.createElement('input'); hidden.type = 'hidden'; hidden.name = 'f_names'; hidden.value = f.name;
+      td0.appendChild(hidden); tr.appendChild(td0);
+      [['f_titles', f.name.replace(/\.[^.]+$/, ''), ''], ['f_authors', '', 'как в общих'], ['f_years', '', 'как в общих'],
+       ['f_genres', '', 'как в общих']].forEach(([n, v, ph]) => { const td = document.createElement('td'); td.appendChild(text(n, v, ph)); tr.appendChild(td); });
+      const sel = document.createElement('select'); sel.name = 'f_types';
+      sel.innerHTML = '<option value="">как в общих</option>' + Object.entries(types).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
+      const tdS = document.createElement('td'); tdS.appendChild(sel); tr.appendChild(tdS);
+      const tdG = document.createElement('td'); tdG.appendChild(text('f_generators', '', '')); tr.appendChild(tdG);
+      table.appendChild(tr);
+    });
+  });
+})();
+</script>
 {% endblock %}

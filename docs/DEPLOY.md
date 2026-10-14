@@ -113,9 +113,9 @@ adduser tw && usermod -aG docker,sudo tw
 ### 2.3. Установка приложения
 ```bash
 su - tw
-sudo mkdir -p /opt/tolstoy-words && sudo chown tw /opt/tolstoy-words
-git clone https://github.com/kagort/tolstoy-words-local.git /opt/tolstoy-words
-cd /opt/tolstoy-words
+sudo mkdir -p /opt/quotverba && sudo chown tw /opt/quotverba
+git clone https://github.com/kagort/tolstoy-words-local.git /opt/quotverba
+cd /opt/quotverba
 cp .env.example .env
 nano .env
 ```
@@ -139,12 +139,12 @@ ssh -L 5433:localhost:5432 tw@IP_СЕРВЕРА
 
 ### 2.5. Резервные копии
 ```bash
-cd /opt/tolstoy-words
+cd /opt/quotverba
 ./deploy/backup.sh                 # копия в backups/, старше 14 дней удаляются
 crontab -e                         # ежедневно в 03:15:
-# 15 3 * * * cd /opt/tolstoy-words && ./deploy/backup.sh >> backups/backup.log 2>&1
+# 15 3 * * * cd /opt/quotverba && ./deploy/backup.sh >> backups/backup.log 2>&1
 ```
-Скачать копию к себе: `scp tw@IP:/opt/tolstoy-words/backups/ИМЯ.dump .`
+Скачать копию к себе: `scp tw@IP:/opt/quotverba/backups/ИМЯ.dump .`
 Восстановление: `./deploy/restore.sh backups/ИМЯ.dump`.
 Раз в месяц проверяйте восстановление на локальной машине — копия, которую ни разу не восстанавливали, не считается копией.
 
@@ -152,17 +152,17 @@ crontab -e                         # ежедневно в 03:15:
 Удобно разобрать большой корпус на мощном компьютере, а потом перенести готовую базу:
 ```powershell
 # на Windows, в папке проекта
-docker compose exec -T db pg_dump -U postgres -d tolstoy -Fc > tolstoy.dump
-scp tolstoy.dump tw@IP:/opt/tolstoy-words/backups/
+docker compose exec -T db pg_dump -U postgres -d tolstoy -Fc > quotverba.dump
+scp quotverba.dump tw@IP:/opt/quotverba/backups/
 ```
 ```bash
 # на VPS
-cd /opt/tolstoy-words && ./deploy/restore.sh backups/tolstoy.dump
+cd /opt/quotverba && ./deploy/restore.sh backups/quotverba.dump
 ```
 
 ### 2.7. Обновление на VPS
 ```bash
-cd /opt/tolstoy-words
+cd /opt/quotverba
 ./deploy/backup.sh
 git pull
 docker compose --profile prod up -d --build

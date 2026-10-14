@@ -16,10 +16,70 @@
 
 {% set base = {'dictionary_id': dict_id, 'corpus_id': corpus_id or ''} %}
 <div class="tabs">
-  {% for key, label in [('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
+  {% for key, label in [('overview', 'Обзор'), ('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
   <a class="{{ 'active' if tab == key }}" href="/analysis?tab={{ key }}&dictionary_id={{ dict_id }}&corpus_id={{ corpus_id or '' }}{% if entry_id and key in ('profile','conc','structure','compare') %}&entry_id={{ entry_id }}{% endif %}">{{ label }}</a>
   {% endfor %}
 </div>
+
+{# ============================================================== ОБЗОР #}
+{% if tab == 'overview' and ov %}
+{% set p = ov_params %}
+<form method="get" class="panel">
+  <input type="hidden" name="tab" value="overview"><input type="hidden" name="dictionary_id" value="{{ dict_id }}"><input type="hidden" name="corpus_id" value="{{ corpus_id or '' }}">
+  <div class="row">
+    <div><label>Слова словаря (Ctrl+щелчок — несколько; по умолчанию 5 самых частых)</label>
+      <select name="words" multiple size="6">{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id in ov_entry_ids }}>{{ e.surface }}</option>{% endfor %}</select></div>
+    <div>
+      <label>Группировать по</label>
+      <select name="dim">{% for k, v in DIMENSIONS.items() %}<option value="{{ k }}" {{ 'selected' if p.dim == k }}>{{ v }}</option>{% endfor %}</select>
+      <label>Шаг периода, лет (для группировки «Период»)</label>
+      <select name="step">{% for st in PERIOD_STEPS %}<option value="{{ st }}" {{ 'selected' if p.step == st }}>{{ st }}</option>{% endfor %}</select>
+      <label>Показатель</label>
+      <select name="metric">
+        <option value="ipm" {{ 'selected' if p.metric == 'ipm' }}>ipm — на миллион слов группы</option>
+        <option value="count" {{ 'selected' if p.metric == 'count' }}>число вхождений</option>
+        <option value="share" {{ 'selected' if p.metric == 'share' }}>% текстов группы, где слово встречается</option>
+      </select>
+    </div>
+    <div>
+      <label>Годы: с … по … {% if facets.year_min %}<span class="muted">(в корпусе {{ facets.year_min }}–{{ facets.year_max }})</span>{% endif %}</label>
+      <div class="row" style="gap:6px"><input type="number" name="year_from" value="{{ p.year_from or '' }}" placeholder="с"><input type="number" name="year_to" value="{{ p.year_to or '' }}" placeholder="по"></div>
+      <label>Тип текста</label>
+      <select name="stypes" multiple size="3">{% for k, v in SOURCE_TYPES.items() %}<option value="{{ k }}" {{ 'selected' if k in p.stypes }}>{{ v }}</option>{% endfor %}</select>
+    </div>
+    <div><label>Авторы (пусто — все)</label>
+      <select name="authors" multiple size="6">{% for a in facets.authors %}<option {{ 'selected' if a in p.authors }}>{{ a }}</option>{% endfor %}</select></div>
+    <div><label>Жанры (пусто — все)</label>
+      <select name="genres" multiple size="6">{% for g in facets.genres %}<option {{ 'selected' if g in p.genres }}>{{ g }}</option>{% endfor %}</select></div>
+  </div>
+  <p class="row"><span class="shrink"><button type="submit">Показать</button></span>
+    <a class="shrink" href="/analysis?tab=overview&dictionary_id={{ dict_id }}&corpus_id={{ corpus_id or '' }}">сбросить фильтры</a></p>
+</form>
+{% set mlabel = {'ipm': 'ipm', 'count': 'вхождений', 'share': '% текстов'}[p.metric] %}
+<div class="row" style="margin-bottom:10px">
+  <div class="muted">Выборка: {{ ov.n_texts }} текстов, {{ "{:,}".format(ov.corpus_words).replace(",", " ") }} слов; групп: {{ ov.groups|length }}.
+    {% if p.year_from or p.year_to %}Тексты без года при фильтре по годам не учитываются.{% endif %}</div>
+  <div class="shrink">Скачать: <a href="/export/overview.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/overview.csv{{ qs(request) }}">CSV</a> · <a href="/export/overview.json{{ qs(request) }}">JSON</a></div>
+</div>
+{% if ov.words and ov.groups %}
+<div class="panel"><div id="chart-ov" class="chart" style="min-height:420px"></div></div>
+{% if ov.words|length > 1 and ov.groups|length > 1 %}
+<div class="panel"><h3 style="margin-top:0">Тепловая карта: слово × {{ ov.dim_label|lower }} ({{ mlabel }})</h3><div id="chart-ov-heat" class="chart" style="min-height:{{ 160 + 28 * ov.words|length }}px"></div></div>
+{% endif %}
+<div class="panel table-scroll">
+  <table>
+    <tr><th>{{ ov.dim_label }}</th><th class="num">Слов</th><th class="num">Текстов</th>
+      {% for w in ov.words %}<th class="num">{{ w.word }}</th>{% endfor %}<th class="num">Σ выбранных</th></tr>
+    {% for g in ov.groups %}{% set gi = loop.index0 %}
+    <tr><td>{{ g.label }}</td><td class="num">{{ g.n_words }}</td><td class="num">{{ g.n_texts }}</td>
+      {% for w in ov.words %}<td class="num" title="вхождений: {{ w.count[gi] }}; ipm: {{ w.ipm[gi] }}; текстов со словом: {{ w.share[gi] }}%">{{ w[p.metric][gi] }}</td>{% endfor %}
+      <td class="num"><strong>{{ ov.total[p.metric][gi] }}</strong></td></tr>
+    {% endfor %}
+  </table>
+  <p class="help">Значение в ячейке — {{ mlabel }}. Наведите на ячейку, чтобы увидеть все три показателя.</p>
+</div>
+{% else %}<div class="panel muted">Нет данных: выберите слова или ослабьте фильтры.</div>{% endif %}
+{% endif %}
 
 {# ============================================================== ЧАСТОТЫ #}
 {% if tab == 'freq' and freq %}
@@ -193,6 +253,23 @@
 
 {% block scripts %}
 <script>
+{% if tab == 'overview' and ov and ov.words and ov.groups %}
+(function () {
+  const ov = {{ ov|tojson }}, metric = {{ ov_params.metric|tojson }};
+  const labels = ov.groups.map(g => g.label);
+  const ytitle = { ipm: 'ipm', count: 'вхождений', share: '% текстов группы' }[metric];
+  const isPeriod = ov.dim === 'period';
+  const traces = ov.words.map(w => isPeriod
+    ? { type: 'scatter', mode: 'lines+markers', name: w.word, x: labels, y: w[metric] }
+    : { type: 'bar', name: w.word, x: labels, y: w[metric] });
+  drawChart('chart-ov', traces, { barmode: 'group', yaxis: { title: ytitle }, xaxis: { automargin: true },
+    title: { text: `${ytitle} по группировке «${ov.dim_label}»`, font: { size: 14 } }, margin: { l: 60, r: 20, t: 50, b: 140 } });
+  if (ov.words.length > 1 && ov.groups.length > 1) {
+    drawChart('chart-ov-heat', [{ type: 'heatmap', z: ov.words.map(w => w[metric]), x: labels, y: ov.words.map(w => w.word),
+      colorscale: 'Blues', reversescale: true, hovertemplate: '%{y} — %{x}: %{z}<extra></extra>' }], { margin: { l: 110, r: 20, t: 10, b: 140 } });
+  }
+})();
+{% endif %}
 {% if tab == 'freq' and freq %}
 (function () {
   const rows = {{ freq.rows[:40]|tojson }}.filter(r => r.count > 0);
@@ -201,7 +278,7 @@
     { title: { text: 'Частота на миллион слов (ipm)', font: { size: 14 } }, yaxis: { title: 'ipm' } });
   {% if heat.words and heat.texts|length > 1 %}
   const heat = {{ heat|tojson }};
-  drawChart('chart-heat', [{ type: 'heatmap', z: heat.z, x: heat.texts, y: heat.words, colorscale: 'Blues', hovertemplate: '%{y} — %{x}: %{z} ipm<extra></extra>' }],
+  drawChart('chart-heat', [{ type: 'heatmap', z: heat.z, x: heat.texts, y: heat.words, colorscale: 'Blues', reversescale: true, hovertemplate: '%{y} — %{x}: %{z} ipm<extra></extra>' }],
     { margin: { l: 110, r: 20, t: 10, b: 160 } });
   {% endif %}
 })();

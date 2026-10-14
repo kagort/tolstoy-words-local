@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     admin_username: str = "admin"
     admin_password: str = ""
     upload_max_mb: int = 50
-    site_title: str = "Tolstoy Words"
+    site_title: str = "Quotverba"
 
     # NLP
     nlp_backend: str = "stanza"  # stanza | natasha

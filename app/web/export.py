@@ -161,6 +161,27 @@ def export_compare(fmt: str, request: Request, db: Session = Depends(get_session
     return _send(frames, fmt, "compare", params)
 
 
+@router.get("/overview.{fmt}")
+def export_overview(fmt: str, request: Request, db: Session = Depends(get_session)):
+    if fmt not in FORMATS:
+        raise HTTPException(400)
+    from app.web.pages import _overview_context
+
+    dict_id, ids = _ctx(db, request)
+    ov = _overview_context(db, request, dict_id, ids)["ov"]
+    head = {ov["dim_label"]: [g["label"] for g in ov["groups"]], "Слов в группе": [g["n_words"] for g in ov["groups"]],
+            "Текстов в группе": [g["n_texts"] for g in ov["groups"]]}
+    frames = {}
+    for metric, title in (("ipm", "ipm"), ("count", "Вхождения"), ("share", "Доля текстов, %")):
+        data = dict(head)
+        for w in ov["words"] + [ov["total"]]:
+            data[w["word"]] = w[metric]
+        frames[title] = pd.DataFrame(data)
+    params = _params(db, request) | {"Группировка": ov["dim_label"], "Шаг периода (лет)": ov["step"],
+                                     "Слов в выборке": ov["corpus_words"], "Текстов в выборке": ov["n_texts"]}
+    return _send(frames, fmt, f"overview-{ov['dim']}", params)
+
+
 @router.get("/structure.{fmt}")
 def export_structure(fmt: str, request: Request, db: Session = Depends(get_session)):
     if fmt not in FORMATS:
