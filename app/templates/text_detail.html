@@ -37,6 +37,7 @@
       <tr><td>Загружен</td><td class="num">{{ doc.created_at.strftime('%d.%m.%Y %H:%M') if doc.created_at }}</td></tr>
     </table>
     <p class="row">
+      {% if doc.status == 'ready' %}<a class="btn" href="/texts/{{ doc.id }}/stats">📊 Статистический портрет</a>{% endif %}
       <a class="btn secondary" href="/export/text/{{ doc.id }}.conllu">Скачать разметку (CoNLL-U)</a>
       <form class="inline shrink" method="post" action="/texts/{{ doc.id }}/reparse"><button class="secondary" type="submit">Разобрать заново</button></form>
       <form class="inline shrink" method="post" action="/texts/{{ doc.id }}/delete" onsubmit="return confirm('Удалить текст и всю его разметку?')"><button class="danger" type="submit">Удалить</button></form>

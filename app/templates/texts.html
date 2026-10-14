@@ -57,7 +57,7 @@
   {% for t in texts %}
   <tr>
     <td class="muted">{{ t.id }}</td>
-    <td><a href="/texts/{{ t.id }}">{{ t.title }}</a></td>
+    <td><a href="/texts/{{ t.id }}">{{ t.title }}</a>{% if t.status == 'ready' %} <a href="/texts/{{ t.id }}/stats" title="статистический портрет текста" style="text-decoration:none">📊</a>{% endif %}</td>
     <td>{{ t.author or '' }}</td>
     <td>{{ t.years }}</td>
     <td>{{ t.genre or '' }}</td>

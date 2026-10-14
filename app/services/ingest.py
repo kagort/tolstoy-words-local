@@ -90,6 +90,7 @@ def run_ingest(job_id: int | None, text_id: int) -> None:
         s.execute(delete(SentenceRow).where(SentenceRow.text_id == text_id))
         doc.status = "processing"
         doc.error = None
+        doc.meta = {k: v for k, v in (doc.meta or {}).items() if k != "stats"}  # статистика пересчитается
         s.commit()
         content = doc.norm_text or normalize_text(doc.raw_text)
         title = doc.title
@@ -143,4 +144,12 @@ def run_ingest(job_id: int | None, text_id: int) -> None:
             enqueue(s, "match", {"dictionary_id": d.id, "text_ids": [text_id]},
                     title=f"Словарь «{d.name}» × текст «{title}»")
         s.commit()
+    # статистический портрет считаем сразу, чтобы страница открывалась мгновенно
+    try:
+        from app.services.textstats import get_stats
+
+        with SessionLocal() as s:
+            get_stats(s, text_id, refresh=True)
+    except Exception:  # noqa: BLE001 — статистика не должна ломать разбор
+        log.exception("Не удалось посчитать статистику текста %s", text_id)
     log.info("Текст %s разобран: %s предложений, %s токенов", text_id, sent_idx, n_tokens)

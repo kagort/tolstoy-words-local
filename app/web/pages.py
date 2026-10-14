@@ -194,6 +194,17 @@ def text_detail(request: Request, text_id: int, page: int = 1, db: Session = Dep
     return render(request, "text_detail.html", doc=doc, sents=sents, corpora=corpora, page=page, pages=pages_n)
 
 
+@router.get("/texts/{text_id}/stats")
+def text_stats(request: Request, text_id: int, refresh: int = 0, db: Session = Depends(get_session)):
+    from app.services.textstats import FEATURE_VALUE_LABELS, get_stats
+
+    doc = db.get(TextDoc, text_id)
+    if doc is None:
+        raise HTTPException(404, "Текст не найден")
+    stats = get_stats(db, text_id, refresh=bool(refresh))
+    return render(request, "text_stats.html", doc=doc, st=stats, FEATURE_VALUE_LABELS=FEATURE_VALUE_LABELS)
+
+
 @router.post("/texts/{text_id}/edit")
 def text_edit(request: Request, text_id: int, title: str = Form(...), author: str = Form(""), years: str = Form(""),
               genre: str = Form(""), source_type: str = Form("natural"), generator: str = Form(""),

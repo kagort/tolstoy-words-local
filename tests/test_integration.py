@@ -137,6 +137,18 @@ def test_full_flow(client):
         now = {row["word"]: row["count"] for row in A.frequency(s, dict_id, ids)["rows"]}
         assert sum(ov["words"][0]["count"]) == now["запах"]  # одно вхождение уже отмечено ложным
         assert A.filter_texts(s, ids, year_from=1870, year_to=1890) and not A.filter_texts(s, ids, year_from=3000)
+    # статистический портрет текста
+    with SessionLocal() as s:
+        tid = s.query(Hit.text_id).filter_by(entry_id=entry.id).first()[0]
+    r = client.get(f"/texts/{tid}/stats")
+    assert r.status_code == 200 and "MATTR" in r.text and "ch-zipf" in r.text
+    from app.services.textstats import get_stats, mattr, yule_k
+
+    with SessionLocal() as s:
+        st = get_stats(s, tid)
+        assert st["size"]["words"] > 0 and st["lexical"]["n_lemmas"] > 0 and st["morphology"]["pos"]
+    assert mattr(["а", "б", "а", "б"], window=2) == 1.0 and yule_k([1, 1, 1]) < yule_k([3])
+    assert client.get(f"/export/text/{tid}/stats.xlsx").status_code == 200
     for url in (f"/export/overview.xlsx?{base}&dim=period&step=25", f"/export/frequency.xlsx?{base}", f"/export/frequency.csv?{base}", f"/export/concordance.xlsx?{base}",
                 f"/export/profile.json?{base}&entry_id={entry.id}", f"/export/compare.xlsx?{base}&corpus_b=",
                 f"/export/structure.csv?{base}", f"/export/hits.conllu?{base}", f"/export/dictionary/{dict_id}.csv"):
