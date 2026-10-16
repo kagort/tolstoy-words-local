@@ -61,8 +61,14 @@
   <div class="panel"><h3 style="margin-top:0">Длина слова, букв</h3><div id="ch-wordlen" class="chart" style="min-height:280px"></div></div>
 </div>
 
-<h2>Частотный словарь</h2>
-<div class="panel"><h3 style="margin-top:0">30 самых частых лемм (все части речи)</h3><div id="ch-top" class="chart" style="min-height:620px"></div></div>
+<h2 id="freq">Частотный словарь</h2>
+<form method="get" action="#freq" class="panel row">
+  <div><label>Стоп-слова <a href="/stopwords" class="small">(списки)</a></label>
+    <select name="stop" onchange="this.form.submit()">{% for o in stop_options %}<option value="{{ o.value }}" {{ 'selected' if o.value == stop }}>{{ o.label }}</option>{% endfor %}</select></div>
+  <div class="muted small">Стоп-слова скрываются только из частотных списков ниже; остальные показатели считаются по всему тексту.</div>
+  <div class="shrink small">Скачать: <a href="/export/text/{{ doc.id }}/stats.xlsx{{ '?stop=' ~ stop if stop }}">XLSX</a></div>
+</form>
+<div class="panel"><h3 style="margin-top:0">30 самых частых лемм ({{ 'без стоп-слов' if stop else 'все части речи' }})</h3><div id="ch-top" class="chart" style="min-height:620px"></div></div>
 <div class="grid cols-2">
   {% for key, title in [('top_noun', 'Существительные (NOUN)'), ('top_verb', 'Глаголы (VERB)'), ('top_adj', 'Прилагательные (ADJ)'), ('top_adv', 'Наречия (ADV)'), ('top_propn', 'Имена собственные (PROPN)')] %}
   {% if st.frequency[key] %}

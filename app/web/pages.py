@@ -28,6 +28,7 @@ from app.services.dictionaries import (
 from app.services.ingest import create_text
 from app.services.metadata import lookup, normalize_source_type, parse_meta_table, parse_years
 from app.services.jobs import enqueue
+from app.services.stopwords import options as stop_options
 from app.services.matching import load_sentences
 from app.web.deps import flash, render
 
@@ -195,14 +196,18 @@ def text_detail(request: Request, text_id: int, page: int = 1, db: Session = Dep
 
 
 @router.get("/texts/{text_id}/stats")
-def text_stats(request: Request, text_id: int, refresh: int = 0, db: Session = Depends(get_session)):
-    from app.services.textstats import FEATURE_VALUE_LABELS, get_stats
+def text_stats(request: Request, text_id: int, refresh: int = 0, stop: str = "", db: Session = Depends(get_session)):
+    from app.services.stopwords import resolve
+    from app.services.textstats import FEATURE_VALUE_LABELS, frequency_lists, get_stats
 
     doc = db.get(TextDoc, text_id)
     if doc is None:
         raise HTTPException(404, "Текст не найден")
     stats = get_stats(db, text_id, refresh=bool(refresh))
-    return render(request, "text_stats.html", doc=doc, st=stats, FEATURE_VALUE_LABELS=FEATURE_VALUE_LABELS)
+    if stats and stop:
+        stats = {**stats, "frequency": frequency_lists(stats, resolve(db, stop))}
+    return render(request, "text_stats.html", doc=doc, st=stats, FEATURE_VALUE_LABELS=FEATURE_VALUE_LABELS,
+                  stop=stop, stop_options=stop_options(db))
 
 
 @router.post("/texts/{text_id}/edit")
@@ -227,8 +232,14 @@ def text_reparse(request: Request, text_id: int, db: Session = Depends(get_sessi
     doc = db.get(TextDoc, text_id)
     if doc is None:
         raise HTTPException(404)
+    busy = db.scalar(select(Job.id).where(Job.kind == "ingest", Job.status.in_(["queued", "running"]),
+                                         Job.params["text_id"].as_integer() == text_id))
+    if busy:
+        flash(request, "Этот текст уже стоит в очереди на разбор или разбирается (см. «Задачи»)", "error")
+        return redirect(f"/texts/{text_id}")
     doc.norm_text = normalize_text(doc.raw_text)
     doc.status = "queued"
+    doc.error = None
     enqueue(db, "ingest", {"text_id": text_id}, title=f"Повторный разбор «{doc.title}»")
     db.commit()
     flash(request, "Текст поставлен на повторный разбор", "success")
@@ -424,18 +435,120 @@ def dictionary_delete(request: Request, dict_id: int, db: Session = Depends(get_
     return redirect("/dictionaries")
 
 
+# ------------------------------------------------------------------ стоп-слова
+
+
+@router.get("/stopwords")
+def stopwords_page(request: Request, db: Session = Depends(get_session)):
+    from app.models import StopList
+    from app.services.stopwords import BUILTIN_NAME, builtin_words
+
+    lists = list(db.scalars(select(StopList).order_by(StopList.name)))
+    return render(request, "stopwords.html", lists=lists, builtin=builtin_words(), builtin_name=BUILTIN_NAME)
+
+
+@router.get("/stopwords/builtin.txt")
+def stopwords_builtin_txt():
+    from fastapi.responses import PlainTextResponse
+
+    from app.services.stopwords import builtin_words
+
+    return PlainTextResponse("\n".join(builtin_words()) + "\n",
+                             headers={"Content-Disposition": 'attachment; filename="stopwords-ru.txt"'})
+
+
+async def _stop_words_from_form(words: str, file: UploadFile | None, with_builtin: bool) -> list[str]:
+    from app.services.stopwords import builtin_words, parse_words
+
+    text = words
+    if file is not None and file.filename:
+        raw = await file.read()
+        text += "\n" + (raw.decode("utf-8-sig", errors="replace"))
+    out = parse_words(text)
+    if with_builtin:
+        out = list(dict.fromkeys(list(builtin_words()) + out))
+    return out
+
+
+@router.post("/stopwords")
+async def stopwords_create(request: Request, name: str = Form(...), description: str = Form(""), words: str = Form(""),
+                           file: UploadFile | None = File(None), with_builtin: str | None = Form(None),
+                           db: Session = Depends(get_session)):
+    from app.models import StopList
+
+    name = name.strip()
+    if not name:
+        flash(request, "Укажите название списка", "error")
+        return redirect("/stopwords")
+    if db.scalar(select(StopList).where(StopList.name == name)):
+        flash(request, "Список с таким названием уже есть", "error")
+        return redirect("/stopwords")
+    items = await _stop_words_from_form(words, file, bool(with_builtin))
+    if not items:
+        flash(request, "Список пуст: впишите слова или загрузите файл", "error")
+        return redirect("/stopwords")
+    db.add(StopList(name=name, description=description.strip() or None, words=items))
+    db.commit()
+    flash(request, f"Список «{name}» создан: {len(items)} слов. Выберите его в поле «Стоп-слова» на странице анализа или портрета текста.", "success")
+    return redirect("/stopwords")
+
+
+@router.post("/stopwords/{list_id}")
+async def stopwords_update(request: Request, list_id: int, name: str = Form(...), description: str = Form(""),
+                           words: str = Form(""), db: Session = Depends(get_session)):
+    from app.models import StopList
+
+    sl = db.get(StopList, list_id)
+    if sl is None:
+        raise HTTPException(404)
+    other = db.scalar(select(StopList).where(StopList.name == name.strip(), StopList.id != list_id))
+    if other or not name.strip():
+        flash(request, "Название пустое или уже занято другим списком", "error")
+        return redirect("/stopwords")
+    sl.name, sl.description = name.strip(), description.strip() or None
+    sl.words = await _stop_words_from_form(words, None, False)
+    db.commit()
+    flash(request, f"Список «{sl.name}» сохранён: {len(sl.words)} слов", "success")
+    return redirect("/stopwords")
+
+
+@router.post("/stopwords/{list_id}/delete")
+def stopwords_delete(request: Request, list_id: int, db: Session = Depends(get_session)):
+    from app.models import StopList
+
+    sl = db.get(StopList, list_id)
+    if sl is not None:
+        db.delete(sl)
+        db.commit()
+        flash(request, f"Список «{sl.name}» удалён", "success")
+    return redirect("/stopwords")
+
+
 # ------------------------------------------------------------------ анализ
 
 
 def _analysis_context(db: Session, request: Request) -> dict:
+    from app.services.selection import corpus_texts, from_params
+
     qp = request.query_params
     dictionaries = list(db.scalars(select(Dictionary).order_by(Dictionary.id)))
     corpora = list(db.scalars(select(Corpus).order_by(Corpus.name)))
     dict_id = _int(qp.get("dictionary_id")) or (dictionaries[0].id if dictionaries else None)
-    corpus_id = _int(qp.get("corpus_id"))
-    entries = list(db.scalars(select(DictionaryEntry).where(DictionaryEntry.dictionary_id == dict_id).order_by(DictionaryEntry.surface))) if dict_id else []
-    return dict(dictionaries=dictionaries, corpora=corpora, dict_id=dict_id, corpus_id=corpus_id, entries=entries,
-                corpus_name=A.corpus_label(db, corpus_id), tab=qp.get("tab", "overview"))
+    sel = from_params(db, qp)
+    entries = list(db.scalars(select(DictionaryEntry).where(DictionaryEntry.dictionary_id == dict_id)
+                              .order_by(DictionaryEntry.category, DictionaryEntry.surface))) if dict_id else []
+    valid_ids = {e.id for e in entries}
+    sel.words = [w for w in sel.words if w in valid_ids]  # слова другого словаря после его смены отбрасываются
+    word_counts = {}
+    if dict_id:
+        word_counts = {r["entry_id"]: r["count"] for r in A.frequency(db, dict_id, sel.ids)["rows"]}
+    categories: dict[str, list] = {}
+    for e in entries:
+        categories.setdefault(e.category or "", []).append(e)
+    return dict(dictionaries=dictionaries, corpora=corpora, dict_id=dict_id, corpus_id=sel.corpus_id, entries=entries,
+                corpus_name=sel.corpus_name, tab=qp.get("tab", "overview"), sel=sel, sel_texts=corpus_texts(db, sel),
+                facets=A.facets(db, sel.corpus_ids), word_counts=word_counts, categories=categories,
+                n_texts=len(sel.ids), stop_options=stop_options(db))
 
 
 def _overview_params(request: Request) -> dict:
@@ -445,56 +558,67 @@ def _overview_params(request: Request) -> dict:
         "dim": qp.get("dim") or "author",
         "step": _int(qp.get("step")) or 10,
         "metric": qp.get("metric") or "ipm",
-        "year_from": _int(qp.get("year_from")),
-        "year_to": _int(qp.get("year_to")),
-        "authors": [a for a in qp.getlist("authors") if a],
-        "genres": [g for g in qp.getlist("genres") if g],
-        "stypes": [t for t in qp.getlist("stypes") if t],
     }
 
 
 def _overview_context(db: Session, request: Request, dict_id: int, text_ids: list[int]) -> dict:
+    """text_ids — уже отфильтрованная выборка (панель «Выборка»)."""
     p = _overview_params(request)
-    facets = A.facets(db, text_ids)
-    ids = A.filter_texts(db, text_ids, year_from=p["year_from"], year_to=p["year_to"], authors=p["authors"],
-                         genres=p["genres"], source_types=p["stypes"])
     entry_ids = p["entry_ids"]
     if not entry_ids:  # по умолчанию — пять самых частых слов
-        entry_ids = [r["entry_id"] for r in A.frequency(db, dict_id, ids)["rows"] if r["count"]][:5]
-    ov = A.overview(db, dict_id, ids, entry_ids, p["dim"], p["step"])
-    return {"ov": ov, "ov_params": p, "ov_entry_ids": entry_ids, "facets": facets,
-            "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
+        entry_ids = [r["entry_id"] for r in A.frequency(db, dict_id, text_ids)["rows"] if r["count"]][:5]
+    ov = A.overview(db, dict_id, text_ids, entry_ids, p["dim"], p["step"])
+    return {"ov": ov, "ov_params": p, "ov_entry_ids": entry_ids, "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
+
+
+def _report_context(db: Session, request: Request, dict_id: int, sel) -> dict:
+    from app.services.report import build_report, default_words
+
+    qp = request.query_params
+    entry_ids = sel.words or default_words(db, dict_id, sel.ids)
+    corpus_b = qp.get("report_b")
+    ids_b = A.corpus_text_ids(db, _int(corpus_b)) if corpus_b not in (None, "none") else None
+    step = _int(qp.get("step")) or 10
+    rep = build_report(db, dict_id, sel.ids, entry_ids, step=step if step in A.PERIOD_STEPS else 10, ids_b=ids_b, stop=sel.stopset)
+    return {"rep": rep, "report_b": corpus_b, "report_b_name": A.corpus_label(db, _int(corpus_b)) if ids_b is not None else "",
+            "rep_default_words": not sel.words, "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
 
 
 @router.get("/analysis")
 def analysis(request: Request, db: Session = Depends(get_session)):
     ctx = _analysis_context(db, request)
     qp = request.query_params
-    dict_id, corpus_id, tab = ctx["dict_id"], ctx["corpus_id"], ctx["tab"]
+    dict_id, tab, sel = ctx["dict_id"], ctx["tab"], ctx["sel"]
     if not dict_id:
         return render(request, "analysis.html", **ctx)
-    text_ids = A.corpus_text_ids(db, corpus_id)
-    ctx["n_texts"] = len(text_ids)
+    text_ids = sel.ids
     entry_id = _int(qp.get("entry_id"))
     ctx["entry_id"] = entry_id
     scopes = ("direct", "shared", "uncertain") if qp.get("uncertain") else ("direct", "shared")
     if tab == "overview":
         ctx.update(_overview_context(db, request, dict_id, text_ids))
+    elif tab == "report":
+        ctx.update(_report_context(db, request, dict_id, sel))
     elif tab == "freq":
         ctx["freq"] = A.frequency(db, dict_id, text_ids)
         ctx["heat"] = A.frequency_by_text(db, dict_id, text_ids)
     elif tab == "conc":
         ctx["conc"] = A.concordance(
-            db, dict_id, text_ids, entry_id=entry_id, role=qp.get("role") or None, rel_type=qp.get("rel_type") or None,
-            related_lemma=qp.get("related") or None, include_invalid=bool(qp.get("invalid")), page=_int(qp.get("page")) or 1,
+            db, dict_id, text_ids, entry_id=entry_id, entry_ids=sel.words, role=qp.get("role") or None,
+            rel_type=qp.get("rel_type") or None, related_lemma=qp.get("related") or None,
+            include_invalid=bool(qp.get("invalid")), page=_int(qp.get("page")) or 1,
         )
     elif tab == "profile":
         if not entry_id and ctx["entries"]:
-            freq = A.frequency(db, dict_id, text_ids)["rows"]
-            entry_id = freq[0]["entry_id"] if freq else ctx["entries"][0].id
+            if sel.words:
+                entry_id = sel.words[0]
+            else:
+                freq = A.frequency(db, dict_id, text_ids)["rows"]
+                entry_id = freq[0]["entry_id"] if freq else ctx["entries"][0].id
             ctx["entry_id"] = entry_id
         if entry_id:
-            ctx["profile"] = A.word_profile(db, entry_id, text_ids, scopes=scopes, include_negated=bool(qp.get("negated")))
+            ctx["profile"] = A.word_profile(db, entry_id, text_ids, scopes=scopes, include_negated=bool(qp.get("negated")),
+                                            stop=sel.stopset)
             ctx["forms"] = A.forms_distribution(db, entry_id, text_ids)
     elif tab == "compare":
         corpus_b = _int(qp.get("corpus_b"))
@@ -503,9 +627,10 @@ def analysis(request: Request, db: Session = Depends(get_session)):
         ids_b = A.corpus_text_ids(db, corpus_b)
         ctx["cmp"] = A.compare_frequency(db, dict_id, text_ids, ids_b)
         if entry_id:
-            ctx["cmp_profile"] = A.compare_profile(db, entry_id, text_ids, ids_b, qp.get("rel_type") or "attribute", scopes=scopes)
+            ctx["cmp_profile"] = A.compare_profile(db, entry_id, text_ids, ids_b, qp.get("rel_type") or "attribute", scopes=scopes,
+                                                   stop=sel.stopset)
     elif tab == "structure":
-        ctx["structure"] = A.sentence_structure(db, dict_id, text_ids, entry_id)
+        ctx["structure"] = A.sentence_structure(db, dict_id, text_ids, entry_id, entry_ids=sel.words)
     return render(request, "analysis.html", **ctx)
 
 
@@ -609,10 +734,57 @@ def jobs_api(db: Session = Depends(get_session)):
 @router.post("/jobs/{job_id}/retry")
 def job_retry(request: Request, job_id: int, db: Session = Depends(get_session)):
     j = db.get(Job, job_id)
-    if j is not None and j.status == "error":
-        enqueue(db, j.kind, j.params, title=j.title + " (повтор)")
+    if j is not None and j.status in ("error", "cancelled"):
+        if j.kind == "ingest" and (j.params or {}).get("text_id"):
+            doc = db.get(TextDoc, j.params["text_id"])
+            if doc is None:
+                flash(request, "Текст этой задачи уже удалён", "error")
+                return redirect("/jobs")
+            doc.status, doc.error = "queued", None
+        title = j.title if j.title.endswith("(повтор)") else j.title + " (повтор)"
+        enqueue(db, j.kind, j.params, title=title)
+        db.delete(j)
         db.commit()
         flash(request, "Задача поставлена повторно", "success")
+    return redirect("/jobs")
+
+
+@router.post("/jobs/{job_id}/cancel")
+def job_cancel(request: Request, job_id: int, db: Session = Depends(get_session)):
+    from app.services.jobs import cancel_job
+
+    j = db.get(Job, job_id)
+    if j is not None:
+        msg = cancel_job(db, j)
+        db.commit()
+        flash(request, msg, "success")
+    return redirect("/jobs")
+
+
+@router.post("/jobs/{job_id}/delete")
+def job_delete(request: Request, job_id: int, db: Session = Depends(get_session)):
+    from app.services.jobs import delete_jobs
+
+    j = db.get(Job, job_id)
+    if j is not None:
+        if delete_jobs(db, [j]):
+            flash(request, "Задача удалена", "success")
+        else:
+            flash(request, "Выполняющуюся задачу нельзя удалить — сначала отмените её", "error")
+        db.commit()
+    return redirect("/jobs")
+
+
+@router.post("/jobs/clear")
+def jobs_clear(request: Request, what: str = Form("finished"), db: Session = Depends(get_session)):
+    """what: finished — выполненные и отменённые; errors — с ошибкой; all — все, кроме выполняющихся."""
+    from app.services.jobs import delete_jobs
+
+    statuses = {"finished": ["done", "cancelled"], "errors": ["error"], "all": ["done", "cancelled", "error", "queued"]}
+    jobs = list(db.scalars(select(Job).where(Job.status.in_(statuses.get(what, ["done", "cancelled"])))))
+    n = delete_jobs(db, jobs)
+    db.commit()
+    flash(request, f"Удалено задач: {n}", "success")
     return redirect("/jobs")
 
 

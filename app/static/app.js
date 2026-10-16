@@ -100,11 +100,15 @@ function drawTree(containerId, tokens, focus, showPunct) {
 function watchJobs() {
   const box = document.getElementById('jobs-live');
   if (!box) return;
+  const shown = [...box.querySelectorAll('[data-job]')]
+    .filter(r => ['queued', 'running'].includes(r.dataset.status)).map(r => +r.dataset.job);
   setInterval(async () => {
     const res = await fetch('/api/jobs');
     if (!res.ok) return;
     const data = await res.json();
-    if (!data.active.length) { location.reload(); return; }
+    const now = new Set(data.active.map(j => j.id));
+    // задача завершилась или появилась новая — перерисовываем страницу целиком
+    if (!data.active.length || shown.some(id => !now.has(id))) { location.reload(); return; }
     data.active.forEach(j => {
       const row = document.querySelector(`[data-job="${j.id}"]`);
       if (!row) { location.reload(); return; }
@@ -194,3 +198,42 @@ document.addEventListener('DOMContentLoaded', watchJobs);
   document.addEventListener('keydown', ev => { if (ev.key === 'Escape') hide(); });
   window.addEventListener('scroll', hide, { passive: true });
 })();
+
+// ------------------------------------------------------------ панель «Выборка» и выбор слов
+function selCorpusChanged(sel) {
+  // отметки текстов относятся к прежнему корпусу — снимаем их и сразу применяем
+  const form = document.getElementById('sel-form');
+  form.querySelectorAll('input[name="texts"]').forEach(c => { c.checked = false; });
+  form.submit();
+}
+function selDictChanged(sel) {
+  sel.form.querySelectorAll('input[name="words"]').forEach(c => { c.checked = false; });
+  sel.form.submit();
+}
+function _box(target) { return typeof target === 'string' ? document.querySelector(target) : target; }
+function filterChecks(input, target) {
+  const q = input.value.trim().toLowerCase();
+  _box(target).querySelectorAll('[data-name]').forEach(el => {
+    el.style.display = !q || el.dataset.name.includes(q) ? '' : 'none';
+  });
+}
+function checkAll(target, on) {
+  _box(target).querySelectorAll('input[type="checkbox"]').forEach(c => {
+    const item = c.closest('[data-name]');
+    if (!item || item.style.display !== 'none') c.checked = on;
+  });
+}
+function checkTop(target, n) {
+  const items = [..._box(target).querySelectorAll('[data-count]')];
+  items.forEach(el => { el.querySelector('input').checked = false; });
+  items.filter(el => +el.dataset.count > 0).sort((a, b) => b.dataset.count - a.dataset.count).slice(0, n)
+    .forEach(el => { el.querySelector('input').checked = true; });
+}
+function checkFound(target) {
+  _box(target).querySelectorAll('[data-count]').forEach(el => { el.querySelector('input').checked = +el.dataset.count > 0; });
+}
+// флажок в таблице частот отмечает то же слово в блоке «Слова словаря» (именно оно уходит в запрос)
+function syncWord(box) {
+  const twin = document.querySelector(`#word-list input[name="words"][value="${box.value}"]`);
+  if (twin) twin.checked = box.checked;
+}

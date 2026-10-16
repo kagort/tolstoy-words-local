@@ -14,10 +14,13 @@ from sqlalchemy import Integer, func, select
 from sqlalchemy.orm import Session
 
 from app.models import Dictionary, Hit, SentenceRow, TextDoc, TokenRow
-from app.nlp.tree import parse_feats
+from app.nlp.tree import norm, parse_feats
 from app.services.stats import ipm
 
-STATS_VERSION = "2"
+STATS_VERSION = "3"
+POOL_SIZE = 600
+TOP_LISTS = (("top_all", None, 30), ("top_noun", {"NOUN"}, 20), ("top_propn", {"PROPN"}, 15), ("top_verb", {"VERB"}, 20),
+             ("top_adj", {"ADJ"}, 20), ("top_adv", {"ADV"}, 15))
 
 CONTENT_POS = {"NOUN", "PROPN", "VERB", "ADJ", "ADV"}
 NON_WORD = {"PUNCT", "SYM"}
@@ -167,6 +170,8 @@ def compute(session: Session, text_id: int) -> dict:
         "top_verb": top({"VERB"}, 20),
         "top_adj": top({"ADJ"}, 20),
         "top_adv": top({"ADV"}, 15),
+        # запас частотных лемм — из него списки пересобираются при фильтре стоп-слов (frequency_lists)
+        "pool": top(None, POOL_SIZE),
         "zipf": [[r, f] for r, f in enumerate(freqs_sorted[:2000], start=1)],
         "spectrum": [[m, spectrum[m]] for m in sorted(spectrum)[:15]],
     }
@@ -322,3 +327,15 @@ def get_stats(session: Session, text_id: int, refresh: bool = False) -> dict | N
     stats["dynamics"] = {**stats["dynamics"],
                          "dictionaries": dictionary_dynamics(session, text_id, stats["size"]["sentences"], stats["dynamics"]["seg_words"])}
     return stats
+
+
+def frequency_lists(stats: dict, stop: frozenset[str] = frozenset()) -> dict:
+    """Частотные списки портрета без стоп-слов (пересобираются из запаса `pool`, кэш не пересчитывается)."""
+    fq = dict(stats.get("frequency") or {})
+    pool = fq.get("pool")
+    if not stop or not pool:
+        return fq
+    items = [x for x in pool if norm(x["lemma"]) not in stop]
+    for key, pos_set, k in TOP_LISTS:
+        fq[key] = [x for x in items if pos_set is None or x["pos"] in pos_set][:k]
+    return fq

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Стоп-слова{% endblock %}
+{% block content %}
+<h1>Стоп-слова</h1>
+<p class="help">Стоп-слова — служебные и слишком частые слова (предлоги, союзы, местоимения, «быть»…), которые мешают увидеть содержательные связи.
+  Они <strong>не удаляются из базы</strong>: выбранный список только скрывает их в частотных списках портрета текста, в связях профиля слова,
+  в отчёте и в сравнении связей. Список выбирается в поле «Стоп-слова» на странице «Анализ» и на странице портрета текста.
+  Для стилометрии (определения авторства) служебные слова, наоборот, важны — там фильтр не применяется.</p>
+
+<div class="grid cols-2">
+  <div class="panel">
+    <h2 style="margin-top:0">{{ builtin_name }} <span class="muted small">— {{ builtin|length }} слов</span></h2>
+    <p class="help">Местоимения, предлоги, союзы, частицы, местоименные наречия, связки и модальные слова. Изменить встроенный список нельзя,
+      но можно создать свой на его основе (флажок в форме справа) и дополнить.</p>
+    <details><summary>Показать все слова</summary><p class="small">{{ builtin|join(', ') }}</p></details>
+    <p><a href="/stopwords/builtin.txt">Скачать как текстовый файл</a></p>
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0">Новый список</h2>
+    <form method="post" action="/stopwords" enctype="multipart/form-data">
+      <label>Название</label><input type="text" name="name" required placeholder="например: Служебные + имена героев">
+      <label>Описание</label><input type="text" name="description">
+      <label>Слова (через запятую, пробел или с новой строки; строки с # — комментарии)</label>
+      <textarea name="words" rows="5" placeholder="сказать, говорить, князь"></textarea>
+      <label>или файл .txt / .csv (по одному слову в строке)</label><input type="file" name="file" accept=".txt,.csv">
+      <label class="check"><input type="checkbox" name="with_builtin" value="1" checked> включить встроенный список (дополнить его своими словами)</label>
+      <p><button type="submit">Создать список</button></p>
+    </form>
+    <p class="help">Слова лучше вписывать в начальной форме (лемме): «сказать», а не «сказал». Регистр и ё/е не важны.</p>
+  </div>
+</div>
+
+<h2>Мои списки</h2>
+{% for sl in lists %}
+<details class="panel" id="list-{{ sl.id }}">
+  <summary><strong>{{ sl.name }}</strong> <span class="muted">— {{ sl.words|length }} слов{% if sl.description %} · {{ sl.description }}{% endif %}</span></summary>
+  <form method="post" action="/stopwords/{{ sl.id }}" style="margin-top:8px">
+    <div class="row"><div><label>Название</label><input type="text" name="name" value="{{ sl.name }}" required></div>
+      <div><label>Описание</label><input type="text" name="description" value="{{ sl.description or '' }}"></div></div>
+    <label>Слова</label><textarea name="words" rows="6">{{ sl.words|join(', ') }}</textarea>
+    <p class="row"><span class="shrink"><button type="submit">Сохранить</button></span></p>
+  </form>
+  <form method="post" action="/stopwords/{{ sl.id }}/delete" onsubmit="return confirm('Удалить список «{{ sl.name }}»?')"><button class="small danger" type="submit">Удалить список</button></form>
+</details>
+{% else %}<div class="panel muted">Своих списков пока нет.</div>{% endfor %}
+{% endblock %}

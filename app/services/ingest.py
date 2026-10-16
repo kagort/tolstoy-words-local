@@ -81,6 +81,21 @@ def _copy(session: Session, table: str, cols: tuple[str, ...], rows: list[tuple]
                 cp.write_row(r)
 
 
+def mark_interrupted(text_id: int, message: str) -> None:
+    """Разбор не завершён (ошибка, отмена, падение обработчика): статус «ошибка», частичные предложения удаляются.
+
+    Текст остаётся в базе — его можно разобрать заново кнопкой на странице текста.
+    """
+    with SessionLocal() as s:
+        doc = s.get(TextDoc, text_id)
+        if doc is None or doc.status == "ready":
+            return
+        s.execute(delete(SentenceRow).where(SentenceRow.text_id == text_id))
+        doc.status, doc.error = "error", message
+        doc.n_sentences = doc.n_tokens = doc.n_words = 0
+        s.commit()
+
+
 def run_ingest(job_id: int | None, text_id: int) -> None:
     parser = get_parser()
     with SessionLocal() as s:
@@ -125,11 +140,7 @@ def run_ingest(job_id: int | None, text_id: int) -> None:
             if job_id:
                 set_progress(job_id, sent_idx / total, f"Разобрано предложений: {sent_idx} из ~{total}")
     except Exception as exc:
-        with SessionLocal() as s:
-            doc = s.get(TextDoc, text_id)
-            doc.status = "error"
-            doc.error = str(exc)
-            s.commit()
+        mark_interrupted(text_id, str(exc) or "Разбор прерван")
         raise
 
     with SessionLocal() as s:

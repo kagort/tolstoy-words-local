@@ -6,59 +6,117 @@
 {% if not dictionaries %}
 <div class="panel">Для анализа нужен словарь. <a href="/dictionaries">Создайте словарь</a> и загрузите <a href="/texts">тексты</a>.</div>
 {% else %}
-<form method="get" class="panel row">
+{% macro corpus_select(label='Корпус') %}
+<label>{{ label }}</label>
+<select name="corpus_id" form="sel-form" onchange="selCorpusChanged(this)"><option value="">Все тексты</option>{% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if c.id == corpus_id }}>{{ c.name }}</option>{% endfor %}</select>
+{% endmacro %}
+
+<form method="get" action="/analysis" id="sel-form" class="panel sel-panel">
   <input type="hidden" name="tab" value="{{ tab }}">
-  <div><label>Словарь</label><select name="dictionary_id">{% for d in dictionaries %}<option value="{{ d.id }}" {{ 'selected' if d.id == dict_id }}>{{ d.name }}</option>{% endfor %}</select></div>
-  <div><label>Корпус</label><select name="corpus_id"><option value="">Все тексты</option>{% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if c.id == corpus_id }}>{{ c.name }}</option>{% endfor %}</select></div>
-  <div class="shrink"><button type="submit">Показать</button></div>
-  <div class="shrink muted small">текстов в выборке: {{ n_texts }}</div>
+  <div class="row">
+    <div><label>Словарь</label><select name="dictionary_id" onchange="selDictChanged(this)">{% for d in dictionaries %}<option value="{{ d.id }}" {{ 'selected' if d.id == dict_id }}>{{ d.name }}</option>{% endfor %}</select></div>
+    {% if tab != 'compare' %}<div>{{ corpus_select() }}</div>{% endif %}
+    <div><label title="скрывают служебные слова в связях профиля и отчёта; данные не удаляются">Стоп-слова <a href="/stopwords" class="small">(списки)</a></label>
+      <select name="stop">{% for o in stop_options %}<option value="{{ o.value }}" {{ 'selected' if o.value == sel.stop }}>{{ o.label }}</option>{% endfor %}</select></div>
+    <div class="shrink"><button type="submit">Применить</button></div>
+    <div class="shrink"><button type="submit" class="secondary" onclick="this.form.tab.value='report'" title="сводная страница по выбранным словам и выборке текстов">📋 Построить отчёт</button></div>
+  </div>
+
+  <details class="sel-block" id="sel-texts" {{ 'open' if sel.filtered and tab != 'report' }}>
+    <summary><strong>Выборка текстов:</strong> {{ n_texts }} из {{ sel.corpus_ids|length }}
+      {% if sel.filtered %}<span class="muted">— {{ sel.describe() }}</span> · <a href="/analysis?tab={{ tab }}&dictionary_id={{ dict_id }}&corpus_id={{ corpus_id or '' }}{% for w in sel.words %}&words={{ w }}{% endfor %}{% if sel.stop %}&stop={{ sel.stop }}{% endif %}">сбросить фильтры</a>
+      {% else %}<span class="muted">— все тексты корпуса «{{ corpus_name }}». Щёлкните, чтобы отобрать тексты или задать фильтры.</span>{% endif %}</summary>
+    <div class="sel-grid">
+      <div>
+        <label>Тексты корпуса <span class="muted">(ничего не отмечено — все)</span></label>
+        <div class="row" style="gap:6px;margin-bottom:4px">
+          <input type="search" placeholder="поиск по названию или автору" oninput="filterChecks(this, '#sel-text-list')">
+          <span class="shrink"><button type="button" class="small secondary" onclick="checkAll('#sel-text-list', true)">все</button>
+          <button type="button" class="small secondary" onclick="checkAll('#sel-text-list', false)">ни одного</button></span>
+        </div>
+        <div class="check-list" id="sel-text-list">
+          {% for t in sel_texts %}
+          <label class="check-item {{ '' if t.in_selection else 'muted' }}" data-name="{{ (t.author ~ ' ' ~ t.title)|lower }}">
+            <input type="checkbox" name="texts" value="{{ t.id }}" {{ 'checked' if t.checked }}>
+            {% if t.author %}{{ t.author }}, {% endif %}«{{ t.title }}»{% if t.year %}, {{ t.year }}{% endif %}
+            <span class="muted small">{{ "{:,}".format(t.n_words).replace(",", " ") }} сл.{% if t.stype == 'generated' %} · нейросеть{% endif %}</span></label>
+          {% else %}<div class="muted small">В корпусе нет разобранных текстов.</div>{% endfor %}
+        </div>
+      </div>
+      <div>
+        <label>Авторы <span class="muted">(пусто — все)</span></label>
+        <div class="check-list short">{% for a in facets.authors %}<label class="check-item"><input type="checkbox" name="authors" value="{{ a }}" {{ 'checked' if a in sel.authors }}> {{ a }}</label>{% else %}<div class="muted small">авторы не указаны</div>{% endfor %}</div>
+        <label>Жанры <span class="muted">(пусто — все)</span></label>
+        <div class="check-list short">{% for g in facets.genres %}<label class="check-item"><input type="checkbox" name="genres" value="{{ g }}" {{ 'checked' if g in sel.genres }}> {{ g }}</label>{% else %}<div class="muted small">жанры не указаны</div>{% endfor %}</div>
+      </div>
+      <div>
+        <label>Годы: с … по … {% if facets.year_min %}<span class="muted">(в корпусе {{ facets.year_min }}–{{ facets.year_max }})</span>{% endif %}</label>
+        <div class="row" style="gap:6px"><input type="number" name="year_from" value="{{ sel.year_from or '' }}" placeholder="с"><input type="number" name="year_to" value="{{ sel.year_to or '' }}" placeholder="по"></div>
+        <p class="help">Тексты без года при фильтре по годам не учитываются.</p>
+        <label>Тип текста <span class="muted">(пусто — все)</span></label>
+        {% for k, v in SOURCE_TYPES.items() %}<label class="check-item"><input type="checkbox" name="stypes" value="{{ k }}" {{ 'checked' if k in sel.stypes }}> {{ v }}</label>{% endfor %}
+      </div>
+    </div>
+    <p class="shrink"><button type="submit">Применить выборку</button></p>
+  </details>
+
+  <details class="sel-block" id="sel-words" {{ 'open' if tab == 'report' and not sel.words }}>
+    <summary><strong>Слова словаря:</strong> {% if sel.words %}выбрано {{ sel.words|length }} —
+      {% set names = [] %}{% for e in entries if e.id in sel.words %}{% set _ = names.append(e.surface) %}{% endfor %}{{ names[:10]|join(', ') }}{{ '…' if names|length > 10 }}
+      {% else %}<span class="muted">не выбраны — вкладки показывают все слова (обзор и отчёт — самые частые). Щёлкните, чтобы выбрать.</span>{% endif %}</summary>
+    <div class="row" style="gap:6px;margin:6px 0">
+      <input type="search" placeholder="поиск слова" oninput="filterChecks(this, '#word-list')">
+      <span class="shrink">
+        <button type="button" class="small secondary" onclick="checkAll('#word-list', true)">выбрать все</button>
+        <button type="button" class="small secondary" onclick="checkAll('#word-list', false)">снять все</button>
+        <button type="button" class="small secondary" onclick="checkTop('#word-list', 10)" title="10 самых частых в выборке">10 самых частых</button>
+        <button type="button" class="small secondary" onclick="checkFound('#word-list')" title="слова, которые встречаются в выборке">все встречающиеся</button>
+      </span>
+    </div>
+    <div id="word-list">
+      {% for cat, es in categories.items() %}
+      <div class="word-cat">
+        {% if categories|length > 1 %}<div class="cat-title"><label><input type="checkbox" onchange="checkAll(this.closest('.word-cat'), this.checked)"> <strong>{{ cat or 'без категории' }}</strong></label> <span class="muted small">{{ es|length }} слов</span></div>{% endif %}
+        <div class="word-grid">
+          {% for e in es %}{% set n = word_counts.get(e.id, 0) %}
+          <label class="check-item {{ 'muted' if not n }}" data-name="{{ e.surface|lower }}" data-count="{{ n }}"><input type="checkbox" name="words" value="{{ e.id }}" {{ 'checked' if e.id in sel.words }}> {{ e.surface }} <span class="muted small">{{ n }}</span></label>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="help">Число рядом со словом — вхождений в текущей выборке текстов. Выбор сохраняется при переходе между вкладками и в выгрузках.</p>
+    <p><button type="submit">Применить</button> <button type="submit" class="secondary" onclick="this.form.tab.value='report'">📋 Построить отчёт по выбранным</button></p>
+  </details>
 </form>
 
-{% set base = {'dictionary_id': dict_id, 'corpus_id': corpus_id or ''} %}
 <div class="tabs">
-  {% for key, label in [('overview', 'Обзор'), ('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
-  <a class="{{ 'active' if tab == key }}" href="/analysis?tab={{ key }}&dictionary_id={{ dict_id }}&corpus_id={{ corpus_id or '' }}{% if entry_id and key in ('profile','conc','structure','compare') %}&entry_id={{ entry_id }}{% endif %}">{{ label }}</a>
+  {% for key, label in [('overview', 'Обзор'), ('report', '📋 Отчёт'), ('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
+  <a class="{{ 'active' if tab == key }}" href="/analysis?tab={{ key }}&dictionary_id={{ dict_id }}&{{ sel.query() }}{% if entry_id and key in ('profile','conc','structure','compare') %}&entry_id={{ entry_id }}{% endif %}">{{ label }}</a>
   {% endfor %}
 </div>
 
+{% set sq = 'dictionary_id=' ~ dict_id ~ '&' ~ sel.query() %}
 {# ============================================================== ОБЗОР #}
 {% if tab == 'overview' and ov %}
 {% set p = ov_params %}
-<form method="get" class="panel">
-  <input type="hidden" name="tab" value="overview"><input type="hidden" name="dictionary_id" value="{{ dict_id }}"><input type="hidden" name="corpus_id" value="{{ corpus_id or '' }}">
-  <div class="row">
-    <div><label>Слова словаря (Ctrl+щелчок — несколько; по умолчанию 5 самых частых)</label>
-      <select name="words" multiple size="6">{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id in ov_entry_ids }}>{{ e.surface }}</option>{% endfor %}</select></div>
-    <div>
-      <label>Группировать по</label>
-      <select name="dim">{% for k, v in DIMENSIONS.items() %}<option value="{{ k }}" {{ 'selected' if p.dim == k }}>{{ v }}</option>{% endfor %}</select>
-      <label>Шаг периода, лет (для группировки «Период»)</label>
-      <select name="step">{% for st in PERIOD_STEPS %}<option value="{{ st }}" {{ 'selected' if p.step == st }}>{{ st }}</option>{% endfor %}</select>
-      <label>Показатель</label>
-      <select name="metric">
-        <option value="ipm" {{ 'selected' if p.metric == 'ipm' }}>ipm — на миллион слов группы</option>
-        <option value="count" {{ 'selected' if p.metric == 'count' }}>число вхождений</option>
-        <option value="share" {{ 'selected' if p.metric == 'share' }}>% текстов группы, где слово встречается</option>
-      </select>
-    </div>
-    <div>
-      <label>Годы: с … по … {% if facets.year_min %}<span class="muted">(в корпусе {{ facets.year_min }}–{{ facets.year_max }})</span>{% endif %}</label>
-      <div class="row" style="gap:6px"><input type="number" name="year_from" value="{{ p.year_from or '' }}" placeholder="с"><input type="number" name="year_to" value="{{ p.year_to or '' }}" placeholder="по"></div>
-      <label>Тип текста</label>
-      <select name="stypes" multiple size="3">{% for k, v in SOURCE_TYPES.items() %}<option value="{{ k }}" {{ 'selected' if k in p.stypes }}>{{ v }}</option>{% endfor %}</select>
-    </div>
-    <div><label>Авторы (пусто — все)</label>
-      <select name="authors" multiple size="6">{% for a in facets.authors %}<option {{ 'selected' if a in p.authors }}>{{ a }}</option>{% endfor %}</select></div>
-    <div><label>Жанры (пусто — все)</label>
-      <select name="genres" multiple size="6">{% for g in facets.genres %}<option {{ 'selected' if g in p.genres }}>{{ g }}</option>{% endfor %}</select></div>
-  </div>
-  <p class="row"><span class="shrink"><button type="submit">Показать</button></span>
-    <a class="shrink" href="/analysis?tab=overview&dictionary_id={{ dict_id }}&corpus_id={{ corpus_id or '' }}">сбросить фильтры</a></p>
-</form>
+<div class="panel row">
+  <div><label>Группировать по</label>
+    <select name="dim" form="sel-form">{% for k, v in DIMENSIONS.items() %}<option value="{{ k }}" {{ 'selected' if p.dim == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div><label>Шаг периода, лет (для «Период»)</label>
+    <select name="step" form="sel-form">{% for st in PERIOD_STEPS %}<option value="{{ st }}" {{ 'selected' if p.step == st }}>{{ st }}</option>{% endfor %}</select></div>
+  <div><label>Показатель</label>
+    <select name="metric" form="sel-form">
+      <option value="ipm" {{ 'selected' if p.metric == 'ipm' }}>ipm — на миллион слов группы</option>
+      <option value="count" {{ 'selected' if p.metric == 'count' }}>число вхождений</option>
+      <option value="share" {{ 'selected' if p.metric == 'share' }}>% текстов группы, где слово встречается</option>
+    </select></div>
+  <div class="shrink"><button type="submit" form="sel-form">Показать</button></div>
+</div>
+{% if not sel.words %}<p class="help">Показаны 5 самых частых слов. Другие слова — в блоке «Слова словаря» выше.</p>{% endif %}
 {% set mlabel = {'ipm': 'ipm', 'count': 'вхождений', 'share': '% текстов'}[p.metric] %}
 <div class="row" style="margin-bottom:10px">
-  <div class="muted">Выборка: {{ ov.n_texts }} текстов, {{ "{:,}".format(ov.corpus_words).replace(",", " ") }} слов; групп: {{ ov.groups|length }}.
-    {% if p.year_from or p.year_to %}Тексты без года при фильтре по годам не учитываются.{% endif %}</div>
+  <div class="muted">Выборка: {{ ov.n_texts }} текстов, {{ "{:,}".format(ov.corpus_words).replace(",", " ") }} слов; групп: {{ ov.groups|length }}.</div>
   <div class="shrink">Скачать: <a href="/export/overview.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/overview.csv{{ qs(request) }}">CSV</a> · <a href="/export/overview.json{{ qs(request) }}">JSON</a></div>
 </div>
 {% if ov.words and ov.groups %}
@@ -78,26 +136,42 @@
   </table>
   <p class="help">Значение в ячейке — {{ mlabel }}. Наведите на ячейку, чтобы увидеть все три показателя.</p>
 </div>
-{% else %}<div class="panel muted">Нет данных: выберите слова или ослабьте фильтры.</div>{% endif %}
+{% else %}<div class="panel muted">Нет данных: выберите слова или ослабьте фильтры выборки.</div>{% endif %}
 {% endif %}
+
+{% include "_report.html" %}
 
 {# ============================================================== ЧАСТОТЫ #}
 {% if tab == 'freq' and freq %}
 <div class="row" style="margin-bottom:10px">
-  <div class="muted">Корпус «{{ corpus_name }}»: {{ freq.n_texts }} текстов, {{ "{:,}".format(freq.corpus_words).replace(",", " ") }} словоупотреблений.</div>
-  <div class="shrink">Скачать: <a href="/export/frequency.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/frequency.csv{{ qs(request) }}">CSV</a> · <a href="/export/frequency.json{{ qs(request) }}">JSON</a></div>
+  <div class="muted">Выборка: {{ freq.n_texts }} текстов, {{ "{:,}".format(freq.corpus_words).replace(",", " ") }} словоупотреблений.</div>
+  <div class="shrink">Скачать таблицу: <a href="/export/frequency.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/frequency.csv{{ qs(request) }}">CSV</a> · <a href="/export/frequency.json{{ qs(request) }}">JSON</a></div>
 </div>
 <div class="panel"><div id="chart-freq" class="chart"></div></div>
+<div class="panel row" style="align-items:center">
+  <div class="muted small">Отметьте слова флажками (они же отмечаются в блоке «Слова словаря»), затем:</div>
+  <div class="shrink">
+    <button type="submit" form="sel-form" onclick="document.getElementById('sel-form').tab.value='report'">📋 Отчёт по отмеченным</button>
+    <button type="submit" form="sel-form" class="secondary" formaction="/export/concordance.xlsx" title="все предложения с отмеченными словами">⬇ Предложения отмеченных (XLSX)</button>
+    <button type="submit" form="sel-form" class="secondary" formaction="/export/concordance.csv">CSV</button>
+    <button type="submit" form="sel-form" class="secondary" formaction="/export/hits.conllu">CoNLL-U</button>
+  </div>
+</div>
 <div class="panel table-scroll">
   <table>
-    <tr><th>Слово</th><th>Лемма</th><th>Категория</th><th class="num">Вхождений</th><th class="num">ipm</th><th class="num">Предложений</th><th class="num">Текстов</th>
-      <th class="num" title="Мера неравномерности Грайса: 0 — равномерно по текстам, ближе к 1 — сосредоточено в немногих">DP</th><th></th></tr>
+    <tr><th><input type="checkbox" title="отметить все" onchange="document.querySelectorAll('.freq-check').forEach(c => { c.checked = this.checked; syncWord(c); })"></th>
+      <th>Слово</th><th>Лемма</th><th>Категория</th><th class="num">Вхождений</th><th class="num">ipm</th><th class="num">Предложений</th><th class="num">Текстов</th>
+      <th class="num" title="Мера неравномерности Грайса: 0 — равномерно по текстам, ближе к 1 — сосредоточено в немногих">DP</th><th>Перейти</th><th>Все предложения со словом</th></tr>
     {% for r in freq.rows %}
-    <tr><td><strong>{{ r.word }}</strong></td><td>{{ r.lemma }} <span class="muted small">{{ pos_label(r.upos) }}</span></td><td>{{ r.category }}</td>
+    <tr><td><input type="checkbox" class="freq-check" value="{{ r.entry_id }}" {{ 'checked' if r.entry_id in sel.words }} onchange="syncWord(this)"></td>
+      <td><strong>{{ r.word }}</strong></td><td>{{ r.lemma }} <span class="muted small">{{ pos_label(r.upos) }}</span></td><td>{{ r.category }}</td>
       <td class="num">{{ r.count }}</td><td class="num">{{ r.ipm }}</td><td class="num">{{ r.sentences }}</td><td class="num">{{ r.texts }}</td>
       <td class="num">{{ r.dp if r.dp is not none else '' }}</td>
-      <td class="num small">{% if r.count %}<a href="/analysis?tab=profile&dictionary_id={{ dict_id }}&corpus_id={{ corpus_id or '' }}&entry_id={{ r.entry_id }}">профиль</a> ·
-        <a href="/analysis?tab=conc&dictionary_id={{ dict_id }}&corpus_id={{ corpus_id or '' }}&entry_id={{ r.entry_id }}">примеры</a>{% endif %}</td></tr>
+      <td class="small nowrap">{% if r.count %}<a href="/analysis?tab=profile&{{ sq }}&entry_id={{ r.entry_id }}">профиль</a> ·
+        <a href="/analysis?tab=conc&{{ sq }}&entry_id={{ r.entry_id }}">примеры</a>{% endif %}</td>
+      <td class="small nowrap">{% if r.count %}<a href="/export/concordance.xlsx?{{ sq }}&entry_id={{ r.entry_id }}" title="все {{ r.count }} предложений в XLSX">XLSX</a> ·
+        <a href="/export/concordance.csv?{{ sq }}&entry_id={{ r.entry_id }}">CSV</a> ·
+        <a href="/export/hits.conllu?{{ sq }}&entry_id={{ r.entry_id }}" title="предложения с полным разбором">CoNLL-U</a>{% endif %}</td></tr>
     {% endfor %}
   </table>
 </div>
@@ -108,15 +182,14 @@
 
 {# ============================================================== КОНКОРДАНС #}
 {% if tab == 'conc' and conc %}
-<form method="get" class="panel row">
-  <input type="hidden" name="tab" value="conc"><input type="hidden" name="dictionary_id" value="{{ dict_id }}"><input type="hidden" name="corpus_id" value="{{ corpus_id or '' }}">
-  <div><label>Слово</label><select name="entry_id"><option value="">все слова словаря</option>{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
-  <div><label>Роль слова в предложении</label><select name="role"><option value="">любая</option>{% for k in ROLE_LABELS %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('role') == k }}>{{ role_label(k) }}</option>{% endfor %}</select></div>
-  <div><label>Тип связи</label><select name="rel_type"><option value="">любой</option>{% for k in REL_LABELS %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('rel_type') == k }}>{{ rel_label(k) }}</option>{% endfor %}</select></div>
-  <div><label>Связанное слово (лемма)</label><input type="text" name="related" value="{{ request.query_params.get('related', '') }}" placeholder="например: сладкий"></div>
-  <div class="shrink"><label class="check"><input type="checkbox" name="invalid" value="1" {{ 'checked' if request.query_params.get('invalid') }}> показать ложные</label></div>
-  <div class="shrink"><button type="submit">Найти</button></div>
-</form>
+<div class="panel row">
+  <div><label>Слово</label><select name="entry_id" form="sel-form"><option value="">{{ 'выбранные слова (' ~ sel.words|length ~ ')' if sel.words else 'все слова словаря' }}</option>{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
+  <div><label>Роль слова в предложении</label><select name="role" form="sel-form"><option value="">любая</option>{% for k in ROLE_LABELS %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('role') == k }}>{{ role_label(k) }}</option>{% endfor %}</select></div>
+  <div><label>Тип связи</label><select name="rel_type" form="sel-form"><option value="">любой</option>{% for k in REL_LABELS %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('rel_type') == k }}>{{ rel_label(k) }}</option>{% endfor %}</select></div>
+  <div><label>Связанное слово (лемма)</label><input type="text" name="related" form="sel-form" value="{{ request.query_params.get('related', '') }}" placeholder="например: сладкий"></div>
+  <div class="shrink"><label class="check"><input type="checkbox" name="invalid" form="sel-form" value="1" {{ 'checked' if request.query_params.get('invalid') }}> показать ложные</label></div>
+  <div class="shrink"><button type="submit" form="sel-form">Найти</button></div>
+</div>
 <div class="row" style="margin-bottom:6px">
   <div class="muted">Найдено: {{ conc.total }}. Наведите курсор на строку — появится окно с соседними предложениями; ID или выделенное слово открывают разбор предложения 🌳.</div>
   <form class="shrink" method="get" action="/go/sentence" style="display:flex;gap:6px;align-items:center"><input type="text" name="id" placeholder="ID предложения" style="width:150px"><button class="small secondary" type="submit">Открыть разбор</button></form>
@@ -149,16 +222,15 @@
 
 {# ============================================================== ПРОФИЛЬ #}
 {% if tab == 'profile' %}
-<form method="get" class="panel row">
-  <input type="hidden" name="tab" value="profile"><input type="hidden" name="dictionary_id" value="{{ dict_id }}"><input type="hidden" name="corpus_id" value="{{ corpus_id or '' }}">
-  <div><label>Слово</label><select name="entry_id">{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
-  <div class="shrink"><label class="check"><input type="checkbox" name="uncertain" value="1" {{ 'checked' if request.query_params.get('uncertain') }}> учитывать спорные связи через однородные ряды</label></div>
-  <div class="shrink"><label class="check"><input type="checkbox" name="negated" value="1" {{ 'checked' if request.query_params.get('negated') }}> учитывать члены под отрицанием («не запах, а…»)</label></div>
-  <div class="shrink"><button type="submit">Показать</button></div>
-</form>
+<div class="panel row">
+  <div><label>Слово</label><select name="entry_id" form="sel-form">{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
+  <div class="shrink"><label class="check"><input type="checkbox" name="uncertain" form="sel-form" value="1" {{ 'checked' if request.query_params.get('uncertain') }}> учитывать спорные связи через однородные ряды</label></div>
+  <div class="shrink"><label class="check"><input type="checkbox" name="negated" form="sel-form" value="1" {{ 'checked' if request.query_params.get('negated') }}> учитывать члены под отрицанием («не запах, а…»)</label></div>
+  <div class="shrink"><button type="submit" form="sel-form">Показать</button></div>
+</div>
 {% if profile and profile.total %}
 <div class="row" style="margin-bottom:10px">
-  <div><strong style="font-size:18px">«{{ profile.entry.surface }}»</strong> <span class="muted">— {{ profile.total }} вхождений в корпусе «{{ corpus_name }}»</span></div>
+  <div><strong style="font-size:18px">«{{ profile.entry.surface }}»</strong> <span class="muted">— {{ profile.total }} вхождений в выборке ({{ n_texts }} текстов)</span></div>
   <div class="shrink">Скачать: <a href="/export/profile.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/profile.csv{{ qs(request) }}">CSV</a> · <a href="/export/profile.json{{ qs(request) }}">JSON</a></div>
 </div>
 <div class="grid cols-2">
@@ -176,7 +248,7 @@
     <table>
       <tr><th>Слово</th><th class="num">Частота</th><th class="num">Текстов</th>{% if rt != 'case' %}<th class="num">logDice</th>{% endif %}</tr>
       {% for x in block['items'] %}
-      <tr><td><a href="/analysis?tab=conc&dictionary_id={{ dict_id }}&corpus_id={{ corpus_id or '' }}&entry_id={{ entry_id }}&rel_type={{ rt }}&related={{ x.lemma|urlencode }}">{{ x.lemma }}</a></td>
+      <tr><td><a href="/analysis?tab=conc&{{ sq }}&entry_id={{ entry_id }}&rel_type={{ rt }}&related={{ x.lemma|urlencode }}">{{ x.lemma }}</a></td>
         <td class="num">{{ x.count }}</td><td class="num">{{ x.texts }}</td>{% if rt != 'case' %}<td class="num">{{ x.logdice }}</td>{% endif %}</tr>
       {% endfor %}
     </table>
@@ -188,17 +260,17 @@
 
 {# ============================================================== СРАВНЕНИЕ #}
 {% if tab == 'compare' %}
-<form method="get" class="panel row">
-  <input type="hidden" name="tab" value="compare"><input type="hidden" name="dictionary_id" value="{{ dict_id }}"><input type="hidden" name="corpus_id" value="{{ corpus_id or '' }}">
-  <div><label>Корпус A</label><input type="text" value="{{ corpus_name }}" disabled></div>
-  <div><label>Корпус B</label><select name="corpus_b"><option value="">Все тексты</option>{% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if c.id == corpus_b }}>{{ c.name }}</option>{% endfor %}</select></div>
-  <div><label>Сравнить связи слова</label><select name="entry_id"><option value="">—</option>{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
-  <div><label>Тип связи</label><select name="rel_type">{% for k in REL_LABELS %}<option value="{{ k }}" {{ 'selected' if (request.query_params.get('rel_type') or 'attribute') == k }}>{{ rel_label(k) }}</option>{% endfor %}</select></div>
-  <div class="shrink"><button type="submit">Сравнить</button></div>
-</form>
+<div class="panel row">
+  <div>{{ corpus_select('Корпус A') }}</div>
+  <div><label>Корпус B</label><select name="corpus_b" form="sel-form"><option value="">Все тексты</option>{% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if c.id == corpus_b }}>{{ c.name }}</option>{% endfor %}</select></div>
+  <div><label>Сравнить связи слова</label><select name="entry_id" form="sel-form"><option value="">—</option>{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
+  <div><label>Тип связи</label><select name="rel_type" form="sel-form">{% for k in REL_LABELS %}<option value="{{ k }}" {{ 'selected' if (request.query_params.get('rel_type') or 'attribute') == k }}>{{ rel_label(k) }}</option>{% endfor %}</select></div>
+  <div class="shrink"><button type="submit" form="sel-form">Сравнить</button></div>
+</div>
+{% if sel.filtered %}<p class="help">Фильтры панели «Выборка» ({{ sel.describe() }}) применяются к корпусу A; корпус B берётся целиком.</p>{% endif %}
 {% if cmp %}
 <div class="row" style="margin-bottom:6px">
-  <div class="muted">A = «{{ corpus_name }}» ({{ cmp.words_a }} слов), B = «{{ corpus_b_name }}» ({{ cmp.words_b }} слов). G² ≥ 3,84 — различие значимо (p &lt; 0,05). Log-ratio &gt; 0 — чаще в A.</div>
+  <div class="muted">A = «{{ corpus_name }}»{% if sel.filtered %} с фильтрами{% endif %} ({{ cmp.words_a }} слов), B = «{{ corpus_b_name }}» ({{ cmp.words_b }} слов). G² ≥ 3,84 — различие значимо (p &lt; 0,05). Log-ratio &gt; 0 — чаще в A.</div>
   <div class="shrink">Скачать: <a href="/export/compare.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/compare.csv{{ qs(request) }}">CSV</a></div>
 </div>
 <div class="panel"><div id="chart-cmp" class="chart"></div></div>
@@ -228,12 +300,11 @@
 
 {# ============================================================== СТРУКТУРА #}
 {% if tab == 'structure' and structure %}
-<form method="get" class="panel row">
-  <input type="hidden" name="tab" value="structure"><input type="hidden" name="dictionary_id" value="{{ dict_id }}"><input type="hidden" name="corpus_id" value="{{ corpus_id or '' }}">
-  <div><label>Предложения со словом</label><select name="entry_id"><option value="">любым словом словаря</option>{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
-  <div class="shrink"><button type="submit">Показать</button></div>
+<div class="panel row">
+  <div><label>Предложения со словом</label><select name="entry_id" form="sel-form"><option value="">{{ 'любым из выбранных слов (' ~ sel.words|length ~ ')' if sel.words else 'любым словом словаря' }}</option>{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
+  <div class="shrink"><button type="submit" form="sel-form">Показать</button></div>
   <div class="shrink">Скачать: <a href="/export/structure.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/structure.csv{{ qs(request) }}">CSV</a></div>
-</form>
+</div>
 {% set h, a = structure.hits, structure.all %}
 <div class="grid cols-2">
   <div class="panel">
@@ -267,6 +338,40 @@
   if (ov.words.length > 1 && ov.groups.length > 1) {
     drawChart('chart-ov-heat', [{ type: 'heatmap', z: ov.words.map(w => w[metric]), x: labels, y: ov.words.map(w => w.word),
       colorscale: 'Blues', reversescale: true, hovertemplate: '%{y} — %{x}: %{z}<extra></extra>' }], { margin: { l: 110, r: 20, t: 10, b: 140 } });
+  }
+})();
+{% endif %}
+{% if tab == 'report' and rep and rep.words %}
+(function () {
+  const rep = {{ rep|tojson }};
+  const words = rep.cards;
+  drawChart('rep-freq', [{ type: 'bar', x: words.map(w => w.word), y: words.map(w => w.ipm), text: words.map(w => w.count + ' вхожд.'),
+    hovertemplate: '%{x}: %{y} ipm (%{text})<extra></extra>', marker: { color: cssVar('--accent') } }],
+    { title: { text: 'ipm выбранных слов', font: { size: 14 } }, yaxis: { title: 'ipm' }, margin: { l: 60, r: 20, t: 40, b: 90 } });
+  for (const [dim, ov] of Object.entries(rep.overviews)) {
+    const labels = ov.groups.map(g => g.label);
+    const traces = ov.words.map(w => dim === 'period'
+      ? { type: 'scatter', mode: 'lines+markers', name: w.word, x: labels, y: w.ipm }
+      : { type: 'bar', name: w.word, x: labels, y: w.ipm });
+    drawChart('rep-ov-' + dim, traces, { barmode: 'group', yaxis: { title: 'ipm' }, xaxis: { automargin: true, tickangle: labels.length > 4 ? -30 : 0 },
+      legend: { orientation: 'h', y: 1.18 }, margin: { l: 55, r: 10, t: 40, b: 40 } });
+  }
+  const rm = rep.role_matrix;
+  if (rm.roles.length) {
+    drawChart('rep-roles', rm.roles.map((r, k) => ({ type: 'bar', orientation: 'h', name: r.label, y: rm.words.map(w => w.word),
+      x: rm.words.map(w => w.pct[k]), marker: { color: cssVar('--r-' + r.role) || undefined },
+      hovertemplate: '%{y}: ' + r.label + ' — %{x}%<extra></extra>' })),
+      { barmode: 'stack', xaxis: { title: '% вхождений слова', range: [0, 100] }, yaxis: { autorange: 'reversed', automargin: true },
+        legend: { orientation: 'h', y: -0.25 }, margin: { l: 110, r: 20, t: 10, b: 120 } });
+  }
+  if (rep.structure && rep.structure.hits.n) {
+    const h = rep.structure.hits.hist || {}, a = rep.structure.all.hist || {};
+    const keys = [...new Set([...Object.keys(h), ...Object.keys(a)].map(Number))].sort((x, y) => x - y);
+    const lab = keys.map(k => k >= 100 ? '100+' : `${k}–${k + 4}`);
+    drawChart('rep-len', [
+      { type: 'bar', name: 'с выбранными словами', x: lab, y: keys.map(k => h[k] || 0), marker: { color: cssVar('--accent') } },
+      { type: 'bar', name: 'все предложения', x: lab, y: keys.map(k => a[k] || 0), marker: { color: cssVar('--muted') } }],
+      { barmode: 'group', xaxis: { title: 'длина предложения, слов' }, yaxis: { title: '% предложений' } });
   }
 })();
 {% endif %}

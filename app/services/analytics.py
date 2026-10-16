@@ -140,6 +140,7 @@ def concordance(
     text_ids: list[int],
     *,
     entry_id: int | None = None,
+    entry_ids: list[int] | None = None,
     role: str | None = None,
     rel_type: str | None = None,
     related_lemma: str | None = None,
@@ -163,6 +164,8 @@ def concordance(
         q = q.where(VALID)
     if entry_id:
         q = q.where(Hit.entry_id == entry_id)
+    elif entry_ids:
+        q = q.where(Hit.entry_id.in_(entry_ids))
     if role:
         q = q.where(Hit.role == role)
     if rel_type or related_lemma:
@@ -206,7 +209,8 @@ def concordance(
 
 
 def word_profile(session: Session, entry_id: int, text_ids: list[int], scopes=DEFAULT_SCOPES,
-                 top: int = 25, include_negated: bool = False) -> dict:
+                 top: int = 25, include_negated: bool = False, stop: frozenset[str] = frozenset()) -> dict:
+    """stop — стоп-слова: такие связанные леммы не показываются (данные в базе не меняются)."""
     entry = session.get(DictionaryEntry, entry_id)
     if entry is None or not text_ids:
         return {"entry": entry, "total": 0, "roles": [], "relations": {}}
@@ -228,6 +232,8 @@ def word_profile(session: Session, entry_id: int, text_ids: list[int], scopes=DE
         rel_q = rel_q.where(TokenRelation.negated.is_(False))
     grouped = defaultdict(list)
     for r in session.execute(rel_q):
+        if stop and r.rel_type != "case" and norm(r.related_lemma) in stop:
+            continue
         grouped[r.rel_type].append({"lemma": r.related_lemma, "count": r.n, "texts": r.texts, "example": r.example})
     # частоты связанных лемм в корпусе для logDice
     lemmas = {x["lemma"] for rt, xs in grouped.items() if rt != "case" for x in xs}
@@ -276,7 +282,7 @@ def compare_frequency(session: Session, dictionary_id: int, ids_a: list[int], id
 
 
 def compare_profile(session: Session, entry_id: int, ids_a: list[int], ids_b: list[int], rel_type: str = "attribute",
-                    scopes=DEFAULT_SCOPES, top: int = 40) -> dict:
+                    scopes=DEFAULT_SCOPES, top: int = 40, stop: frozenset[str] = frozenset()) -> dict:
     def counts(ids):
         if not ids:
             return Counter(), 0
@@ -294,6 +300,8 @@ def compare_profile(session: Session, entry_id: int, ids_a: list[int], ids_b: li
     cb, hb = counts(ids_b)
     rows = []
     for lemma in set(ca) | set(cb):
+        if stop and rel_type != "case" and norm(lemma) in stop:
+            continue
         a, b = ca.get(lemma, 0), cb.get(lemma, 0)
         ll = log_likelihood(a, b, max(ha, 1), max(hb, 1))
         rows.append({"lemma": lemma, "count_a": a, "count_b": b,
@@ -351,11 +359,14 @@ def _structure_stats(session: Session, where) -> dict:
     }
 
 
-def sentence_structure(session: Session, dictionary_id: int, text_ids: list[int], entry_id: int | None = None) -> dict:
+def sentence_structure(session: Session, dictionary_id: int, text_ids: list[int], entry_id: int | None = None,
+                       entry_ids: list[int] | None = None) -> dict:
     ids = text_ids or [-1]
     hit_sids = select(Hit.sentence_id).where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), VALID)
     if entry_id:
         hit_sids = hit_sids.where(Hit.entry_id == entry_id)
+    elif entry_ids:
+        hit_sids = hit_sids.where(Hit.entry_id.in_(entry_ids))
     return {
         "hits": _structure_stats(session, SentenceRow.id.in_(hit_sids)),
         "all": _structure_stats(session, SentenceRow.text_id.in_(ids)),
