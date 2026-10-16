@@ -1,0 +1,111 @@
+{# ============================================================== ОТЧЁТ (вкладка «Отчёт») #}
+{% if tab == 'report' and rep %}
+<div class="panel row no-print">
+  <div><label>Шаг периода, лет</label>
+    <select name="step" form="sel-form">{% for st in PERIOD_STEPS %}<option value="{{ st }}" {{ 'selected' if rep.step == st }}>{{ st }}</option>{% endfor %}</select></div>
+  <div><label>Сравнить с корпусом</label>
+    <select name="report_b" form="sel-form"><option value="none">— без сравнения —</option><option value="" {{ 'selected' if report_b == '' }}>Все тексты</option>
+      {% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if report_b == c.id|string }}>{{ c.name }}</option>{% endfor %}</select></div>
+  <div class="shrink"><button type="submit" form="sel-form">Обновить отчёт</button></div>
+  <div class="shrink">Скачать отчёт: <a href="/export/report.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/report.json{{ qs(request) }}">JSON</a>
+    · <a href="#" onclick="window.print(); return false;" title="печать или сохранение в PDF средствами браузера">🖨 печать / PDF</a></div>
+</div>
+
+<div class="panel report-head">
+  <h2 style="margin:0 0 6px">Сводный отчёт: {{ rep.words|map(attribute='word')|join(', ') or 'слова не найдены' }}</h2>
+  <div class="muted">{{ sel.describe() }} · {{ rep.n_texts }} текстов, {{ "{:,}".format(rep.corpus_words).replace(",", " ") }} слов.
+    {% if rep_default_words %}Слова не выбраны — взяты 10 самых частых (выберите свои в блоке «Слова словаря»).{% endif %}</div>
+  <div class="stat-tiles">
+    <div class="tile"><div class="tile-num">{{ rep.total }}</div><div class="tile-label">вхождений выбранных слов</div></div>
+    <div class="tile"><div class="tile-num">{{ rep.total_ipm }}</div><div class="tile-label">ipm (на миллион слов)</div></div>
+    <div class="tile"><div class="tile-num">{{ rep.texts_with }} / {{ rep.n_texts }}</div><div class="tile-label">текстов, где встречаются</div></div>
+    <div class="tile"><div class="tile-num">{{ rep.words|length }}</div><div class="tile-label">слов в отчёте</div></div>
+  </div>
+</div>
+
+{% if rep.words %}
+<h3>1. Частота</h3>
+<div class="grid cols-2">
+  <div class="panel"><div id="rep-freq" class="chart" style="min-height:300px"></div></div>
+  <div class="panel table-scroll">
+    <table>
+      <tr><th>Слово</th><th class="num">Вхожд.</th><th class="num">ipm</th><th class="num">Текстов</th><th class="num" title="неравномерность по текстам (Грайс)">DP</th><th>Чаще всего</th></tr>
+      {% for c in rep.cards %}
+      <tr><td><a href="/analysis?tab=profile&{{ sq }}&entry_id={{ c.entry_id }}"><strong>{{ c.word }}</strong></a></td><td class="num">{{ c.count }}</td><td class="num">{{ c.ipm }}</td>
+        <td class="num">{{ c.texts }}</td><td class="num">{{ c.dp if c.dp is not none else '' }}</td>
+        <td class="small">{{ c.top_role }}{% if c.top_role %} <span class="muted">({{ c.top_role_pct }}%)</span>{% endif %}</td></tr>
+      {% endfor %}
+    </table>
+    <p class="help">DP: 0 — слово распределено по текстам равномерно, ближе к 1 — сосредоточено в немногих текстах.</p>
+  </div>
+</div>
+
+{% if rep.overviews %}
+<h3>2. Распределение по выборке</h3>
+<div class="grid cols-2">
+  {% for dim, ov in rep.overviews.items() %}
+  <div class="panel"><h4 style="margin:0">ipm по группировке «{{ ov.dim_label }}»{% if dim == 'period' %} (шаг {{ ov.step }} лет){% endif %}</h4>
+    <div id="rep-ov-{{ dim }}" class="chart" style="min-height:320px"></div></div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if rep.role_matrix.roles %}
+<h3>3. Роль в предложении</h3>
+<div class="panel"><div id="rep-roles" class="chart" style="min-height:{{ 120 + 34 * rep.cards|length }}px"></div>
+  <p class="help">Доля вхождений слова в каждой роли (член предложения по академической грамматике, в скобках — связь UD).</p></div>
+{% endif %}
+
+<h3>4. Связи и примеры по каждому слову</h3>
+{% for c in rep.cards %}
+<div class="panel word-card">
+  <h4 style="margin:0 0 6px">«{{ c.word }}» <span class="muted small">— {{ c.count }} вхождений, {{ c.ipm }} ipm, в {{ c.texts }} текстах</span>
+    <span class="small no-print"> · <a href="/analysis?tab=profile&{{ sq }}&entry_id={{ c.entry_id }}">полный профиль</a> · <a href="/analysis?tab=conc&{{ sq }}&entry_id={{ c.entry_id }}">все примеры</a></span></h4>
+  {% if c.relations %}
+  <div class="rel-grid">
+    {% for rt, block in c.relations.items() %}
+    <div><div class="muted small"><strong>{{ block.label|capitalize }}</strong> ({{ block.total }})</div>
+      {% for x in block['items'] %}<a class="chip" title="{{ x.count }} раз, logDice {{ x.logdice }}" href="/analysis?tab=conc&{{ sq }}&entry_id={{ c.entry_id }}&rel_type={{ rt }}&related={{ x.lemma|urlencode }}">{{ x.lemma }} <span class="muted">{{ x.count }}</span></a>{% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}<div class="muted small">Связей не найдено.</div>{% endif %}
+  {% if c.examples %}
+  <div class="examples">
+    {% for i in c.examples %}<div class="example"><a href="/sentences/{{ i.sentence_id }}" class="muted small no-print">🌳 {{ i.sentence_id }}</a> {{ i.left }}<strong>{{ i.kw }}</strong>{{ i.right }} <span class="muted small">— {{ i.source }}</span></div>{% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+
+{% if rep.structure and rep.structure.hits.n %}
+{% set h, a = rep.structure.hits, rep.structure.all %}
+<h3>5. Предложения с выбранными словами</h3>
+<div class="grid cols-2">
+  <div class="panel">
+    <table>
+      <tr><th>Показатель</th><th class="num">С выбранными словами</th><th class="num">Все предложения</th></tr>
+      {% for k, label in [('n','Предложений'),('avg_len','Средняя длина, слов'),('median_len','Медиана длины'),('avg_depth','Глубина дерева'),('avg_clauses','Клауз на предложение'),('direct_speech','% прямой речи'),('homogeneous','% с однородными членами'),('participial','% с причастными оборотами'),('gerund','% с деепричастиями')] %}
+      <tr><td>{{ label }}</td><td class="num">{{ h.get(k, '—') }}</td><td class="num">{{ a.get(k, '—') }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  <div class="panel"><div id="rep-len" class="chart" style="min-height:280px"></div></div>
+</div>
+{% endif %}
+
+{% if rep.compare %}
+<h3>6. Сравнение с корпусом «{{ report_b_name }}»</h3>
+<div class="panel table-scroll">
+  <p class="muted small" style="margin-top:0">A — текущая выборка ({{ rep.compare.words_a }} слов), B — «{{ report_b_name }}» ({{ rep.compare.words_b }} слов). G² ≥ 3,84 — различие значимо (p &lt; 0,05); log-ratio &gt; 0 — чаще в A.</p>
+  <table>
+    <tr><th>Слово</th><th class="num">ipm A</th><th class="num">ipm B</th><th class="num">G²</th><th class="num">Log-ratio</th><th></th></tr>
+    {% for r in rep.compare.rows %}<tr><td>{{ r.word }}</td><td class="num">{{ r.ipm_a }}</td><td class="num">{{ r.ipm_b }}</td><td class="num">{{ r.ll }}</td><td class="num">{{ r.log_ratio }}</td>
+      <td>{% if r.significant %}<span class="badge warn">{{ 'чаще в A' if r.log_ratio > 0 else 'чаще в B' }}</span>{% endif %}</td></tr>{% endfor %}
+  </table>
+</div>
+{% endif %}
+{% else %}
+<div class="panel muted">В выборке нет вхождений выбранных слов. Выберите другие слова или ослабьте фильтры.</div>
+{% endif %}
+{% endif %}

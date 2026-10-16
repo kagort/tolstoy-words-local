@@ -40,12 +40,14 @@ def _params(db: Session, request: Request) -> dict:
         "Версия приложения": __version__,
         "Версия синтаксического слоя": SYNTAX_VERSION,
         "Корпус": A.corpus_label(db, _int(qp.get("corpus_id"))),
+        "Выборка": _selection(db, request).describe(),
+        "Стоп-слова": _stop_label(db, request),
     }
     if d:
         p["Словарь"] = d.name
         p["Настройки словаря"] = json.dumps(d.settings, ensure_ascii=False)
-    for k, v in qp.items():
-        p[f"параметр: {k}"] = v
+    for k in dict.fromkeys(qp.keys()):
+        p[f"параметр: {k}"] = ", ".join(qp.getlist(k))
     return p
 
 
@@ -79,11 +81,27 @@ def _send(frames: dict[str, pd.DataFrame], fmt: str, name: str, params: dict) ->
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers=headers)
 
 
+def _selection(db: Session, request: Request):
+    from app.services.selection import from_params
+
+    if not hasattr(request.state, "selection"):
+        request.state.selection = from_params(db, request.query_params)
+    return request.state.selection
+
+
+def _stop_label(db: Session, request: Request) -> str:
+    from app.services.stopwords import label
+
+    return label(db, request.query_params.get("stop"))
+
+
 def _ctx(db: Session, request: Request):
-    qp = request.query_params
-    dict_id = _int(qp.get("dictionary_id"))
-    corpus_id = _int(qp.get("corpus_id"))
-    return dict_id, A.corpus_text_ids(db, corpus_id)
+    """Словарь и итоговая выборка текстов — те же, что на странице анализа (панель «Выборка»)."""
+    return _int(request.query_params.get("dictionary_id")), _selection(db, request).ids
+
+
+def _words(db: Session, request: Request) -> list[int]:
+    return _selection(db, request).words
 
 
 @router.get("/frequency.{fmt}")
@@ -107,7 +125,7 @@ def export_concordance(fmt: str, request: Request, db: Session = Depends(get_ses
         raise HTTPException(400)
     qp = request.query_params
     dict_id, ids = _ctx(db, request)
-    c = A.concordance(db, dict_id, ids, entry_id=_int(qp.get("entry_id")), role=qp.get("role") or None,
+    c = A.concordance(db, dict_id, ids, entry_id=_int(qp.get("entry_id")), entry_ids=_words(db, request), role=qp.get("role") or None,
                       rel_type=qp.get("rel_type") or None, related_lemma=qp.get("related") or None,
                       include_invalid=bool(qp.get("invalid")), page=1, per_page=100_000, context_chars=10_000)
     df = pd.DataFrame([{
@@ -126,7 +144,7 @@ def export_profile(fmt: str, request: Request, db: Session = Depends(get_session
     _, ids = _ctx(db, request)
     entry_id = _int(qp.get("entry_id"))
     scopes = ("direct", "shared", "uncertain") if qp.get("uncertain") else ("direct", "shared")
-    p = A.word_profile(db, entry_id, ids, scopes=scopes, top=10_000)
+    p = A.word_profile(db, entry_id, ids, scopes=scopes, top=10_000, stop=_selection(db, request).stopset)
     rows = []
     for rt, block in p["relations"].items():
         for x in block["items"]:
@@ -152,7 +170,8 @@ def export_compare(fmt: str, request: Request, db: Session = Depends(get_session
     frames = {"Сравнение частот": df}
     entry_id = _int(qp.get("entry_id"))
     if entry_id:
-        cp = A.compare_profile(db, entry_id, ids_a, ids_b, qp.get("rel_type") or "attribute", top=10_000)
+        cp = A.compare_profile(db, entry_id, ids_a, ids_b, qp.get("rel_type") or "attribute", top=10_000,
+                               stop=_selection(db, request).stopset)
         frames["Сравнение связей"] = pd.DataFrame(cp["rows"]).rename(columns={
             "lemma": "Лемма", "count_a": "A", "count_b": "B", "per100_a": "на 100 вхожд. A", "per100_b": "на 100 вхожд. B",
             "ll": "G²", "log_ratio": "Log-ratio", "significant": "Значимо"})
@@ -188,7 +207,7 @@ def export_structure(fmt: str, request: Request, db: Session = Depends(get_sessi
         raise HTTPException(400)
     qp = request.query_params
     dict_id, ids = _ctx(db, request)
-    st = A.sentence_structure(db, dict_id, ids, _int(qp.get("entry_id")))
+    st = A.sentence_structure(db, dict_id, ids, _int(qp.get("entry_id")), entry_ids=_words(db, request))
     keys = [("n", "Предложений"), ("avg_len", "Средняя длина (слов)"), ("median_len", "Медиана длины"),
             ("stdev_len", "Ст. отклонение длины"), ("avg_depth", "Средняя глубина дерева"), ("avg_clauses", "Среднее число клауз"),
             ("direct_speech", "% прямой речи"), ("homogeneous", "% с однородными членами"),
@@ -200,6 +219,46 @@ def export_structure(fmt: str, request: Request, db: Session = Depends(get_sessi
     return _send({"Структура предложений": pd.DataFrame(rows)}, fmt, "structure", _params(db, request))
 
 
+@router.get("/report.{fmt}")
+def export_report(fmt: str, request: Request, db: Session = Depends(get_session)):
+    if fmt not in ("xlsx", "json"):
+        raise HTTPException(400, "Формат: xlsx или json")
+    from app.web.pages import _report_context
+
+    dict_id, ids = _ctx(db, request)
+    rep = _report_context(db, request, dict_id, _selection(db, request))["rep"]
+    frames = {"Слова": pd.DataFrame([{
+        "Слово": c["word"], "Лемма": c["lemma"], "Категория": c["category"], "Вхождений": c["count"], "ipm": c["ipm"],
+        "Предложений": c["sentences"], "Текстов": c["texts"], "DP": c["dp"], "Главная роль": c["top_role"],
+        "Доля главной роли, %": c["top_role_pct"]} for c in rep["cards"]])}
+    for dim, ov in rep["overviews"].items():
+        data = {ov["dim_label"]: [g["label"] for g in ov["groups"]], "Слов в группе": [g["n_words"] for g in ov["groups"]],
+                "Текстов в группе": [g["n_texts"] for g in ov["groups"]]}
+        for w in ov["words"] + [ov["total"]]:
+            data[f"{w['word']} (ipm)"] = w["ipm"]
+            data[f"{w['word']} (вхожд.)"] = w["count"]
+        frames[f"По группировке «{ov['dim_label']}»"] = pd.DataFrame(data)
+    rm = rep["role_matrix"]
+    frames["Роли, %"] = pd.DataFrame([{"Слово": w["word"], **{r["label"]: w["pct"][k] for k, r in enumerate(rm["roles"])}} for w in rm["words"]])
+    frames["Связи"] = pd.DataFrame([{"Слово": c["word"], "Тип связи": b["label"], "Лемма": x["lemma"], "Частота": x["count"],
+                                     "Текстов": x["texts"], "logDice": x["logdice"]}
+                                    for c in rep["cards"] for b in c["relations"].values() for x in b["items"]])
+    frames["Примеры"] = pd.DataFrame([{"Слово": c["word"], "Предложение": i["sentence"], "Источник": i["source"], "ID предложения": i["sentence_id"]}
+                                      for c in rep["cards"] for i in c["examples"]])
+    if rep["structure"]:
+        st = rep["structure"]
+        keys = [("n", "Предложений"), ("avg_len", "Средняя длина"), ("median_len", "Медиана длины"), ("avg_depth", "Глубина дерева"),
+                ("avg_clauses", "Клауз"), ("direct_speech", "% прямой речи"), ("homogeneous", "% с однородными"),
+                ("participial", "% с причастными оборотами"), ("gerund", "% с деепричастиями")]
+        frames["Структура предложений"] = pd.DataFrame([{"Показатель": label, "С выбранными словами": st["hits"].get(k),
+                                                          "Все предложения": st["all"].get(k)} for k, label in keys])
+    if rep["compare"]:
+        frames["Сравнение"] = pd.DataFrame(rep["compare"]["rows"]).drop(columns=["entry_id"], errors="ignore")
+    params = _params(db, request) | {"Слов в выборке": rep["corpus_words"], "Текстов в выборке": rep["n_texts"],
+                                     "Вхождений выбранных слов": rep["total"]}
+    return _send(frames, fmt, "report", params)
+
+
 @router.get("/hits.conllu")
 def export_hits_conllu(request: Request, db: Session = Depends(get_session)):
     qp = request.query_params
@@ -207,6 +266,8 @@ def export_hits_conllu(request: Request, db: Session = Depends(get_session)):
     q = select(Hit.sentence_id).where(Hit.dictionary_id == dict_id, Hit.text_id.in_(ids or [-1]), A.VALID).distinct()
     if _int(qp.get("entry_id")):
         q = q.where(Hit.entry_id == _int(qp.get("entry_id")))
+    elif _words(db, request):
+        q = q.where(Hit.entry_id.in_(_words(db, request)))
     sids = sorted(db.scalars(q))
 
     def gen():
@@ -273,7 +334,11 @@ def export_text_stats(text_id: int, fmt: str, request: Request, db: Session = De
                 ("Прилагательные / существительные", st["morphology"]["adj_noun"]), ("Местоимения, %", st["morphology"]["pron_share"]),
                 ("Удобочитаемость (Флеш–Оборнева)", st["readability"]["flesch_oborneva"])]
     frames = {"Сводка": pd.DataFrame(summary, columns=["Показатель", "Значение"])}
-    fq = st["frequency"]
+    from app.services.stopwords import label, resolve
+    from app.services.textstats import frequency_lists
+
+    stop = request.query_params.get("stop") or ""
+    fq = frequency_lists(st, resolve(db, stop))
     for key, title in (("top_all", "Частотные леммы"), ("top_noun", "Существительные"), ("top_verb", "Глаголы"),
                        ("top_adj", "Прилагательные"), ("top_adv", "Наречия"), ("top_propn", "Имена собственные")):
         frames[title] = pd.DataFrame([{"Лемма": x["lemma"], "Часть речи": pos_label(x["pos"]), "Частота": x["count"], "ipm": x["ipm"]} for x in fq[key]])
@@ -289,7 +354,8 @@ def export_text_stats(text_id: int, fmt: str, request: Request, db: Session = De
         dd[f"ipm: {ds['name']}"] = ds["ipm"]
     frames["Динамика"] = pd.DataFrame(dd)
     params = {"Текст": doc.title, "Автор": doc.author or "", "Год": doc.years, "Конвейер разбора": doc.pipeline_version or "",
-              "Дата выгрузки": datetime.now().strftime("%Y-%m-%d %H:%M"), "Версия приложения": __version__}
+              "Дата выгрузки": datetime.now().strftime("%Y-%m-%d %H:%M"), "Версия приложения": __version__,
+              "Стоп-слова (частотные списки)": label(db, stop)}
     return _send(frames, fmt, f"text-{text_id}-stats", params)
 
 

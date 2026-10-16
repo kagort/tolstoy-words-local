@@ -207,12 +207,24 @@ class TokenRelation(Base):
     negated: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class StopList(Base):
+    """Свой список стоп-слов (встроенный хранится в файле app/data/stopwords_ru.txt)."""
+
+    __tablename__ = "stopword_lists"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), unique=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    words: Mapped[list] = mapped_column(JSONB, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     kind: Mapped[str] = mapped_column(String(32))  # ingest | match
-    status: Mapped[str] = mapped_column(String(16), default="queued", index=True)  # queued|running|done|error
+    status: Mapped[str] = mapped_column(String(16), default="queued", index=True)  # queued|running|done|error|cancelled
     params: Mapped[dict] = mapped_column(JSONB, default=dict)
     title: Mapped[str] = mapped_column(String(500), default="")
     progress: Mapped[float] = mapped_column(Float, default=0.0)
@@ -221,3 +233,7 @@ class Job(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # «пульс» обработчика: обновляется при каждом шаге; по нему находят задачи упавших обработчиков
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")

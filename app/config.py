@@ -30,6 +30,10 @@ class Settings(BaseSettings):
 
     # Фоновый обработчик
     worker_poll_seconds: float = 2.0
+    # задача без «пульса» дольше этого срока считается брошенной (обработчик упал) и возвращается в очередь
+    job_stale_minutes: float = 5.0
+    # после стольких падений обработчика на одной задаче она помечается ошибкой (защита от бесконечного цикла)
+    job_max_attempts: int = 3
 
     @property
     def sqlalchemy_url(self) -> str:

@@ -10,7 +10,7 @@ from sqlalchemy import and_, delete, not_, select, update
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
-from app.models import Dictionary, DictionaryEntry, Hit, SentenceRow, TextDoc, TokenRow
+from app.models import Dictionary, DictionaryEntry, Hit, Job, SentenceRow, TextDoc, TokenRow
 from app.nlp.morph import word_forms
 from app.nlp.syntax import SYNTAX_VERSION, SentenceAnalysis
 from app.nlp.tree import Sentence, Token, parse_feats
@@ -68,7 +68,7 @@ def load_sentences(session: Session, sentence_ids: list[int]) -> dict[int, Sente
 
 
 def run_match(job_id: int | None, dictionary_id: int, entry_ids: list[int] | None = None,
-              text_ids: list[int] | None = None) -> None:
+              text_ids: list[int] | None = None, manual: list | None = None) -> None:
     with SessionLocal() as s:
         d = s.get(Dictionary, dictionary_id)
         if d is None:
@@ -91,11 +91,35 @@ def run_match(job_id: int | None, dictionary_id: int, entry_ids: list[int] | Non
             keep_q = keep_q.where(Hit.entry_id.in_(entry_ids))
         if text_ids:
             keep_q = keep_q.where(Hit.text_id.in_(text_ids))
-        manual = s.execute(keep_q).all()
+        # отметки сохраняются в параметрах задачи в той же транзакции, что и удаление, — поэтому они
+        # не теряются, даже если обработчик упадёт посреди пересчёта и задача запустится заново
+        marks = {(e, t): v for e, t, v in (manual or [])}
+        marks.update({(e, t): v for e, t, v in s.execute(keep_q).all()})
+        manual = [[e, t, v] for (e, t), v in marks.items()]
+        if job_id:
+            job = s.get(Job, job_id)
+            job.params = {**(job.params or {}), "manual": manual}
         s.execute(q)
         s.commit()
         entry_data = [(e.id, e.surface, entry_token_filter(e, settings)) for e in entries]
 
+    total_hits = 0
+    try:
+        total_hits = _match_entries(job_id, dictionary_id, entry_data, ready_texts)
+    finally:  # и при отмене задачи ручные отметки возвращаются на уже найденные вхождения
+        with SessionLocal() as s:
+            for e_id, tok_id, valid in manual:
+                s.execute(update(Hit).where(Hit.entry_id == e_id, Hit.token_id == tok_id).values(is_valid=valid))
+            s.commit()
+    with SessionLocal() as s:
+        d = s.get(Dictionary, dictionary_id)
+        if d is not None:
+            d.matched_at = datetime.now(timezone.utc)
+            s.commit()
+    log.info("Словарь %s: найдено вхождений %s", dictionary_id, total_hits)
+
+
+def _match_entries(job_id: int | None, dictionary_id: int, entry_data: list, ready_texts: list[int]) -> int:
     total_hits = 0
     for n, (entry_id, surface, cond) in enumerate(entry_data, start=1):
         if not ready_texts:
@@ -130,14 +154,9 @@ def run_match(job_id: int | None, dictionary_id: int, entry_ids: list[int] | Non
                 _copy(s, "token_relations", REL_COLS, rrows)
                 s.commit()
                 total_hits += len(hrows)
+                if job_id and start + CHUNK < len(rows):  # пульс и проверка отмены внутри частого слова
+                    set_progress(job_id, (n - 1 + (start + CHUNK) / len(rows)) / max(len(entry_data), 1),
+                                 f"Обработано слов: {n - 1} из {len(entry_data)} («{surface}»: {start + CHUNK} из {len(rows)})")
         if job_id:
             set_progress(job_id, n / max(len(entry_data), 1), f"Обработано слов: {n} из {len(entry_data)} («{surface}»)")
-
-    with SessionLocal() as s:
-        for e_id, tok_id, valid in manual:
-            s.execute(update(Hit).where(Hit.entry_id == e_id, Hit.token_id == tok_id).values(is_valid=valid))
-        d = s.get(Dictionary, dictionary_id)
-        if d is not None:
-            d.matched_at = datetime.now(timezone.utc)
-            s.commit()
-    log.info("Словарь %s: найдено вхождений %s", dictionary_id, total_hits)
+    return total_hits

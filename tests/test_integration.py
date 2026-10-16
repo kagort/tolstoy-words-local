@@ -162,3 +162,95 @@ def test_full_flow(client):
     run_jobs()
     with SessionLocal() as s:
         assert s.query(Hit).filter_by(entry_id=entry.id, is_valid=False).count() == 1
+
+
+def test_selection_report_stopwords(client):
+    """Панель «Выборка», выбор слов, отчёт, стоп-слова, выгрузка предложений, страница задач."""
+    from app.db import SessionLocal
+    from app.models import Corpus, Dictionary, DictionaryEntry, TextDoc
+    from app.services import analytics as A
+    from app.services.selection import from_params
+
+    with SessionLocal() as s:
+        corpus = s.query(Corpus).filter_by(name="Тест").one()
+        d = s.query(Dictionary).filter_by(name="Запахи").one()
+        e_zapah = s.query(DictionaryEntry).filter_by(dictionary_id=d.id, surface="запах").one()
+        e_dym = s.query(DictionaryEntry).filter_by(dictionary_id=d.id, surface="дым").one()
+        texts = {t.title: t.id for t in s.query(TextDoc).all()}
+        all_ids = A.corpus_text_ids(s, corpus.id)
+        # отмеченные тексты, фильтры и чужие отметки (текст не из корпуса не обнуляет выборку)
+        sel = from_params(s, {"corpus_id": [str(corpus.id)], "texts": [str(texts["Сирень"])]})
+        assert sel.ids == [texts["Сирень"]]
+        sel = from_params(s, {"corpus_id": [str(corpus.id)], "texts": ["999999"]})
+        assert sel.ids == all_ids
+        sel = from_params(s, {"corpus_id": [str(corpus.id)], "stypes": ["generated"]})
+        assert sel.ids == [texts["Текст модели"]]
+        sel = from_params(s, {"corpus_id": [str(corpus.id)], "authors": ["Автор Сирени"], "stop": ["ru"]})
+        assert sel.ids == [texts["Сирень"]] and "и" in sel.stopset
+
+    base = f"dictionary_id={d.id}&corpus_id={corpus.id}"
+    words = f"&words={e_zapah.id}&words={e_dym.id}"
+    # все вкладки с выбранными словами и отмеченным текстом
+    for tab in ("overview", "report", "freq", "conc", "profile", "compare", "structure"):
+        r = client.get(f"/analysis?tab={tab}&{base}{words}&texts={texts['Сирень']}&texts={texts['Дым']}&stop=ru")
+        assert r.status_code == 200, tab
+    r = client.get(f"/analysis?tab=report&{base}{words}&report_b=")
+    assert r.status_code == 200 and "Сводный отчёт" in r.text and "rep-freq" in r.text and "Сравнение с корпусом" in r.text
+    # отчёт без выбранных слов берёт самые частые
+    assert "10 самых частых" in client.get(f"/analysis?tab=report&{base}").text
+    # корпус A выбирается в форме вкладки сравнения
+    r = client.get(f"/analysis?tab=compare&{base}&corpus_b=")
+    assert 'name="corpus_id" form="sel-form"' in r.text and "disabled" not in r.text.split("Корпус A")[1][:200]
+    # конкорданс ограничен выбранными словами и текстами
+    with SessionLocal() as s:
+        conc = A.concordance(s, d.id, [texts["Дым"]], entry_ids=[e_dym.id])
+        assert conc["total"] >= 1 and all(i["word"] == "дым" for i in conc["items"])
+    # выгрузки по выборке: отчёт, предложения отмеченных слов, CoNLL-U
+    for url in (f"/export/report.xlsx?{base}{words}", f"/export/report.json?{base}{words}&report_b=",
+                f"/export/concordance.xlsx?{base}{words}", f"/export/concordance.csv?{base}&entry_id={e_zapah.id}",
+                f"/export/profile.xlsx?{base}&entry_id={e_zapah.id}&stop=ru"):
+        r = client.get(url)
+        assert r.status_code == 200 and len(r.content) > 50, url
+    csv_text = client.get(f"/export/concordance.csv?{base}&words={e_dym.id}").content.decode("utf-8-sig")
+    assert "дым" in csv_text.lower() and "запах;" not in csv_text.split("\n", 1)[1][:30]
+    conllu = client.get(f"/export/hits.conllu?{base}&words={e_dym.id}").text
+    assert "# text =" in conllu
+
+    # стоп-слова: встроенный список, свой список, фильтр в портрете и профиле
+    page = client.get("/stopwords")
+    assert page.status_code == 200 and "Встроенный" in page.text
+    assert "быть" in client.get("/stopwords/builtin.txt").text
+    r = client.post("/stopwords", data={"name": "Мои", "words": "Сладкий, тяжёлый\n# комментарий\nкомнату", "description": ""},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    from app.models import StopList
+
+    with SessionLocal() as s:
+        sl = s.query(StopList).filter_by(name="Мои").one()
+        assert "сладкий" in sl.words and "тяжелый" in sl.words and "и" not in sl.words  # флажок «включить встроенный» не отмечен
+        sl_id = sl.id
+        prof_all = A.word_profile(s, e_zapah.id, all_ids)
+        prof_stop = A.word_profile(s, e_zapah.id, all_ids, stop=frozenset({"сладкий"}))
+        lemmas = lambda p: {x["lemma"] for b in p["relations"].values() for x in b["items"]}
+        assert "сладкий" in lemmas(prof_all) and "сладкий" not in lemmas(prof_stop)
+        tid = texts["Сирень"]
+    r = client.post(f"/stopwords/{sl_id}", data={"name": "Мои", "words": "сладкий", "description": "x"}, follow_redirects=False)
+    assert r.status_code == 303
+    stats_page = client.get(f"/texts/{tid}/stats?stop={sl_id}")
+    assert stats_page.status_code == 200 and "без стоп-слов" in stats_page.text
+    from app.services.stopwords import resolve
+    from app.services.textstats import frequency_lists, get_stats
+
+    with SessionLocal() as s:
+        st = get_stats(s, tid)
+        assert any(x["lemma"] == "и" for x in st["frequency"]["top_all"])
+        assert not any(x["lemma"] == "и" for x in frequency_lists(st, resolve(s, "ru"))["top_all"])
+    assert client.get(f"/export/text/{tid}/stats.xlsx?stop=ru").status_code == 200
+    assert client.post(f"/stopwords/{sl_id}/delete", follow_redirects=False).status_code == 303
+    client.post("/stopwords", data={"name": "Встроенный+", "words": "князь", "with_builtin": "1"})
+    with SessionLocal() as s:
+        assert {"и", "князь"} <= set(s.query(StopList).filter_by(name="Встроенный+").one().words)
+
+    # страница задач: удаление выполненных
+    assert client.get("/jobs").status_code == 200
+    assert client.post("/jobs/clear", data={"what": "finished"}, follow_redirects=False).status_code == 303
