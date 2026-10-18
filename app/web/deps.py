@@ -19,7 +19,7 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 SOURCE_TYPES = {"natural": "литература / естественный", "generated": "сгенерирован нейросетью", "other": "другое"}
 STATUS_LABELS = {
     "uploaded": "загружен", "queued": "в очереди", "processing": "разбирается", "ready": "готов", "error": "ошибка",
-    "running": "выполняется", "done": "готово", "cancelled": "отменена",
+    "running": "выполняется", "done": "готово", "cancelled": "отменена", "deleting": "удаляется",
 }
 SCOPE_LABELS = {"direct": "прямая связь", "shared": "общий член ряда", "uncertain": "спорно", "private": "частный"}
 

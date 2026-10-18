@@ -48,7 +48,7 @@ class TextDoc(Base):
     source_filename: Mapped[str | None] = mapped_column(String(500))
     raw_text: Mapped[str] = mapped_column(Text)
     norm_text: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(32), default="uploaded")  # uploaded|processing|ready|error
+    status: Mapped[str] = mapped_column(String(32), default="uploaded")  # uploaded|queued|processing|ready|error|deleting
     error: Mapped[str | None] = mapped_column(Text)
     pipeline_version: Mapped[str | None] = mapped_column(String(100))
     n_sentences: Mapped[int] = mapped_column(Integer, default=0)
@@ -167,6 +167,8 @@ class Hit(Base):
     __table_args__ = (
         UniqueConstraint("entry_id", "token_id"),
         Index("ix_hits_dict_text", "dictionary_id", "text_id"),
+        Index("ix_hits_token_id", "token_id"),
+        Index("ix_hits_text_id", "text_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -192,6 +194,7 @@ class TokenRelation(Base):
     __table_args__ = (
         Index("ix_rel_entry_type", "entry_id", "rel_type", "related_lemma"),
         Index("ix_rel_dict_text", "dictionary_id", "text_id"),
+        Index("ix_rel_text_id", "text_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

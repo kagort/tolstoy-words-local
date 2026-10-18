@@ -48,7 +48,7 @@
         <button class="secondary" type="submit" {{ 'disabled' if precise_pending }}>{{ 'Точный разбор в очереди…' if precise_pending else 'Точный разбор всего текста (' ~ levels.fast ~ ' предл.)' }}</button></form>
       {% endif %}
       <form class="inline shrink" method="post" action="/texts/{{ doc.id }}/reparse"><button class="secondary" type="submit">Разобрать заново</button></form>
-      <form class="inline shrink" method="post" action="/texts/{{ doc.id }}/delete" onsubmit="return confirm('Удалить текст и всю его разметку?')"><button class="danger" type="submit">Удалить</button></form>
+      <form class="inline shrink" method="post" action="/texts/{{ doc.id }}/delete" onsubmit="return confirm('Удалить текст вместе со всей разметкой, вхождениями словарей, именами и портретом? Отменить нельзя.')"><button class="danger" type="submit">🗑 Удалить текст со всеми связями</button></form>
     </p>
   </div>
 </div>
