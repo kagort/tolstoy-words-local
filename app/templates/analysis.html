@@ -91,8 +91,8 @@
 </form>
 
 <div class="tabs">
-  {% for key, label in [('overview', 'Обзор'), ('report', '📋 Отчёт'), ('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
-  <a class="{{ 'active' if tab == key }}" href="/analysis?tab={{ key }}&dictionary_id={{ dict_id }}&{{ sel.query() }}{% if entry_id and key in ('profile','conc','structure','compare') %}&entry_id={{ entry_id }}{% endif %}">{{ label }}</a>
+  {% for key, label in [('overview', 'Обзор'), ('report', '📋 Отчёт'), ('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('colloc', 'Коллокации'), ('keywords', 'Ключевые слова'), ('map', 'Карта текста'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
+  <a class="{{ 'active' if tab == key }}" href="/analysis?tab={{ key }}&dictionary_id={{ dict_id }}&{{ sel.query() }}{% if entry_id and key in ('profile','conc','structure','compare','colloc') %}&entry_id={{ entry_id }}{% endif %}">{{ label }}</a>
   {% endfor %}
 </div>
 
@@ -140,6 +140,7 @@
 {% endif %}
 
 {% include "_report.html" %}
+{% include "_wave2.html" %}
 
 {# ============================================================== ЧАСТОТЫ #}
 {% if tab == 'freq' and freq %}
@@ -192,6 +193,8 @@
   <div><label>Слово</label><select name="entry_id" form="sel-form"><option value="">{{ 'выбранные слова (' ~ sel.words|length ~ ')' if sel.words else 'все слова словаря' }}</option>{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
   <div><label>Роль слова в предложении</label><select name="role" form="sel-form"><option value="">любая</option>{% for k in ROLE_LABELS %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('role') == k }}>{{ role_label(k) }}</option>{% endfor %}</select></div>
   <div><label>Тип связи</label><select name="rel_type" form="sel-form"><option value="">любой</option>{% for k in REL_LABELS %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('rel_type') == k }}>{{ rel_label(k) }}</option>{% endfor %}</select></div>
+  {% if request.query_params.get('near') %}<div class="shrink"><label>Рядом (±{{ request.query_params.get('window', 3) }} сл.)</label>
+    <input type="text" name="near" form="sel-form" value="{{ request.query_params.get('near') }}" style="width:140px"><input type="hidden" name="window" form="sel-form" value="{{ request.query_params.get('window', 3) }}"></div>{% endif %}
   <div><label>Связанное слово (лемма)</label><input type="text" name="related" form="sel-form" value="{{ request.query_params.get('related', '') }}" placeholder="например: сладкий"></div>
   <div class="shrink"><label class="check"><input type="checkbox" name="invalid" form="sel-form" value="1" {{ 'checked' if request.query_params.get('invalid') }}> показать ложные</label></div>
   <div class="shrink"><button type="submit" form="sel-form">Найти</button></div>

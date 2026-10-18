@@ -143,3 +143,8 @@ ul.dep-tree code { font-size: 12px; }
   .panel { break-inside: avoid; box-shadow: none; }
   body { background: #fff; }
 }
+/* волна 2 */
+td.sorted { font-weight: 700; }
+.kw-cloud { line-height: 1.5; }
+.kw-cloud span { display: inline-block; margin: 0 8px 2px 0; color: var(--accent); }
+mark { background: #ffe58a; color: inherit; padding: 0 2px; border-radius: 3px; }

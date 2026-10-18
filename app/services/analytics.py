@@ -145,6 +145,21 @@ def forms_distribution(session: Session, entry_id: int, text_ids: list[int]) -> 
 # ------------------------------------------------------------------ конкорданс
 
 
+def near_condition(lemma: str, window: int):
+    """Вхождение, рядом с которым (не дальше window слов, знаки препинания не считаются) есть лемма — как в оконных коллокациях."""
+    from sqlalchemy import and_, exists
+    from sqlalchemy.orm import aliased
+
+    t2, t3 = aliased(TokenRow), aliased(TokenRow)
+    between = (select(func.count()).select_from(t3)
+               .where(t3.sentence_id == Hit.sentence_id, t3.upos != "PUNCT",
+                      t3.idx.between(func.least(t2.idx, Hit.token_idx), func.greatest(t2.idx, Hit.token_idx)))
+               .correlate(Hit, t2).scalar_subquery())
+    return exists(select(t2.id).correlate(Hit).where(and_(t2.sentence_id == Hit.sentence_id, t2.lemma_norm == norm(lemma),
+                                          t2.upos != "PUNCT", t2.idx != Hit.token_idx, between <= window + 1)))
+
+
+
 def concordance(
     session: Session,
     dictionary_id: int,
@@ -155,6 +170,8 @@ def concordance(
     role: str | None = None,
     rel_type: str | None = None,
     related_lemma: str | None = None,
+    near: str | None = None,
+    window: int = 3,
     include_invalid: bool = False,
     page: int = 1,
     per_page: int = 50,
@@ -186,6 +203,8 @@ def concordance(
         if related_lemma:
             sub = sub.where(TokenRelation.related_lemma == related_lemma.lower())
         q = q.where(Hit.id.in_(sub))
+    if near:
+        q = q.where(near_condition(near, window))
     total = session.scalar(select(func.count()).select_from(q.subquery())) or 0
     rows = session.execute(q.order_by(TextDoc.id, SentenceRow.idx, Hit.token_idx).offset((page - 1) * per_page).limit(per_page)).all()
     items = []

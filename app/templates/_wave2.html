@@ -1,0 +1,193 @@
+{# ============================================================== КОЛЛОКАЦИИ #}
+{% if tab == 'colloc' %}
+{% set p = col_params %}
+<div class="panel row">
+  <div><label>Слово</label><select name="entry_id" form="sel-form">{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }} ({{ word_counts.get(e.id, 0) }})</option>{% endfor %}</select></div>
+  <div><label>Коллокаты</label><select name="mode" form="sel-form">{% for k, v in COLLOC_MODES.items() %}<option value="{{ k }}" {{ 'selected' if p.mode == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div class="shrink"><label>Окно, слов</label><select name="window" form="sel-form">{% for w in [1, 2, 3, 4, 5, 7, 10] %}<option {{ 'selected' if p.window == w }}>{{ w }}</option>{% endfor %}</select></div>
+  <div><label>Части речи коллокатов</label><select name="pos" form="sel-form">{% for k, v in POS_GROUPS.items() %}<option value="{{ k }}" {{ 'selected' if p.pos == k }}>{{ v[0] }}</option>{% endfor %}</select></div>
+  <div class="shrink"><label>Мин. частота</label><select name="min_count" form="sel-form">{% for m in [1, 2, 3, 5, 10] %}<option {{ 'selected' if p.min_count == m }}>{{ m }}</option>{% endfor %}</select></div>
+  <div><label>Сортировать и строить граф по</label><select name="sort" form="sel-form">{% for k, v in MEASURES.items() %}<option value="{{ k }}" {{ 'selected' if p.sort == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div class="shrink"><button type="submit" form="sel-form">Показать</button></div>
+</div>
+{% if col and col.rows %}
+<div class="row" style="margin-bottom:6px">
+  <div class="muted">«{% for e in entries if e.id == entry_id %}{{ e.surface }}{% endfor %}»: {{ col.fx }} вхождений в выборке ({{ "{:,}".format(col.n).replace(",", " ") }} слов);
+    {{ 'окно ±' ~ col.window ~ ' слов (знаки препинания не считаются, в пределах предложения)' if col.mode == 'window' else 'синтаксические связи (общие члены однородных рядов учтены, отрицание — нет)' }};
+    коллокатов: {{ col.total_candidates }}{% if sel.stop %} без стоп-слов{% endif %}.</div>
+  <div class="shrink">Скачать: <a href="/export/collocations.xlsx{{ qs(request, entry_id=entry_id) }}">XLSX</a> · <a href="/export/collocations.csv{{ qs(request, entry_id=entry_id) }}">CSV</a></div>
+</div>
+<div class="grid cols-2">
+  <div class="panel"><h3 style="margin-top:0">Орбитальный граф: {{ MEASURES[p.sort] }}</h3>
+    <div id="chart-orbit" class="chart" style="min-height:520px"></div>
+    <p class="help">В центре — слово; на ближней орбите — самые сильные коллокаты по выбранной мере, дальше — слабее. Размер кружка — частота сочетания{{ ', цвет — тип связи' if col.mode == 'syntax' else ', цвет — часть речи' }}. Щелчок по коллокату открывает примеры.</p></div>
+  <div class="panel"><h3 style="margin-top:0">Сводная матрица мер (25 первых)</h3>
+    <div id="chart-matrix" class="chart" style="min-height:520px"></div>
+    <p class="help">Цвет — место коллоката среди 25 первых по каждой мере (тёмный — сильнее всех по этой мере); в подсказке — само значение. Разные меры выдвигают разные коллокаты: PMI — редкие и «экзотичные», t-score и G² — частые и устойчивые, logDice — посередине.</p></div>
+</div>
+<div class="panel table-scroll">
+  <table>
+    <tr><th>Коллокат</th>{% if col.mode == 'syntax' %}<th>Связь</th>{% endif %}<th>Ч. р.</th>
+      {% for k, v in MEASURES.items() %}<th class="num" title="{{ MEASURE_HELP[k] }}">{{ v }}</th>{% endfor %}<th class="num" title="частота коллоката в выборке">f(колл.)</th><th></th></tr>
+    {% for r in col.rows %}
+    <tr><td><strong>{{ r.lemma }}</strong></td>{% if col.mode == 'syntax' %}<td class="small">{{ r.rel_label }}</td>{% endif %}<td class="small muted">{{ r.pos }}</td>
+      {% for k in MEASURES %}<td class="num {{ 'sorted' if k == p.sort }}">{{ r[k] if r[k] is not none else '—' }}</td>{% endfor %}
+      <td class="num muted">{{ r.fy }}</td>
+      <td class="small nowrap"><a href="/analysis?tab=conc&{{ sq }}&entry_id={{ entry_id }}{% if col.mode == 'syntax' %}&rel_type={{ r.rel }}&related={{ r.lemma|urlencode }}{% else %}&near={{ r.lemma|urlencode }}&window={{ col.window }}{% endif %}">примеры</a></td></tr>
+    {% endfor %}
+  </table>
+  <p class="help">Наведите курсор на заголовок меры — краткое объяснение. Меры считаются по таблице сопряжённости 2×2: частота сочетания, частота слова (с учётом ширины окна), частота коллоката и размер выборки. ΔP — направленная мера (Gries): «слово → коллокат» — насколько слово предсказывает коллокат, и наоборот.</p>
+</div>
+{% elif col %}<div class="panel muted">Коллокатов не найдено: уменьшите минимальную частоту, расширьте окно или выберите «все части речи».</div>
+{% else %}<div class="panel muted">Выберите слово.</div>{% endif %}
+{% endif %}
+
+{# ============================================================== КЛЮЧЕВЫЕ СЛОВА #}
+{% if tab == 'keywords' and kw %}
+<div class="panel row">
+  <div><label>Сравнить выборку с (опорный корпус)</label>
+    <select name="ref" form="sel-form"><option value="">все остальные тексты базы</option>{% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if kw_ref == c.id|string }}>корпус «{{ c.name }}»</option>{% endfor %}</select></div>
+  <div><label>Части речи</label><select name="pos" form="sel-form">{% for k, v in POS_GROUPS.items() %}<option value="{{ k }}" {{ 'selected' if kw_pos == k }}>{{ v[0] }}</option>{% endfor %}</select></div>
+  <div class="shrink"><label>Мин. частота</label><select name="min_count" form="sel-form">{% for m in [2, 3, 5, 10, 20] %}<option {{ 'selected' if kw_min == m }}>{{ m }}</option>{% endfor %}</select></div>
+  <div class="shrink"><button type="submit" form="sel-form">Показать</button></div>
+  <div class="shrink">Скачать: <a href="/export/keywords.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/keywords.csv{{ qs(request) }}">CSV</a></div>
+</div>
+<p class="muted">Выборка: {{ "{:,}".format(kw.words_a).replace(",", " ") }} слов; опорный корпус — {{ kw_ref_label }}: {{ "{:,}".format(kw.words_b).replace(",", " ") }} слов.
+  {% if kw.words_b %}Значимо чаще в выборке: {{ kw.n_positive }} лемм, реже: {{ kw.n_negative }}.{% else %}Опорный корпус пуст — показаны просто самые частые леммы выборки.{% endif %}
+  {% if not sel.stop %}<span class="help">Совет: выберите стоп-слова в панели выбора, чтобы убрать служебные слова.</span>{% endif %}</p>
+{% if kw.positive %}
+<div class="panel"><h3 style="margin-top:0">Облако ключевых слов (размер — G²)</h3><div class="kw-cloud">
+  {% set mx = (kw.positive|map(attribute='ll')|max) or 1 %}
+  {% for r in kw.positive[:60] %}<span style="font-size:{{ (12 + 26 * ((r.ll / mx) ** 0.5))|round(1) if kw.words_b else 14 }}px" title="G² {{ r.ll }}; {{ r.ipm_a }} ipm в выборке против {{ r.ipm_b }}">{{ r.lemma }}</span> {% endfor %}
+</div></div>
+{% endif %}
+<div class="grid cols-2">
+  {% for block, title in [(kw.positive, 'Ключевые слова выборки (чаще, чем в опорном корпусе)'), (kw.negative, 'Отрицательные ключевые слова (реже, чем в опорном корпусе)')] %}
+  {% if block or loop.first %}
+  <div class="panel table-scroll"><h3 style="margin-top:0">{{ title }}</h3>
+    <table><tr><th>Лемма</th><th>Ч. р.</th><th class="num">Выборка</th><th class="num">Опорный</th><th class="num">ipm</th><th class="num">ipm опорн.</th><th class="num">G²</th><th class="num">Log-ratio</th></tr>
+      {% for r in block[:60] %}<tr class="{{ '' if r.significant or not kw.words_b else 'muted' }}"><td><strong>{{ r.lemma }}</strong></td><td class="small muted">{{ r.pos }}</td><td class="num">{{ r.count_a }}</td><td class="num">{{ r.count_b }}</td>
+        <td class="num">{{ r.ipm_a }}</td><td class="num">{{ r.ipm_b }}</td><td class="num">{{ r.ll }}</td><td class="num">{{ r.log_ratio if r.log_ratio is not none else '' }}</td></tr>{% endfor %}
+    </table></div>
+  {% endif %}
+  {% endfor %}
+</div>
+<p class="help">G² ≥ 3,84 — различие значимо (p &lt; 0,05), ≥ 10,83 — p &lt; 0,001; незначимые строки показаны бледно. Log-ratio: +1 — вдвое чаще в выборке. Сравниваются леммы (ступень 1 — предварительный разбор), без знаков препинания.</p>
+<div class="panel table-scroll"><h3 style="margin-top:0">TF-IDF: самые характерные слова каждого текста</h3>
+  {% if tfidf.too_many %}<p class="muted">В выборке больше {{ MAX_TFIDF_TEXTS }} текстов — отметьте нужные тексты в панели «Выборка».</p>
+  {% else %}
+  <table><tr><th>Текст</th><th>Характерные леммы (по убыванию TF-IDF)</th></tr>
+    {% for t in tfidf.texts %}<tr><td class="small"><a href="/texts/{{ t.text_id }}">{% if t.author %}{{ t.author }}, {% endif %}«{{ t.title }}»</a></td>
+      <td>{% for w in t.words %}<span class="chip" title="частота {{ w.count }}; TF-IDF×1000 = {{ w.score }}">{{ w.lemma }}</span>{% endfor %}</td></tr>{% endfor %}
+  </table>
+  <p class="help">TF-IDF — частота леммы в тексте × редкость леммы в коллекции (все {{ tfidf.n_docs }} готовых текстов базы): высоко у слов, частых в этом тексте и редких в остальных. Чем больше текстов в базе, тем точнее.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{# ============================================================== КАРТА ТЕКСТА #}
+{% if tab == 'map' %}
+<div class="panel row">
+  <div><label>Текст (из выборки)</label><select name="text_id" form="sel-form">{% for t in map_texts %}<option value="{{ t.id }}" {{ 'selected' if t.id == map_text_id }}>{% if t.author %}{{ t.author }}, {% endif %}«{{ t.title }}» ({{ t.n_words }} сл.)</option>{% endfor %}</select></div>
+  <div class="shrink"><label>Число отрезков</label><select name="segments" form="sel-form">{% for n in SEGMENT_CHOICES %}<option {{ 'selected' if tm and tm.segments == n }}>{{ n }}</option>{% endfor %}</select></div>
+  <div class="shrink"><button type="submit" form="sel-form">Показать</button></div>
+  {% if tm %}<div class="shrink">Скачать: <a href="/export/textmap.xlsx{{ qs(request, text_id=map_text_id) }}">XLSX</a></div>{% endif %}
+</div>
+{% if tm and tm.summary[0].total %}
+<p class="muted">Текст разбит на {{ tm.segments }} равных по числу слов отрезков (по ~{{ (tm.n_words / tm.segments)|round|int }} слов). Цвет — плотность вхождений (ipm, на миллион слов отрезка).
+  {% if not sel.words %}Показаны {{ tm.rows|length }} самых частых слов — свои слова выберите в блоке «Слова словаря».{% endif %} <strong>Щёлкните по клетке</strong> — ниже появится текст этого отрезка с подсвеченными словами.</p>
+<div class="panel"><h3 style="margin-top:0">Карта словаря по тексту</h3><div id="chart-map" class="chart" style="min-height:{{ 140 + 26 * (tm.rows|length + tm.summary|length) }}px"></div></div>
+{% if tm.peaks %}<div class="panel"><strong>Самые «плотные» места:</strong>
+  {% for pk in tm.peaks %}<a href="#" class="chip" onclick="showPassage({{ pk.from }}, {{ pk.to }}, {{ pk.segment }}); return false;">отрезок {{ pk.segment }} (предл. {{ pk.from }}–{{ pk.to }}): {{ pk.count }} вхожд., {{ pk.ipm }} ipm</a>{% endfor %}</div>{% endif %}
+<div class="panel" id="passage-box" style="display:none"><h3 style="margin-top:0" id="passage-title"></h3><div id="passage"></div></div>
+<div class="panel"><h3 style="margin-top:0">Лексическая дисперсия: где в тексте встречается каждое слово</h3><div id="chart-disp" class="chart" style="min-height:{{ 120 + 30 * tm.points|length }}px"></div></div>
+<div class="panel table-scroll"><h3 style="margin-top:0">Равномерность распределения по тексту</h3>
+  <table><tr><th>Слово</th><th class="num">Вхождений</th><th class="num" title="в скольких отрезках из {{ tm.segments }} встречается">Отрезков со словом</th>
+    <th class="num" title="DP Грайса: 0 — равномерно, ближе к 1 — сосредоточено в немногих местах">DP</th><th class="num" title="D Жуйяна: 1 — равномерно, 0 — всё в одном месте">D Жуйяна</th></tr>
+    {% for r in tm.summary + tm.rows %}<tr><td>{% if r.kind != 'word' %}<em>{{ r.label }}</em>{% else %}<strong>{{ r.label }}</strong>{% endif %}</td><td class="num">{{ r.total }}</td><td class="num">{{ r.range }}</td>
+      <td class="num">{{ r.dp if r.dp is not none else '' }}</td><td class="num">{{ r.d if r.d is not none else '' }}</td></tr>{% endfor %}
+  </table></div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const tm = {{ tm|tojson }};
+  const rows = tm.summary.concat(tm.rows).reverse();
+  const segLabels = tm.seg_from.map((f, k) => `${k + 1}`);
+  drawChart('chart-map', [{ type: 'heatmap', z: rows.map(r => r.ipm), x: segLabels, y: rows.map(r => r.label),
+    customdata: rows.map(r => r.count.map((c, k) => [c, tm.seg_from[k], tm.seg_to[k]])),
+    colorscale: [[0, '#f4f6fb'], [0.15, '#c6d4f0'], [0.5, '#5b82d6'], [1, '#14307a']],
+    hovertemplate: '%{y}<br>отрезок %{x} (предл. %{customdata[1]}–%{customdata[2]})<br>%{customdata[0]} вхожд., %{z} ipm<extra></extra>' }],
+    { xaxis: { title: 'отрезок текста (от начала к концу)' }, yaxis: { automargin: true }, margin: { l: 160, r: 20, t: 10, b: 50 } });
+  const el = document.getElementById('chart-map');
+  if (el && el.on) el.on('plotly_click', ev => { const k = ev.points[0].pointIndex[1]; showPassage(tm.seg_from[k], tm.seg_to[k], k + 1); });
+  const pts = tm.points.slice().reverse();
+  drawChart('chart-disp', pts.map(p => ({ type: 'scatter', mode: 'markers', name: p.label, x: p.x, y: p.x.map(() => p.label),
+    marker: { symbol: 'line-ns-open', size: 16, line: { width: 1.5 } }, hovertemplate: '%{y}: %{x}% текста<extra></extra>' })),
+    { showlegend: false, xaxis: { title: '% текста (от начала к концу)', range: [0, 100] }, yaxis: { automargin: true }, margin: { l: 120, r: 20, t: 10, b: 50 } });
+  window.showPassage = async function (from, to, seg) {
+    const url = `/api/texts/${tm.text_id}/passage?from=${from}&to=${to}&dictionary_id={{ dict_id }}{% for w in sel.words %}&words={{ w }}{% endfor %}`;
+    const res = await fetch(url); if (!res.ok) return;
+    const data = await res.json();
+    const box = document.getElementById('passage');
+    box.innerHTML = '';
+    let lastPar = null;
+    for (const s of data.sentences) {
+      const p = document.createElement('div'); p.className = 'example';
+      if (lastPar !== null && s.paragraph !== lastPar) p.style.marginTop = '10px';
+      lastPar = s.paragraph;
+      const a = document.createElement('a'); a.href = `/sentences/${s.id}`; a.className = 'muted small'; a.textContent = `${s.idx} `; p.appendChild(a);
+      let pos = 0;
+      for (const [st, en] of s.marks) {
+        p.appendChild(document.createTextNode(s.text.slice(pos, st)));
+        const b = document.createElement('mark'); b.textContent = s.text.slice(st, en); p.appendChild(b); pos = en;
+      }
+      p.appendChild(document.createTextNode(s.text.slice(pos)));
+      box.appendChild(p);
+    }
+    document.getElementById('passage-title').textContent = `Отрезок ${seg}: предложения ${from}–${Math.min(to, from + 79)}` + (to > from + 79 ? ' (первые 80)' : '');
+    document.getElementById('passage-box').style.display = '';
+    document.getElementById('passage-box').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+});
+</script>
+{% elif tm %}<div class="panel muted">В этом тексте нет вхождений выбранных слов словаря.</div>
+{% else %}<div class="panel muted">В выборке нет текстов.</div>{% endif %}
+{% endif %}
+
+{% if tab == 'colloc' and col and col.rows %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const orbit = {{ orbit|tojson }}, sortKey = {{ col_params.sort|tojson }}, mode = {{ col.mode|tojson }};
+  const word = {{ (entries|selectattr('id', 'equalto', entry_id)|map(attribute='surface')|first or '')|tojson }};
+  const groupKey = r => mode === 'syntax' ? (r.rel_label || r.rel) : r.pos;
+  const groups = [...new Set(orbit.map(groupKey))];
+  const maxC = Math.max(...orbit.map(r => r.count));
+  const rings = [...new Set(orbit.map(r => r.ring))];
+  const shapes = rings.map(k => ({ type: 'circle', xref: 'x', yref: 'y', x0: -k, y0: -k, x1: k, y1: k, line: { color: cssVar('--border'), dash: 'dot' } }));
+  const traces = groups.map(g => {
+    const rs = orbit.filter(r => groupKey(r) === g);
+    return { type: 'scatter', mode: 'markers+text', name: g, x: rs.map(r => r.x), y: rs.map(r => r.y), text: rs.map(r => r.lemma),
+      textposition: 'top center', customdata: rs.map(r => [r.count, r[sortKey], r.lemma, r.rel]),
+      marker: { size: rs.map(r => 10 + 26 * Math.sqrt(r.count / maxC)), opacity: 0.85 },
+      hovertemplate: '%{customdata[2]}<br>частота %{customdata[0]}<br>' + {{ MEASURES[col_params.sort]|tojson }} + ': %{customdata[1]}<extra>%{fullData.name}</extra>' };
+  });
+  traces.push({ type: 'scatter', mode: 'markers+text', x: [0], y: [0], text: [word], textposition: 'middle center', showlegend: false,
+    marker: { size: 54, color: cssVar('--accent') }, textfont: { color: '#fff', size: 13 }, hoverinfo: 'skip' });
+  const lim = Math.max(...rings, 1) + 0.6;
+  drawChart('chart-orbit', traces, { shapes, xaxis: { visible: false, range: [-lim, lim] }, yaxis: { visible: false, range: [-lim, lim], scaleanchor: 'x' },
+    legend: { orientation: 'h', y: -0.05 }, margin: { l: 10, r: 10, t: 10, b: 10 } });
+  const el = document.getElementById('chart-orbit');
+  const base = '/analysis?tab=conc&{{ sq|safe }}&entry_id={{ entry_id }}';
+  if (el && el.on) el.on('plotly_click', ev => {
+    const d = ev.points[0].customdata; if (!d) return;
+    location.href = base + (mode === 'syntax' ? `&rel_type=${d[3]}&related=${encodeURIComponent(d[2])}` : `&near=${encodeURIComponent(d[2])}&window={{ col.window }}`);
+  });
+  {% if matrix %}
+  const mx = {{ matrix|tojson }};
+  drawChart('chart-matrix', [{ type: 'heatmap', z: mx.z.slice().reverse(), x: mx.measures, y: mx.lemmas.slice().reverse(),
+    customdata: mx.values.slice().reverse(), colorscale: 'Blues', reversescale: true, zmin: 0, zmax: 1, showscale: false,
+    hovertemplate: '%{y} — %{x}: %{customdata}<extra></extra>' }],
+    { xaxis: { tickangle: -35, automargin: true }, yaxis: { automargin: true }, margin: { l: 120, r: 10, t: 10, b: 110 } });
+  {% endif %}
+});
+</script>
+{% endif %}
