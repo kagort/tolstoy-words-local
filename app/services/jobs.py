@@ -88,8 +88,9 @@ def run_job(job_id: int) -> None:
     from app.services.matching import run_match
 
     from app.services.entities import run_ner
+    from app.services.textdelete import run_delete
 
-    handlers = {"ingest": run_ingest, "match": run_match, "deepparse": run_deepparse, "ner": run_ner}
+    handlers = {"ingest": run_ingest, "match": run_match, "deepparse": run_deepparse, "ner": run_ner, "delete_text": run_delete}
     with SessionLocal() as s:
         job = s.get(Job, job_id)
         kind, params = job.kind, dict(job.params or {})

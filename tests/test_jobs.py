@@ -156,3 +156,86 @@ def test_manual_marks_survive_interrupted_match():
     run_match(jid, did, manual=params["manual"])  # повторный запуск той же задачи
     with SessionLocal() as s:
         assert s.query(Hit).filter_by(dictionary_id=did, token_id=token_id).one().is_valid is False
+
+
+def test_delete_texts_with_all_links():
+    """Удаление текста убирает предложения, токены, вхождения, связи, имена, членство в корпусах и задачи текста."""
+    from fastapi.testclient import TestClient
+
+    from app.db import SessionLocal
+    from app.main import app
+    from app.models import Corpus, Entity, Hit, Job, SentenceRow, TextDoc, TokenRelation, TokenRow
+    from app.services.dictionaries import create_dictionary
+    from app.services.jobs import run_pending
+
+    with SessionLocal() as s:
+        s.query(Job).delete()
+        c = Corpus(name="Для удаления")
+        s.add(c)
+        s.flush()
+        doc = _text(s, "Пьер Безухов почувствовал запах сирени в Москве. Сладкий запах стоял в саду.")
+        doc.corpora = [c]
+        keep = _text(s, "Запах дыма. Наташа Ростова молчала.")
+        s.commit()
+        tid, keep_id, cid = doc.id, keep.id, c.id
+    run_pending()
+    with SessionLocal() as s:
+        create_dictionary(s, "Запахи для удаления", [{"surface": "запах"}], None, {})
+        s.commit()
+    run_pending()
+    with SessionLocal() as s:
+        assert s.query(Hit).filter_by(text_id=tid).count() > 0 and s.query(Entity).filter_by(text_id=tid).count() > 0
+        assert s.query(TokenRelation).filter_by(text_id=tid).count() > 0
+    c = TestClient(app)
+    c.post("/login", data={"username": "admin", "password": "test-password", "next": "/"})
+    assert 'name="text_ids"' in c.get("/texts").text
+    r = c.post("/texts/delete", data={"text_ids": [str(tid)]}, follow_redirects=False)
+    assert r.status_code == 303
+    with SessionLocal() as s:
+        assert s.get(TextDoc, tid).status == "deleting"
+    run_pending()
+    with SessionLocal() as s:
+        assert s.get(TextDoc, tid) is None
+        for model in (SentenceRow, TokenRow, Hit, TokenRelation, Entity):
+            assert s.query(model).filter_by(text_id=tid).count() == 0, model
+        assert s.get(Corpus, cid) is not None and not s.get(Corpus, cid).texts
+        assert s.get(TextDoc, keep_id) is not None and s.query(Hit).filter_by(text_id=keep_id).count() > 0  # другой текст не тронут
+        assert s.query(Job).filter(Job.status == "error").count() == 0
+
+
+def test_delete_cancels_text_jobs_and_corpus_with_texts():
+    from app.db import SessionLocal
+    from app.models import Corpus, Job, TextDoc
+    from app.services.jobs import run_pending
+    from app.services.textdelete import request_delete
+
+    with SessionLocal() as s:
+        s.query(Job).delete()
+        doc = _text(s, "Тишина.")  # разбор ещё в очереди
+        s.commit()
+        tid = doc.id
+        job = request_delete(s, [tid])
+        s.commit()
+        ingest = s.query(Job).filter_by(kind="ingest").one()
+        assert ingest.status == "cancelled" and job.kind == "delete_text"
+        assert request_delete(s, [tid]) is None  # повторное удаление не ставит вторую задачу
+    run_pending()
+    with SessionLocal() as s:
+        assert s.get(TextDoc, tid) is None
+        c = Corpus(name="Корпус с текстами")
+        s.add(c)
+        s.flush()
+        d1 = _text(s, "Первый текст.")
+        d1.corpora = [c]
+        s.commit()
+        cid, d1_id = c.id, d1.id
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    cl = TestClient(app)
+    cl.post("/login", data={"username": "admin", "password": "test-password", "next": "/"})
+    assert cl.post(f"/corpora/{cid}/delete", data={"with_texts": "1"}, follow_redirects=False).status_code == 303
+    run_pending()
+    with SessionLocal() as s:
+        assert s.get(Corpus, cid) is None and s.get(TextDoc, d1_id) is None

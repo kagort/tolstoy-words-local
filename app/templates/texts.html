@@ -50,12 +50,21 @@
       {% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if corpus_id == c.id }}>{{ c.name }}</option>{% endfor %}</select></div>
 </form>
 
+<form method="post" action="/texts/delete" id="del-form"></form>
 <div class="panel table-scroll">
 {% if texts %}
+<div class="row" style="margin-bottom:8px;align-items:center">
+  <div class="shrink"><button type="submit" form="del-form" class="small danger"
+    onclick="const n = document.querySelectorAll('.del-check:checked').length; if (!n) { alert('Отметьте тексты флажками'); return false; } return confirm('Удалить отмеченные тексты (' + n + ') вместе со всей разметкой, вхождениями словарей, именами и портретами? Отменить нельзя.')">🗑 Удалить отмеченные</button></div>
+  <div class="muted small">Удаляются текст и все его данные в базе: предложения, токены, вхождения словарей и их связи, имена собственные, статистический портрет, членство в корпусах.
+    Словари и корпуса остаются.</div>
+</div>
 <table>
-  <tr><th>#</th><th>Название</th><th>Автор</th><th>Год</th><th>Жанр</th><th>Тип</th><th>Корпуса</th><th class="num">Предложений</th><th class="num">Слов</th><th>Статус</th></tr>
+  <tr><th><input type="checkbox" title="отметить все" onchange="document.querySelectorAll('.del-check').forEach(c => c.checked = this.checked)"></th>
+    <th>#</th><th>Название</th><th>Автор</th><th>Год</th><th>Жанр</th><th>Тип</th><th>Корпуса</th><th class="num">Предложений</th><th class="num">Слов</th><th>Статус</th><th></th></tr>
   {% for t in texts %}
   <tr>
+    <td><input type="checkbox" class="del-check" name="text_ids" value="{{ t.id }}" form="del-form" {{ 'disabled' if t.status == 'deleting' }}></td>
     <td class="muted">{{ t.id }}</td>
     <td><a href="/texts/{{ t.id }}">{{ t.title }}</a>{% if t.status == 'ready' %} <a href="/texts/{{ t.id }}/stats" title="статистический портрет текста" style="text-decoration:none">📊</a>{% endif %}</td>
     <td>{{ t.author or '' }}</td>
@@ -66,6 +75,8 @@
     <td class="num">{{ t.n_sentences }}</td>
     <td class="num">{{ t.n_words }}</td>
     <td><span class="badge {{ t.status }}">{{ STATUS_LABELS.get(t.status, t.status) }}</span></td>
+    <td>{% if t.status != 'deleting' %}<button type="submit" form="del-form" formaction="/texts/{{ t.id }}/delete" class="small secondary" title="удалить текст со всеми связями"
+      onclick="return confirm('Удалить текст «{{ t.title|replace("'", "")|replace('"', '') }}» вместе со всей разметкой и вхождениями? Отменить нельзя.')">🗑</button>{% endif %}</td>
   </tr>
   {% endfor %}
 </table>

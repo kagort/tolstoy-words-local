@@ -269,12 +269,27 @@ def text_reparse(request: Request, text_id: int, db: Session = Depends(get_sessi
 
 @router.post("/texts/{text_id}/delete")
 def text_delete(request: Request, text_id: int, db: Session = Depends(get_session)):
-    doc = db.get(TextDoc, text_id)
-    if doc is not None:
-        db.execute(delete(Hit).where(Hit.text_id == text_id))
-        db.delete(doc)
-        db.commit()
-        flash(request, f"Текст «{doc.title}» удалён", "success")
+    return _delete_texts(request, db, [text_id])
+
+
+@router.post("/texts/delete")
+def texts_delete(request: Request, text_ids: list[str] = Form([]), db: Session = Depends(get_session)):
+    """Удаление нескольких отмеченных текстов со всеми связями."""
+    return _delete_texts(request, db, [int(t) for t in text_ids if t.isdigit()])
+
+
+def _delete_texts(request: Request, db: Session, ids: list[int]):
+    from app.services.textdelete import request_delete
+
+    if not ids:
+        flash(request, "Не отмечено ни одного текста", "error")
+        return redirect("/texts")
+    job = request_delete(db, ids)
+    db.commit()
+    if job:
+        n = len(job.params["text_ids"])
+        flash(request, f"Удаление {n} текст(ов) со всеми связями поставлено в очередь — они уже не участвуют в анализе. "
+                       "Большой текст удаляется до минуты (прогресс — на странице «Задачи»).", "success")
     return redirect("/texts")
 
 
@@ -324,12 +339,19 @@ def corpus_update(request: Request, corpus_id: int, name: str = Form(...), descr
 
 
 @router.post("/corpora/{corpus_id}/delete")
-def corpus_delete(request: Request, corpus_id: int, db: Session = Depends(get_session)):
+def corpus_delete(request: Request, corpus_id: int, with_texts: str | None = Form(None), db: Session = Depends(get_session)):
     c = db.get(Corpus, corpus_id)
     if c:
+        ids = [t.id for t in c.texts]
         db.delete(c)
+        if with_texts and ids:
+            from app.services.textdelete import request_delete
+
+            request_delete(db, ids)
+            flash(request, f"Корпус удалён; удаление его текстов ({len(ids)}) со всеми связями поставлено в очередь", "success")
+        else:
+            flash(request, "Корпус удалён (тексты остались в базе)", "success")
         db.commit()
-        flash(request, "Корпус удалён (тексты остались в базе)", "success")
     return redirect("/corpora")
 
 
