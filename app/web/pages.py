@@ -621,8 +621,11 @@ def analysis(request: Request, db: Session = Depends(get_session)):
     elif tab == "report":
         ctx.update(_report_context(db, request, dict_id, sel))
     elif tab == "freq":
-        ctx["freq"] = A.frequency(db, dict_id, text_ids)
-        ctx["heat"] = A.frequency_by_text(db, dict_id, text_ids)
+        # отмеченные слова — только они (переключатель all_words показывает весь словарь)
+        words = None if qp.get("all_words") else (sel.words or None)
+        ctx["freq"] = A.only_words(A.frequency(db, dict_id, text_ids), words)
+        ctx["heat"] = A.frequency_by_text(db, dict_id, text_ids, entry_ids=words)
+        ctx["freq_filtered"] = bool(words)
     elif tab == "conc":
         ctx["conc"] = A.concordance(
             db, dict_id, text_ids, entry_id=entry_id, entry_ids=sel.words, role=qp.get("role") or None,

@@ -109,11 +109,12 @@ def export_frequency(fmt: str, request: Request, db: Session = Depends(get_sessi
     if fmt not in FORMATS:
         raise HTTPException(400, "Формат: csv, xlsx или json")
     dict_id, ids = _ctx(db, request)
-    f = A.frequency(db, dict_id, ids)
-    df = pd.DataFrame(f["rows"]).rename(columns={
+    words = None if request.query_params.get("all_words") else (_words(db, request) or None)
+    f = A.only_words(A.frequency(db, dict_id, ids), words)
+    df = pd.DataFrame(f["rows"]).rename(columns={"share": "Доля среди слов таблицы, %",
         "word": "Слово", "lemma": "Лемма", "upos": "Часть речи", "category": "Категория", "count": "Вхождений",
         "ipm": "ipm", "sentences": "Предложений", "texts": "Текстов", "dp": "DP (неравномерность)"}).drop(columns=["entry_id"], errors="ignore")
-    heat = A.frequency_by_text(db, dict_id, ids, top=200)
+    heat = A.frequency_by_text(db, dict_id, ids, top=200, entry_ids=words)
     df_heat = pd.DataFrame(heat["z"], index=heat["words"], columns=heat["texts"]).reset_index().rename(columns={"index": "Слово (ipm по текстам)"}) if heat["words"] else pd.DataFrame()
     params = _params(db, request) | {"Слов в корпусе": f["corpus_words"], "Текстов": f["n_texts"]}
     return _send({"Частоты": df, "По текстам (ipm)": df_heat}, fmt, "frequency", params)

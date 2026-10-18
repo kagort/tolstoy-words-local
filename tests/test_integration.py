@@ -35,6 +35,10 @@ def client():
     return c
 
 
+def page_text(client):
+    return client.get("/analysis").text
+
+
 def run_jobs():
     from app.services.jobs import run_pending
 
@@ -198,6 +202,15 @@ def test_selection_report_stopwords(client):
     assert r.status_code == 200 and "Сводный отчёт" in r.text and "rep-freq" in r.text and "Сравнение с корпусом" in r.text
     # отчёт без выбранных слов берёт самые частые
     assert "10 самых частых" in client.get(f"/analysis?tab=report&{base}").text
+    # частоты: при выбранных словах — только они, с долей; all_words — весь словарь
+    r = client.get(f"/analysis?tab=freq&{base}&words={e_dym.id}")
+    assert "Показаны <strong>1 выбранных слов" in r.text and "показать весь словарь" in r.text
+    with SessionLocal() as s:
+        f = A.only_words(A.frequency(s, d.id, all_ids), [e_dym.id, e_zapah.id])
+        assert {x["entry_id"] for x in f["rows"]} == {e_dym.id, e_zapah.id}
+        assert abs(sum(x["share"] for x in f["rows"]) - 100) < 0.2
+    assert "Показан весь словарь" in client.get(f"/analysis?tab=freq&{base}&words={e_dym.id}&all_words=1").text
+    assert client.get(f"/export/frequency.xlsx?{base}&words={e_dym.id}").status_code == 200
     # корпус A выбирается в форме вкладки сравнения
     r = client.get(f"/analysis?tab=compare&{base}&corpus_b=")
     assert 'name="corpus_id" form="sel-form"' in r.text and "disabled" not in r.text.split("Корпус A")[1][:200]
@@ -217,6 +230,8 @@ def test_selection_report_stopwords(client):
     assert "# text =" in conllu
 
     # стоп-слова: встроенный список, свой список, фильтр в портрете и профиле
+    # скрипты и стили подключаются с меткой версии — браузер не возьмёт старый app.js из кэша
+    assert "/static/app.js?v=" in page_text(client) and "function checkTop" in client.get("/static/app.js").text
     page = client.get("/stopwords")
     assert page.status_code == 200 and "Встроенный" in page.text
     assert "быть" in client.get("/stopwords/builtin.txt").text

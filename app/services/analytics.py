@@ -96,10 +96,21 @@ def frequency(session: Session, dictionary_id: int, text_ids: list[int]) -> dict
     return {"rows": rows, "corpus_words": n_words, "n_texts": len(text_ids)}
 
 
-def frequency_by_text(session: Session, dictionary_id: int, text_ids: list[int], top: int = 15) -> dict:
-    """Матрица ipm «слово × текст» для тепловой карты."""
+def only_words(freq: dict, entry_ids: list[int] | None) -> dict:
+    """Оставляет в таблице частот только выбранные слова (если выбраны) и добавляет долю каждого
+    слова среди оставшихся, % («какую часть всех вхождений этих слов составляет слово»)."""
+    rows = [r for r in freq["rows"] if not entry_ids or r["entry_id"] in set(entry_ids)]
+    total = sum(r["count"] for r in rows)
+    rows = [{**r, "share": round(100 * r["count"] / total, 1) if total else 0.0} for r in rows]
+    return {**freq, "rows": rows, "selected_total": total,
+            "selected_ipm": round(ipm(total, freq["corpus_words"]), 2) if freq["corpus_words"] else 0.0}
+
+
+def frequency_by_text(session: Session, dictionary_id: int, text_ids: list[int], top: int = 15,
+                      entry_ids: list[int] | None = None) -> dict:
+    """Матрица ipm «слово × текст» для тепловой карты (entry_ids — только выбранные слова)."""
     texts = list(session.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.n_words).where(TextDoc.id.in_(text_ids or [-1])).order_by(TextDoc.id)))
-    freq = frequency(session, dictionary_id, text_ids)["rows"][:top]
+    freq = only_words(frequency(session, dictionary_id, text_ids), entry_ids)["rows"][:top]
     ids = [r["entry_id"] for r in freq]
     counts = defaultdict(dict)
     if ids:
