@@ -34,7 +34,21 @@ def _qs(request: Request, **changes) -> str:
     return "?" + urlencode(params)
 
 
+def _asset_version() -> str:
+    """Метка версии для /static/app.js и app.css: меняется при любом изменении файлов,
+    поэтому браузер после обновления программы не берёт старые скрипты из кэша."""
+    import hashlib
+
+    h = hashlib.md5(__version__.encode())
+    for name in ("app.js", "app.css"):
+        f = TEMPLATES_DIR.parent / "static" / name
+        if f.exists():
+            h.update(f.read_bytes())
+    return h.hexdigest()[:10]
+
+
 templates.env.globals.update(
+    asset_version=_asset_version(),
     site_title=settings.site_title,
     app_version=__version__,
     ROLE_LABELS=ROLE_LABELS,

@@ -35,6 +35,10 @@ def client():
     return c
 
 
+def page_text(client):
+    return client.get("/analysis").text
+
+
 def run_jobs():
     from app.services.jobs import run_pending
 
@@ -217,6 +221,8 @@ def test_selection_report_stopwords(client):
     assert "# text =" in conllu
 
     # стоп-слова: встроенный список, свой список, фильтр в портрете и профиле
+    # скрипты и стили подключаются с меткой версии — браузер не возьмёт старый app.js из кэша
+    assert "/static/app.js?v=" in page_text(client) and "function checkTop" in client.get("/static/app.js").text
     page = client.get("/stopwords")
     assert page.status_code == 200 and "Встроенный" in page.text
     assert "быть" in client.get("/stopwords/builtin.txt").text
