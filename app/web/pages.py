@@ -683,6 +683,121 @@ def text_passage(text_id: int, request: Request, db: Session = Depends(get_sessi
                                  _int(qp.get("dictionary_id")), words)}
 
 
+def _entities_context(db: Session, request: Request, dict_id: int, sel) -> dict:
+    from app.services import entities as E
+
+    qp = request.query_params
+    etype = qp.get("etype") if qp.get("etype") in E.ETYPES else None
+    unit = qp.get("unit") if qp.get("unit") in E.UNITS else "sentence"
+    ix = E.entity_index(db, sel.ids, etype, qp.get("q") or "")
+    if qp.get("nolatin"):
+        ix["items"] = [x for x in ix["items"] if any("а" <= ch.lower() <= "я" or ch.lower() == "ё" for ch in x["name"])]
+        ix["total"] = len(ix["items"]) if len(ix["items"]) < ix["total"] else ix["total"]
+        ix["n_mentions"] = sum(x["count"] for x in ix["items"])
+    cross = qp.get("cross") if qp.get("cross") in ("LOC", "PER", "ORG") else "LOC"
+    return {"ents": ix, "ent_etype": etype, "ent_unit": unit, "ent_cross": cross,
+            "network": E.persons_network(db, sel.ids, unit) if ix["n_mentions"] else None,
+            "ent_dict": E.entity_dictionary(db, sel.ids, dict_id, sel.words, cross, unit) if ix["n_mentions"] else None,
+            "ETYPES": E.ETYPES, "ETYPE_ONE": E.ETYPE_ONE, "UNITS": E.UNITS}
+
+
+def _semantic_context(db: Session, request: Request, dict_id: int, sel, entry_id: int | None) -> dict:
+    from app.services import semantic as S
+
+    qp = request.query_params
+    entries = list(db.scalars(select(DictionaryEntry).where(DictionaryEntry.dictionary_id == dict_id)))
+    by_id = {e.id: e for e in entries}
+    seed_text = (qp.get("seed") or "").strip()
+    if seed_text:
+        seeds = [w.strip() for w in seed_text.replace(";", ",").replace("\n", ",").split(",") if w.strip()]
+        seed_label = ", ".join(seeds)
+    elif sel.words:
+        seeds = [by_id[w].lemma for w in sel.words if w in by_id]
+        seed_label = "выбранные слова: " + ", ".join(by_id[w].surface for w in sel.words if w in by_id)
+    else:
+        seeds = [e.lemma for e in entries]
+        seed_label = "весь словарь"
+    sim = S.similar_words(db, seeds, sel.ids, exclude={e.lemma for e in entries} | {e.surface for e in entries},
+                          only_in_corpus=not qp.get("any"))
+    k_groups = _int(qp.get("groups"))
+    entry_id = entry_id or _default_entry(db, dict_id, sel, sel.ids)
+    k = max(2, min(_int(qp.get("k")) or 3, 8))
+    return {"sim": sim, "seed_text": seed_text, "seed_label": seed_label,
+            "smap": S.dictionary_map(db, dict_id, k_groups if k_groups and 2 <= k_groups <= 12 else None),
+            "senses": S.senses(db, entry_id, sel.ids, k=k, stop=sel.stopset) if entry_id else None,
+            "entry_id": entry_id, "sense_k": k}
+
+
+def _topics_context(db: Session, request: Request, sel) -> dict:
+    from app.services import semantic as S
+
+    k = max(3, min(_int(request.query_params.get("k")) or 8, 20))
+    words = A.corpus_words(db, sel.ids)
+    if words > 3_000_000:
+        return {"tp": None, "tp_k": k, "tp_too_big": words}
+    return {"tp": S.topics(db, sel.ids, k=k, stop=sel.stopset), "tp_k": k, "tp_too_big": 0}
+
+
+@router.post("/dictionaries/{dict_id}/add-words")
+def dictionary_add_words(request: Request, dict_id: int, words: list[str] = Form([]), back: str = Form(""),
+                         db: Session = Depends(get_session)):
+    """Добавить в словарь слова, отмеченные среди «похожих по смыслу»."""
+    d = db.get(Dictionary, dict_id)
+    if d is None:
+        raise HTTPException(404)
+    items = parse_dictionary_text(", ".join(w for w in words if w.strip()))
+    new = add_entries(db, d, items) if items else []
+    db.commit()
+    flash(request, f"В словарь «{d.name}» добавлено слов: {len(new)}. Вхождения ищутся в фоне (страница «Задачи»).", "success")
+    return redirect(back if back.startswith("/") else f"/dictionaries/{dict_id}")
+
+
+@router.get("/api/entities/mentions")
+def entity_mentions(request: Request, db: Session = Depends(get_session)):
+    from app.services.entities import mentions
+    from app.services.selection import from_params
+
+    sel = from_params(db, request.query_params)
+    return mentions(db, sel.ids, request.query_params.get("name", ""))
+
+
+@router.get("/api/entities/cooccurrence")
+def entity_cooccurrence(request: Request, db: Session = Depends(get_session)):
+    from app.services.entities import cooccurrence_examples
+    from app.services.selection import from_params
+
+    qp = request.query_params
+    sel = from_params(db, qp)
+    return {"sentences": cooccurrence_examples(db, sel.ids, qp.get("name", ""), _int(qp.get("entry")) or 0,
+                                               qp.get("unit") or "sentence")}
+
+
+@router.post("/entities/override")
+def entity_override(request: Request, norm: str = Form(...), etype: str = Form(""), canonical: str = Form(""),
+                    hidden: str | None = Form(None), back: str = Form("/analysis?tab=entities"), db: Session = Depends(get_session)):
+    from app.services.entities import set_override
+
+    set_override(db, norm.strip(), etype or None, canonical, bool(hidden))
+    db.commit()
+    flash(request, f"Правка для «{norm}» сохранена" + (f": объединено с «{canonical.strip()}»" if canonical.strip() else ""), "success")
+    return redirect(back if back.startswith("/") else "/analysis?tab=entities")
+
+
+@router.post("/entities/extract")
+def entities_extract(request: Request, text_ids: list[str] = Form([]), back: str = Form("/analysis?tab=entities"),
+                     db: Session = Depends(get_session)):
+    """Поставить в очередь извлечение имён для текстов без разметки (тексты, загруженные до версии 0.6)."""
+    n = 0
+    for tid in [int(t) for t in text_ids if t.isdigit()]:
+        doc = db.get(TextDoc, tid)
+        if doc is not None and doc.status == "ready":
+            enqueue(db, "ner", {"text_id": tid}, title=f"Имена собственные: «{doc.title}»")
+            n += 1
+    db.commit()
+    flash(request, f"Извлечение имён поставлено в очередь для {n} текстов (прогресс — на странице «Задачи»)", "success")
+    return redirect(back if back.startswith("/") else "/analysis?tab=entities")
+
+
 @router.get("/analysis")
 def analysis(request: Request, db: Session = Depends(get_session)):
     ctx = _analysis_context(db, request)
@@ -704,6 +819,12 @@ def analysis(request: Request, db: Session = Depends(get_session)):
         ctx.update(_keywords_context(db, request, sel))
     elif tab == "map":
         ctx.update(_map_context(db, request, dict_id, sel))
+    elif tab == "entities":
+        ctx.update(_entities_context(db, request, dict_id, sel))
+    elif tab == "semantic":
+        ctx.update(_semantic_context(db, request, dict_id, sel, entry_id))
+    elif tab == "topics":
+        ctx.update(_topics_context(db, request, sel))
     elif tab == "freq":
         # отмеченные слова — только они (переключатель all_words показывает весь словарь)
         words = None if qp.get("all_words") else (sel.words or None)

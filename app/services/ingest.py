@@ -116,7 +116,7 @@ def run_ingest(job_id: int | None, text_id: int) -> None:
         s.execute(delete(SentenceRow).where(SentenceRow.text_id == text_id))
         doc.status = "processing"
         doc.error = None
-        doc.meta = {k: v for k, v in (doc.meta or {}).items() if k != "stats"}  # статистика пересчитается
+        doc.meta = {k: v for k, v in (doc.meta or {}).items() if k not in ("stats", "ner")}  # статистика и имена пересчитаются
         s.commit()
         content = doc.norm_text or normalize_text(doc.raw_text)
         title = doc.title
@@ -166,6 +166,8 @@ def run_ingest(job_id: int | None, text_id: int) -> None:
         for d in s.scalars(select(Dictionary)):
             enqueue(s, "match", {"dictionary_id": d.id, "text_ids": [text_id]},
                     title=f"Словарь «{d.name}» × текст «{title}»")
+        if settings.ner_on_ingest:
+            enqueue(s, "ner", {"text_id": text_id}, title=f"Имена собственные: «{title}»")
         s.commit()
     # статистический портрет считаем сразу, чтобы страница открывалась мгновенно
     try:

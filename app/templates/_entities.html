@@ -1,0 +1,92 @@
+{# ============================================================== ИМЕНА СОБСТВЕННЫЕ #}
+{% if tab == 'entities' and ents %}
+{% set selq = sel.query(False) %}
+<div class="panel row">
+  <div><label>Класс</label><select name="etype" form="sel-form"><option value="">все</option>{% for k, v in ETYPES.items() %}<option value="{{ k }}" {{ 'selected' if ent_etype == k }}>{{ v }} ({{ ents.by_type.get(k, 0) }})</option>{% endfor %}</select></div>
+  <div><label>Поиск имени</label><input type="search" name="q" form="sel-form" value="{{ request.query_params.get('q', '') }}" placeholder="например: Пьер"></div>
+  <div><label>Связь — встречаются</label><select name="unit" form="sel-form">{% for k, v in UNITS.items() %}<option value="{{ k }}" {{ 'selected' if ent_unit == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div><label>Сопоставить со словарём</label><select name="cross" form="sel-form">{% for k, v in ETYPES.items() %}<option value="{{ k }}" {{ 'selected' if ent_cross == k }}>{{ v }} × слова словаря</option>{% endfor %}</select></div>
+  <div class="shrink"><label class="check"><input type="checkbox" name="nolatin" value="1" form="sel-form" {{ 'checked' if request.query_params.get('nolatin') }}> без латиницы</label></div>
+  <div class="shrink"><button type="submit" form="sel-form">Показать</button></div>
+  <div class="shrink">Скачать: <a href="/export/entities.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/entities.csv{{ qs(request) }}">CSV</a></div>
+</div>
+{% if ents.missing %}
+<div class="flash info">Для {{ ents.missing|length }} текстов выборки имена собственные ещё не извлечены (тексты загружены до версии 0.6 или задача ещё идёт).
+  <form class="inline" method="post" action="/entities/extract">{% for t in ents.missing %}<input type="hidden" name="text_ids" value="{{ t }}">{% endfor %}
+    <input type="hidden" name="back" value="{{ request.url.path }}?{{ request.url.query }}"><button class="small" type="submit">Извлечь имена</button></form></div>
+{% endif %}
+<div class="stat-tiles" style="margin-bottom:12px">
+  {% for k, v in ETYPES.items() %}<div class="tile"><div class="tile-num">{{ ents.by_type.get(k, 0) }}</div><div class="tile-label">{{ v }} (разных имён)</div></div>{% endfor %}
+  <div class="tile"><div class="tile-num">{{ ents.n_mentions }}</div><div class="tile-label">упоминаний{{ ' в списке' if ent_etype or request.query_params.get('q') }}</div></div>
+</div>
+
+{% if network or ent_dict %}
+<div class="grid cols-2">
+  <div class="panel"><h3 style="margin-top:0">Сеть персонажей</h3>
+    {% if network and network.nodes %}<div id="chart-net" class="chart" style="min-height:520px"></div>
+    <p class="help">30 самых частых персон; линия — встречаются {{ UNITS[ent_unit] }} (не реже двух раз), толщина — сколько раз. Размер кружка — число упоминаний.
+      Щелчок по имени показывает упоминания.</p>
+    {% else %}<p class="muted">Персон в выборке нет.</p>{% endif %}</div>
+  <div class="panel"><h3 style="margin-top:0">{{ ETYPES[ent_cross]|capitalize }} × слова словаря</h3>
+    {% if ent_dict and ent_dict.names %}<div id="chart-entdict" class="chart" style="min-height:{{ 160 + 24 * ent_dict.names|length }}px"></div>
+    <p class="help">Сколько раз слово словаря встречается {{ UNITS[ent_unit] }} с именем ({{ 'выбранные слова' if sel.words else 'самые частые слова' }}). Щелчок по клетке — примеры с подсветкой обоих.</p>
+    {% else %}<p class="muted">Нет совпадений имён этого класса со словами словаря.</p>{% endif %}</div>
+</div>
+{% endif %}
+
+<div class="panel" id="marked-box" style="display:none"><h3 style="margin-top:0" id="marked-title"></h3><div id="marked"></div></div>
+
+<div class="panel table-scroll">
+  <h3 style="margin-top:0">Указатель имён {% if ents.total > ents['items']|length %}<span class="muted small">— первые {{ ents['items']|length }} из {{ ents.total }}</span>{% endif %}</h3>
+  <table>
+    <tr><th>Имя (начальная форма)</th><th>Класс</th><th class="num">Упоминаний</th><th class="num">Текстов</th><th>Слитые варианты</th><th></th><th>Исправить</th></tr>
+    {% for e in ents['items'] %}
+    <tr><td><strong>{{ e.name }}</strong>{% if e.edited %} <span class="badge" title="есть ручная правка">✎</span>{% endif %}</td><td class="small">{{ e.label }}</td>
+      <td class="num">{{ e.count }}</td><td class="num">{{ e.texts }}</td><td class="small muted">{{ e.variants|join(', ') }}</td>
+      <td class="small nowrap"><a href="#" onclick="showMarked('/api/entities/mentions?{{ selq }}&name={{ e.name|urlencode }}', 'Упоминания: {{ e.name|replace("'", "") }}'); return false;">упоминания</a></td>
+      <td><details><summary class="small">править</summary>
+        <form method="post" action="/entities/override" class="small" style="margin-top:4px">
+          <input type="hidden" name="norm" value="{{ e.name }}"><input type="hidden" name="back" value="{{ request.url.path }}?{{ request.url.query }}">
+          <label>Класс</label><select name="etype"><option value="">как определила модель</option>{% for k, v in ETYPE_ONE.items() %}<option value="{{ k }}" {{ 'selected' if e.etype == k }}>{{ v }}</option>{% endfor %}</select>
+          <label>Слить с именем (вариант того же героя)</label><input type="text" name="canonical" placeholder="например: Пьер Безухов">
+          <label class="check"><input type="checkbox" name="hidden" value="1"> это не имя — скрыть</label>
+          <button class="small" type="submit">Сохранить</button>
+        </form></details></td></tr>
+    {% else %}<tr><td colspan="7" class="muted">Имён не найдено.</td></tr>{% endfor %}
+  </table>
+  <p class="help">Модель Natasha обучена на новостях: в художественных текстах она путает фамилии и города («Ростов»), принимает иностранные фразы за названия, делит одного героя на варианты («Андрей», «князь Андрей», «Болконский»).
+    Исправляйте в колонке «Исправить»: класс, слияние вариантов в одно имя, скрытие. Правки действуют во всех текстах и выгрузках и сохраняются при повторном извлечении.</p>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const selq = {{ selq|tojson }};
+  {% if network and network.nodes %}
+  const net = {{ network|tojson }};
+  const pos = Object.fromEntries(net.nodes.map(n => [n.name, n]));
+  const maxW = Math.max(1, ...net.edges.map(e => e.w));
+  const lines = net.edges.map(e => ({ type: 'scatter', mode: 'lines', x: [pos[e.a].x, pos[e.b].x], y: [pos[e.a].y, pos[e.b].y],
+    line: { width: 0.5 + 6 * e.w / maxW, color: cssVar('--muted') }, opacity: 0.45, hoverinfo: 'text', text: `${e.a} — ${e.b}: ${e.w}`, showlegend: false }));
+  const maxC = Math.max(...net.nodes.map(n => n.count));
+  lines.push({ type: 'scatter', mode: 'markers+text', x: net.nodes.map(n => n.x), y: net.nodes.map(n => n.y), text: net.nodes.map(n => n.name),
+    textposition: 'top center', customdata: net.nodes.map(n => [n.name, n.count, n.degree]),
+    marker: { size: net.nodes.map(n => 10 + 30 * Math.sqrt(n.count / maxC)), color: cssVar('--accent'), opacity: 0.85 },
+    hovertemplate: '%{customdata[0]}<br>упоминаний: %{customdata[1]}<br>связей (сумма): %{customdata[2]}<extra></extra>', showlegend: false });
+  drawChart('chart-net', lines, { xaxis: { visible: false }, yaxis: { visible: false, scaleanchor: 'x' }, margin: { l: 10, r: 10, t: 10, b: 10 }, hovermode: 'closest' });
+  const elN = document.getElementById('chart-net');
+  if (elN && elN.on) elN.on('plotly_click', ev => { const d = ev.points[0].customdata; if (d) showMarked(`/api/entities/mentions?${selq}&name=${encodeURIComponent(d[0])}`, 'Упоминания: ' + d[0]); });
+  {% endif %}
+  {% if ent_dict and ent_dict.names %}
+  const ed = {{ ent_dict|tojson }};
+  drawChart('chart-entdict', [{ type: 'heatmap', z: ed.z.slice().reverse(), x: ed.words.map(w => w.word), y: ed.names.slice().reverse(),
+    colorscale: 'Blues', reversescale: true, hovertemplate: '%{y} × %{x}: %{z}<extra></extra>' }],
+    { xaxis: { automargin: true }, yaxis: { automargin: true }, margin: { l: 150, r: 10, t: 10, b: 80 } });
+  const elD = document.getElementById('chart-entdict');
+  if (elD && elD.on) elD.on('plotly_click', ev => {
+    const p = ev.points[0], w = ed.words[p.pointIndex[1]], name = ed.names[ed.names.length - 1 - p.pointIndex[0]];
+    showMarked(`/api/entities/cooccurrence?${selq}&name=${encodeURIComponent(name)}&entry=${w.entry_id}&unit=${ed.unit}`, `«${name}» и «${w.word}» ${ {{ UNITS[ent_unit]|tojson }} }`);
+  });
+  {% endif %}
+});
+</script>
+{% endif %}

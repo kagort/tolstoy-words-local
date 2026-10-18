@@ -237,3 +237,33 @@ function syncWord(box) {
   const twin = document.querySelector(`#word-list input[name="words"][value="${box.value}"]`);
   if (twin) twin.checked = box.checked;
 }
+
+// ------------------------------------------------------------ список предложений с подсветкой (имена, совместная встречаемость)
+async function showMarked(url, title) {
+  const res = await fetch(url);
+  if (!res.ok) return;
+  const data = await res.json();
+  const box = document.getElementById('marked');
+  if (!box) return;
+  box.innerHTML = '';
+  const list = data.sentences || [];
+  for (const s of list) {
+    const p = document.createElement('div'); p.className = 'example';
+    const a = document.createElement('a'); a.href = `/sentences/${s.id}`; a.className = 'muted small'; a.textContent = `🌳 ${s.id} `; p.appendChild(a);
+    let pos = 0;
+    for (const [st, en] of s.marks || []) {
+      if (st < pos) continue;
+      p.appendChild(document.createTextNode(s.text.slice(pos, st)));
+      const b = document.createElement('mark'); b.textContent = s.text.slice(st, en); p.appendChild(b); pos = en;
+    }
+    p.appendChild(document.createTextNode(s.text.slice(pos)));
+    if (s.source) { const src = document.createElement('span'); src.className = 'muted small'; src.textContent = ' — ' + s.source; p.appendChild(src); }
+    box.appendChild(p);
+  }
+  if (!list.length) box.textContent = 'Примеров нет.';
+  const total = data.total && data.total > list.length ? ` (показаны ${list.length} из ${data.total})` : ` (${list.length})`;
+  document.getElementById('marked-title').textContent = title + total;
+  const wrap = document.getElementById('marked-box');
+  wrap.style.display = '';
+  wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}

@@ -328,6 +328,44 @@ def export_textmap(fmt: str, request: Request, db: Session = Depends(get_session
     return _send(frames, fmt, f"textmap-{tm['text_id']}", _params(db, request) | {"Текст": tm["title"], "Отрезков": tm["segments"]})
 
 
+@router.get("/entities.{fmt}")
+def export_entities(fmt: str, request: Request, db: Session = Depends(get_session)):
+    if fmt not in FORMATS:
+        raise HTTPException(400)
+    from app.services import entities as E
+
+    sel = _selection(db, request)
+    qp = request.query_params
+    etype = qp.get("etype") if qp.get("etype") in E.ETYPES else None
+    ix = E.entity_index(db, sel.ids, etype, qp.get("q") or "", top=1_000_000)
+    frames = {"Имена": pd.DataFrame([{"Имя": x["name"], "Класс": x["label"], "Упоминаний": x["count"], "Текстов": x["texts"],
+                                      "Слитые варианты": ", ".join(x["variants"]), "Ручная правка": "да" if x["edited"] else ""}
+                                     for x in ix["items"]])}
+    unit = qp.get("unit") if qp.get("unit") in E.UNITS else "sentence"
+    net = E.persons_network(db, sel.ids, unit, top=100)
+    frames["Сеть персонажей"] = pd.DataFrame([{"Персона 1": e["a"], "Персона 2": e["b"], "Совместно": e["w"]} for e in net["edges"]])
+    cross = qp.get("cross") if qp.get("cross") in E.ETYPES else "LOC"
+    ed = E.entity_dictionary(db, sel.ids, _int(qp.get("dictionary_id")) or 0, sel.words, cross, unit, top=200, top_words=50)
+    if ed["names"]:
+        frames["Имена × словарь"] = pd.DataFrame(ed["z"], index=ed["names"], columns=[w["word"] for w in ed["words"]]).reset_index().rename(columns={"index": "Имя"})
+    return _send(frames, fmt, "entities", _params(db, request) | {"Связь": E.UNITS[unit], "Класс для сопоставления": E.ETYPES[cross]})
+
+
+@router.get("/topics.{fmt}")
+def export_topics(fmt: str, request: Request, db: Session = Depends(get_session)):
+    if fmt not in FORMATS:
+        raise HTTPException(400)
+    from app.web.pages import _topics_context
+
+    tp = _topics_context(db, request, _selection(db, request))["tp"]
+    if not tp or not tp["topics"]:
+        raise HTTPException(404, "Темы не построены")
+    frames = {"Темы": pd.DataFrame([{"Тема": t["id"], "Доля, %": t["share"], "Слова": ", ".join(t["words"])} for t in tp["topics"]])}
+    frames["По текстам, %"] = pd.DataFrame([{"Текст": b["title"], "Фрагментов": b["chunks"],
+                                              **{f"тема {t['id']}": b["dist"][j] for j, t in enumerate(tp["topics"])}} for b in tp["by_text"]])
+    return _send(frames, fmt, "topics", _params(db, request) | {"Тем": tp["k"], "Фрагментов": tp["n_chunks"]})
+
+
 @router.get("/hits.conllu")
 def export_hits_conllu(request: Request, db: Session = Depends(get_session)):
     qp = request.query_params

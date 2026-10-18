@@ -213,6 +213,33 @@ class TokenRelation(Base):
     negated: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class Entity(Base):
+    """Упоминание имени собственного (NER, Natasha/Slovnet): персона, место, организация или иное название."""
+
+    __tablename__ = "entities"
+    __table_args__ = (Index("ix_entities_text_type", "text_id", "etype"), Index("ix_entities_norm", "norm"))
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    text_id: Mapped[int] = mapped_column(ForeignKey("texts.id", ondelete="CASCADE"))
+    sentence_id: Mapped[int] = mapped_column(ForeignKey("sentences.id", ondelete="CASCADE"), index=True)
+    etype: Mapped[str] = mapped_column(String(8))  # PER | LOC | ORG
+    start_char: Mapped[int] = mapped_column(Integer)
+    end_char: Mapped[int] = mapped_column(Integer)
+    surface: Mapped[str] = mapped_column(Text)
+    norm: Mapped[str] = mapped_column(Text)  # начальная форма: «Андрею Болконскому» → «Андрей Болконский»
+
+
+class EntityOverride(Base):
+    """Ручная правка имени: другой класс, слияние с другим именем (варианты одного героя) или скрытие ошибки."""
+
+    __tablename__ = "entity_overrides"
+
+    norm: Mapped[str] = mapped_column(Text, primary_key=True)
+    etype: Mapped[str | None] = mapped_column(String(8))
+    canonical: Mapped[str | None] = mapped_column(Text)
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
+
 class StopList(Base):
     """Свой список стоп-слов (встроенный хранится в файле app/data/stopwords_ru.txt)."""
 
