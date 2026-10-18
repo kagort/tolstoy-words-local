@@ -605,6 +605,84 @@ def _report_context(db: Session, request: Request, dict_id: int, sel) -> dict:
             "rep_default_words": not sel.words, "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
 
 
+def _default_entry(db: Session, dict_id: int, sel, text_ids: list[int]) -> int | None:
+    if sel.words:
+        return sel.words[0]
+    rows = [r for r in A.frequency(db, dict_id, text_ids)["rows"] if r["count"]]
+    return rows[0]["entry_id"] if rows else None
+
+
+def colloc_params(qp) -> dict:
+    return {"mode": qp.get("mode") or "window", "window": _int(qp.get("window")) or 3, "pos": qp.get("pos") or "content",
+            "min_count": _int(qp.get("min_count")) or 2, "sort": qp.get("sort") or "logdice"}
+
+
+def _colloc_context(db: Session, request: Request, dict_id: int, sel, entry_id: int | None) -> dict:
+    from app.services.collocations import MODES, POS_GROUPS, collocations, orbit_layout
+    from app.services.stats import MEASURE_HELP, MEASURES
+
+    p = colloc_params(request.query_params)
+    entry_id = entry_id or _default_entry(db, dict_id, sel, sel.ids)
+    col = collocations(db, entry_id, sel.ids, stop=sel.stopset, **p) if entry_id else None
+    matrix = None
+    if col and col["rows"]:
+        keys = [k for k in MEASURES if k != "count"]
+        top_rows = col["rows"][:25]
+        # ранг внутри каждой меры (0 — худший, 1 — лучший) для тепловой карты «коллокат × мера»
+        z = []
+        for r in top_rows:
+            line = []
+            for k in keys:
+                vals = sorted(x.get(k) for x in top_rows if x.get(k) is not None)
+                v = r.get(k)
+                line.append(round(vals.index(v) / max(len(vals) - 1, 1), 3) if v is not None and len(vals) > 1 else None)
+            z.append(line)
+        matrix = {"lemmas": [r["lemma"] + (f" ({r['rel']})" if r["rel"] else "") for r in top_rows],
+                  "measures": [MEASURES[k] for k in keys], "z": z,
+                  "values": [[r.get(k) for k in keys] for r in top_rows]}
+    return {"col": col, "col_params": p, "entry_id": entry_id, "orbit": orbit_layout(col["rows"][:30], p["sort"]) if col else [],
+            "matrix": matrix, "MEASURES": MEASURES, "MEASURE_HELP": MEASURE_HELP, "COLLOC_MODES": MODES, "POS_GROUPS": POS_GROUPS}
+
+
+def _keywords_context(db: Session, request: Request, sel) -> dict:
+    from app.services.collocations import POS_GROUPS
+    from app.services.keywords import MAX_TFIDF_TEXTS, keywords, reference_ids, tfidf_by_text
+
+    qp = request.query_params
+    ref = qp.get("ref") or ""
+    pos = qp.get("pos") or "content"
+    min_count = _int(qp.get("min_count")) or 3
+    ref_ids, ref_label = reference_ids(db, sel.ids, ref)
+    return {"kw": keywords(db, sel.ids, ref_ids, pos=pos, min_count=min_count, stop=sel.stopset),
+            "tfidf": tfidf_by_text(db, sel.ids, pos=pos, stop=sel.stopset), "kw_ref": ref, "kw_ref_label": ref_label,
+            "kw_pos": pos, "kw_min": min_count, "POS_GROUPS": POS_GROUPS, "MAX_TFIDF_TEXTS": MAX_TFIDF_TEXTS}
+
+
+def _map_context(db: Session, request: Request, dict_id: int, sel) -> dict:
+    from app.services.textmap import SEGMENT_CHOICES, text_map
+
+    qp = request.query_params
+    texts = list(db.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.n_words)
+                            .where(TextDoc.id.in_(sel.ids or [-1])).order_by(TextDoc.author, TextDoc.title)))
+    text_id = _int(qp.get("text_id"))
+    if text_id not in {t.id for t in texts}:
+        text_id = texts[0].id if texts else None
+    segments = _int(qp.get("segments")) or 50
+    tm = text_map(db, text_id, dict_id, sel.words, segments) if text_id else None
+    return {"tm": tm, "map_texts": texts, "map_text_id": text_id, "SEGMENT_CHOICES": SEGMENT_CHOICES}
+
+
+@router.get("/api/texts/{text_id}/passage")
+def text_passage(text_id: int, request: Request, db: Session = Depends(get_session)):
+    """Предложения отрезка текста с подсветкой вхождений — для щелчка по карте текста."""
+    from app.services.textmap import passage
+
+    qp = request.query_params
+    words = [int(x) for x in qp.getlist("words") if x.isdigit()]
+    return {"sentences": passage(db, text_id, _int(qp.get("from")) or 1, _int(qp.get("to")) or 1,
+                                 _int(qp.get("dictionary_id")), words)}
+
+
 @router.get("/analysis")
 def analysis(request: Request, db: Session = Depends(get_session)):
     ctx = _analysis_context(db, request)
@@ -620,6 +698,12 @@ def analysis(request: Request, db: Session = Depends(get_session)):
         ctx.update(_overview_context(db, request, dict_id, text_ids))
     elif tab == "report":
         ctx.update(_report_context(db, request, dict_id, sel))
+    elif tab == "colloc":
+        ctx.update(_colloc_context(db, request, dict_id, sel, entry_id))
+    elif tab == "keywords":
+        ctx.update(_keywords_context(db, request, sel))
+    elif tab == "map":
+        ctx.update(_map_context(db, request, dict_id, sel))
     elif tab == "freq":
         # отмеченные слова — только они (переключатель all_words показывает весь словарь)
         words = None if qp.get("all_words") else (sel.words or None)
@@ -630,6 +714,7 @@ def analysis(request: Request, db: Session = Depends(get_session)):
         ctx["conc"] = A.concordance(
             db, dict_id, text_ids, entry_id=entry_id, entry_ids=sel.words, role=qp.get("role") or None,
             rel_type=qp.get("rel_type") or None, related_lemma=qp.get("related") or None,
+            near=qp.get("near") or None, window=_int(qp.get("window")) or 3,
             include_invalid=bool(qp.get("invalid")), page=_int(qp.get("page")) or 1,
         )
     elif tab == "profile":

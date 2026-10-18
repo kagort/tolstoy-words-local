@@ -266,6 +266,46 @@ def test_selection_report_stopwords(client):
     with SessionLocal() as s:
         assert {"и", "князь"} <= set(s.query(StopList).filter_by(name="Встроенный+").one().words)
 
+    # волна 2: коллокации (окно и синтаксис), ключевые слова, карта текста, фильтр «рядом» в конкордансе
+    from app.services.collocations import collocations, orbit_layout
+    from app.services.keywords import keywords, reference_ids, tfidf_by_text
+    from app.services.textmap import passage, text_map
+
+    with SessionLocal() as s:
+        win = collocations(s, e_zapah.id, all_ids, mode="window", window=3, min_count=1, pos="all")
+        lem = {r["lemma"]: r for r in win["rows"]}
+        assert win["fx"] >= 4 and "сладкий" in lem and lem["сладкий"]["logdice"] is not None
+        syn = collocations(s, e_zapah.id, all_ids, mode="syntax", min_count=1, pos="all")
+        # синтаксические коллокаты берутся из связей (вхождение со «сладкий» выше отмечено как ложное и не учитывается)
+        assert syn["rows"] and all(r["rel"] and r["rel_label"] for r in syn["rows"]) and syn["span"] == 1
+        assert "сладкий" not in {r["lemma"] for r in collocations(s, e_zapah.id, all_ids, min_count=1, pos="all",
+                                                                    stop=frozenset({"сладкий"}))["rows"]}
+        orb = orbit_layout(win["rows"], "logdice")
+        assert orb[0]["ring"] == 1 and all("x" in r for r in orb)
+        near = A.concordance(s, d.id, all_ids, entry_id=e_zapah.id, near="сладкий", window=3)
+        assert near["total"] == lem["сладкий"]["count"]
+        ref, _ = reference_ids(s, [texts["Сирень"]], "")
+        kw = keywords(s, [texts["Сирень"]], ref, min_count=1)
+        assert kw["words_a"] > 0 and kw["positive"] and kw["positive"][0]["ll"] >= kw["positive"][-1]["ll"]
+        tf = tfidf_by_text(s, all_ids)
+        assert len(tf["texts"]) == len(all_ids)
+        tm = text_map(s, texts["Сирень"], d.id, [e_zapah.id], 10)
+        assert tm["rows"][0]["total"] == sum(tm["rows"][0]["count"]) >= 1 and len(tm["seg_words"]) == 10
+        pas = passage(s, texts["Сирень"], 1, 3, d.id)
+        assert pas and any(x["marks"] for x in pas)
+    for tab, extra in (("colloc", f"&entry_id={e_zapah.id}"), ("colloc", f"&entry_id={e_zapah.id}&mode=syntax&min_count=1"),
+                       ("keywords", ""), ("keywords", f"&ref={corpus.id}"), ("map", f"&text_id={texts['Сирень']}&segments=20")):
+        r = client.get(f"/analysis?tab={tab}&{base}{extra}&stop=ru")
+        assert r.status_code == 200, (tab, extra)
+    assert "chart-orbit" in client.get(f"/analysis?tab=colloc&{base}&entry_id={e_zapah.id}&min_count=1&pos=all").text
+    assert "chart-map" in client.get(f"/analysis?tab=map&{base}&text_id={texts['Сирень']}").text
+    assert client.get(f"/api/texts/{texts['Сирень']}/passage?from=1&to=5&dictionary_id={d.id}").json()["sentences"]
+    for url in (f"/export/collocations.xlsx?{base}&entry_id={e_zapah.id}&min_count=1", f"/export/collocations.csv?{base}&entry_id={e_zapah.id}&mode=syntax&min_count=1",
+                f"/export/keywords.xlsx?{base}", f"/export/keywords.csv?{base}&ref={corpus.id}",
+                f"/export/textmap.xlsx?{base}&text_id={texts['Сирень']}", f"/export/concordance.csv?{base}&entry_id={e_zapah.id}&near=сладкий&window=3"):
+        r = client.get(url)
+        assert r.status_code == 200 and len(r.content) > 50, url
+
     # страница задач: удаление выполненных
     assert client.get("/jobs").status_code == 200
     assert client.post("/jobs/clear", data={"what": "finished"}, follow_redirects=False).status_code == 303

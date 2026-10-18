@@ -1,0 +1,105 @@
+"""Ключевые слова выборки относительно опорного корпуса (keyness) и TF-IDF для каждого текста."""
+
+from __future__ import annotations
+
+from collections import Counter, defaultdict
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.models import TextDoc, TokenRow
+from app.services import analytics as A
+from app.services.collocations import POS_GROUPS
+from app.services.stats import SIGNIFICANCE_LL, ipm, log_likelihood, log_ratio, tf_idf
+
+MAX_TFIDF_TEXTS = 40
+
+
+def _lemma_counts(session: Session, text_ids: list[int], pos_set) -> tuple[Counter, dict[str, str]]:
+    q = select(TokenRow.lemma_norm, TokenRow.upos, func.count()).where(TokenRow.text_id.in_(text_ids or [-1]))
+    q = q.where(TokenRow.upos.in_(pos_set)) if pos_set else q.where(TokenRow.upos != "PUNCT")
+    counts: Counter = Counter()
+    by_pos: dict[str, Counter] = defaultdict(Counter)
+    for lemma, upos, c in session.execute(q.group_by(TokenRow.lemma_norm, TokenRow.upos)):
+        if not lemma or not any(ch.isalpha() for ch in lemma):
+            continue
+        counts[lemma] += c
+        by_pos[lemma][upos] += c
+    return counts, {lemma: c.most_common(1)[0][0] for lemma, c in by_pos.items()}
+
+
+def reference_ids(session: Session, text_ids: list[int], ref: str | None) -> tuple[list[int], str]:
+    """Опорный корпус: "" — все остальные тексты базы; число — корпус (без текстов выборки)."""
+    target = set(text_ids)
+    if ref and ref.isdigit():
+        ids = [t for t in A.corpus_text_ids(session, int(ref)) if t not in target]
+        return ids, f"корпус «{A.corpus_label(session, int(ref))}» (без текстов выборки)"
+    return [t for t in A.corpus_text_ids(session, None) if t not in target], "все остальные тексты базы"
+
+
+def keywords(session: Session, text_ids: list[int], ref_ids: list[int], *, pos: str = "content", min_count: int = 3,
+             stop: frozenset[str] = frozenset(), top: int = 100) -> dict:
+    """Положительные (чаще в выборке) и отрицательные (реже) ключевые слова по G² и log-ratio."""
+    pos_set = POS_GROUPS.get(pos, POS_GROUPS["content"])[1]
+    ta, pos_a = _lemma_counts(session, text_ids, pos_set)
+    tb, pos_b = _lemma_counts(session, ref_ids, pos_set) if ref_ids else (Counter(), {})
+    na, nb = A.corpus_words(session, text_ids), A.corpus_words(session, ref_ids)
+    pos_main = {**pos_b, **pos_a}
+    positive, negative = [], []
+    for lemma in set(ta) | set(tb):
+        if lemma in stop:
+            continue
+        a, b = ta.get(lemma, 0), tb.get(lemma, 0)
+        if a + b < min_count:
+            continue
+        ll = log_likelihood(a, b, na, nb) if nb else 0.0
+        row = {"lemma": lemma, "pos": pos_main.get(lemma, ""), "count_a": a, "count_b": b,
+               "ipm_a": round(ipm(a, na), 1), "ipm_b": round(ipm(b, nb), 1), "ll": round(ll, 2),
+               "log_ratio": round(log_ratio(a, b, na, nb), 2) if nb else None, "significant": ll >= SIGNIFICANCE_LL}
+        if not nb:
+            positive.append(row)
+        elif row["ipm_a"] > row["ipm_b"]:
+            positive.append(row)
+        else:
+            negative.append(row)
+    key = (lambda r: -r["count_a"]) if not nb else (lambda r: -r["ll"])
+    positive.sort(key=key)
+    negative.sort(key=key)
+    return {"positive": positive[:top], "negative": negative[:top], "words_a": na, "words_b": nb,
+            "n_positive": sum(1 for r in positive if r["significant"]), "n_negative": sum(1 for r in negative if r["significant"])}
+
+
+def tfidf_by_text(session: Session, text_ids: list[int], *, pos: str = "content", stop: frozenset[str] = frozenset(),
+                  top: int = 12) -> dict:
+    """Самые характерные леммы каждого текста выборки: TF-IDF, где коллекция — все готовые тексты базы."""
+    if not text_ids or len(text_ids) > MAX_TFIDF_TEXTS:
+        return {"texts": [], "too_many": len(text_ids) > MAX_TFIDF_TEXTS, "n_docs": 0}
+    pos_set = POS_GROUPS.get(pos, POS_GROUPS["content"])[1]
+    q = select(TokenRow.text_id, TokenRow.lemma_norm, func.count()).where(TokenRow.text_id.in_(text_ids))
+    q = q.where(TokenRow.upos.in_(pos_set)) if pos_set else q.where(TokenRow.upos != "PUNCT")
+    per_text: dict[int, Counter] = defaultdict(Counter)
+    for tid, lemma, c in session.execute(q.group_by(TokenRow.text_id, TokenRow.lemma_norm)):
+        if lemma and lemma not in stop and any(ch.isalpha() for ch in lemma) and c >= 2:
+            per_text[tid][lemma] = c
+    lemmas = set().union(*per_text.values()) if per_text else set()
+    all_ids = A.corpus_text_ids(session, None)
+    df = {}
+    if lemmas:
+        df = dict(session.execute(
+            select(TokenRow.lemma_norm, func.count(func.distinct(TokenRow.text_id)))
+            .where(TokenRow.lemma_norm.in_(sorted(lemmas)), TokenRow.text_id.in_(all_ids))
+            .group_by(TokenRow.lemma_norm)
+        ).all())
+    meta = {t.id: t for t in session.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.n_words)
+                                              .where(TextDoc.id.in_(text_ids)))}
+    out = []
+    for tid in text_ids:
+        t = meta.get(tid)
+        if t is None:
+            continue
+        doc_len = t.n_words or 1
+        scored = sorted(((tf_idf(c, doc_len, df.get(lemma, 1), len(all_ids)), lemma, c) for lemma, c in per_text[tid].items()),
+                        reverse=True)[:top]
+        out.append({"text_id": tid, "title": t.title, "author": t.author or "",
+                    "words": [{"lemma": lemma, "count": c, "score": round(score * 1000, 3)} for score, lemma, c in scored]})
+    return {"texts": out, "too_many": False, "n_docs": len(all_ids)}
