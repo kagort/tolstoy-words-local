@@ -31,6 +31,10 @@ def main() -> None:
     from app.nlp.parsers import get_parser
 
     get_parser()
+    if settings.two_stage:
+        get_parser(settings.fast_parser)
+        logging.info("Двухступенчатая обработка: весь текст — %s, предложения со словами словарей — %s",
+                     settings.fast_parser, settings.nlp_backend)
     worker_loop(settings.worker_poll_seconds)
 
 

@@ -76,9 +76,14 @@ class Corpus(Base):
     texts: Mapped[list[TextDoc]] = relationship(secondary=corpus_texts, back_populates="corpora", order_by="TextDoc.id")
 
 
+# уровни разбора предложения (двухступенчатая обработка, волна 1)
+PARSE_FAST = 1  # предварительный разбор быстрым парсером (Natasha) — для статистики всего текста
+PARSE_PRECISE = 2  # разбор основным парсером (NLP_BACKEND, обычно Stanza) — по нему ищутся вхождения словарей
+
+
 class SentenceRow(Base):
     __tablename__ = "sentences"
-    __table_args__ = (UniqueConstraint("text_id", "idx"),)
+    __table_args__ = (UniqueConstraint("text_id", "idx"), Index("ix_sentences_text_level", "text_id", "parse_level"))
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     text_id: Mapped[int] = mapped_column(ForeignKey("texts.id", ondelete="CASCADE"), index=True)
@@ -93,6 +98,7 @@ class SentenceRow(Base):
     has_homogeneous: Mapped[bool] = mapped_column(Boolean, default=False)
     has_participial: Mapped[bool] = mapped_column(Boolean, default=False)
     has_gerund: Mapped[bool] = mapped_column(Boolean, default=False)
+    parse_level: Mapped[int] = mapped_column(SmallInteger, default=PARSE_PRECISE, server_default=str(PARSE_PRECISE))
 
 
 class TokenRow(Base):

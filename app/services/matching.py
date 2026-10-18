@@ -10,7 +10,7 @@ from sqlalchemy import and_, delete, not_, select, update
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
-from app.models import Dictionary, DictionaryEntry, Hit, Job, SentenceRow, TextDoc, TokenRow
+from app.models import PARSE_PRECISE, Dictionary, DictionaryEntry, Hit, Job, SentenceRow, TextDoc, TokenRow
 from app.nlp.morph import word_forms
 from app.nlp.syntax import SYNTAX_VERSION, SentenceAnalysis
 from app.nlp.tree import Sentence, Token, parse_feats
@@ -102,10 +102,25 @@ def run_match(job_id: int | None, dictionary_id: int, entry_ids: list[int] | Non
         s.execute(q)
         s.commit()
         entry_data = [(e.id, e.surface, entry_token_filter(e, settings)) for e in entries]
+        # двухступенчатая обработка: слова словаря ищутся с запасом в предварительном разборе
+        cand_forms, cand_lemmas = set(), set()
+        for e in entries:
+            cand_forms |= word_forms(e.lemma, e.upos if e.match_mode == "forms" else None)
+            cand_lemmas.add(e.lemma_norm)
+        from app.services.deepparse import candidate_sentence_ids
+
+        candidates = candidate_sentence_ids(s, ready_texts, cand_forms, cand_lemmas) if entries else []
 
     total_hits = 0
     try:
-        total_hits = _match_entries(job_id, dictionary_id, entry_data, ready_texts)
+        # ступень 2: кандидаты получают точный разбор основным парсером, только потом ищутся вхождения
+        match_from = 0.0
+        if candidates:
+            from app.services.deepparse import upgrade_sentences
+
+            match_from = 0.7
+            upgrade_sentences(candidates, job_id, (0.0, match_from), label="Точный разбор предложений со словами словаря")
+        total_hits = _match_entries(job_id, dictionary_id, entry_data, ready_texts, match_from)
     finally:  # и при отмене задачи ручные отметки возвращаются на уже найденные вхождения
         with SessionLocal() as s:
             for e_id, tok_id, valid in manual:
@@ -119,15 +134,19 @@ def run_match(job_id: int | None, dictionary_id: int, entry_ids: list[int] | Non
     log.info("Словарь %s: найдено вхождений %s", dictionary_id, total_hits)
 
 
-def _match_entries(job_id: int | None, dictionary_id: int, entry_data: list, ready_texts: list[int]) -> int:
+def _match_entries(job_id: int | None, dictionary_id: int, entry_data: list, ready_texts: list[int],
+                   progress_from: float = 0.0) -> int:
+    """Вхождения ищутся только в предложениях точного разбора (PARSE_PRECISE)."""
     total_hits = 0
+    span = 1.0 - progress_from
+    precise = select(SentenceRow.id).where(SentenceRow.text_id.in_(ready_texts or [-1]), SentenceRow.parse_level == PARSE_PRECISE)
     for n, (entry_id, surface, cond) in enumerate(entry_data, start=1):
         if not ready_texts:
             break
         with SessionLocal() as s:
             rows = s.execute(
                 select(TokenRow.id, TokenRow.sentence_id, TokenRow.text_id, TokenRow.idx, TokenRow.form)
-                .where(cond, TokenRow.text_id.in_(ready_texts))
+                .where(cond, TokenRow.text_id.in_(ready_texts), TokenRow.sentence_id.in_(precise))
                 .order_by(TokenRow.sentence_id, TokenRow.idx)
             ).all()
             for start in range(0, len(rows), CHUNK):
@@ -155,8 +174,8 @@ def _match_entries(job_id: int | None, dictionary_id: int, entry_data: list, rea
                 s.commit()
                 total_hits += len(hrows)
                 if job_id and start + CHUNK < len(rows):  # пульс и проверка отмены внутри частого слова
-                    set_progress(job_id, (n - 1 + (start + CHUNK) / len(rows)) / max(len(entry_data), 1),
+                    set_progress(job_id, progress_from + span * (n - 1 + (start + CHUNK) / len(rows)) / max(len(entry_data), 1),
                                  f"Обработано слов: {n - 1} из {len(entry_data)} («{surface}»: {start + CHUNK} из {len(rows)})")
         if job_id:
-            set_progress(job_id, n / max(len(entry_data), 1), f"Обработано слов: {n} из {len(entry_data)} («{surface}»)")
+            set_progress(job_id, progress_from + span * n / max(len(entry_data), 1), f"Обработано слов: {n} из {len(entry_data)} («{surface}»)")
     return total_hits

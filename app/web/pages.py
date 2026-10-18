@@ -192,7 +192,28 @@ def text_detail(request: Request, text_id: int, page: int = 1, db: Session = Dep
                             .offset((page - 1) * per_page).limit(per_page)))
     corpora = list(db.scalars(select(Corpus).order_by(Corpus.name)))
     pages_n = max(1, -(-(doc.n_sentences or 0) // per_page))
-    return render(request, "text_detail.html", doc=doc, sents=sents, corpora=corpora, page=page, pages=pages_n)
+    from app.services.deepparse import parse_levels
+
+    pending = db.scalar(select(Job.id).where(Job.kind == "deepparse", Job.status.in_(["queued", "running"]),
+                                            Job.params["text_id"].as_integer() == text_id))
+    return render(request, "text_detail.html", doc=doc, sents=sents, corpora=corpora, page=page, pages=pages_n,
+                  levels=parse_levels(db, text_id), precise_pending=bool(pending))
+
+
+@router.post("/texts/{text_id}/precise")
+def text_precise(request: Request, text_id: int, db: Session = Depends(get_session)):
+    """Точный разбор всех предложений текста основным парсером (ступень 2 для всего текста)."""
+    doc = db.get(TextDoc, text_id)
+    if doc is None:
+        raise HTTPException(404)
+    busy = db.scalar(select(Job.id).where(Job.kind == "deepparse", Job.status.in_(["queued", "running"]),
+                                         Job.params["text_id"].as_integer() == text_id))
+    if not busy:
+        enqueue(db, "deepparse", {"text_id": text_id}, title=f"Точный разбор всего текста «{doc.title}»")
+        db.commit()
+        flash(request, "Точный разбор всего текста поставлен в очередь (прогресс — на странице «Задачи»). "
+                       "После него словари пересчитаются, а портрет обновится.", "success")
+    return redirect(f"/texts/{text_id}")
 
 
 @router.get("/texts/{text_id}/stats")
@@ -709,10 +730,26 @@ def sentence_view(request: Request, sentence_id: int, token: int | None = None, 
     context = _context_rows(db, row, 3)
     prev_id = db.scalar(select(SentenceRow.id).where(SentenceRow.text_id == row.text_id, SentenceRow.idx == row.idx - 1))
     next_id = db.scalar(select(SentenceRow.id).where(SentenceRow.text_id == row.text_id, SentenceRow.idx == row.idx + 1))
+    precise_pending = row.parse_level == 1 and bool(db.scalar(
+        select(Job.id).where(Job.kind == "deepparse", Job.status.in_(["queued", "running"]),
+                             Job.params["sentence_ids"].contains([sentence_id]))))
     return render(request, "sentence.html", row=row, sent=sent, doc=doc, roles=roles, rels=rels, focus=focus,
+                  precise_pending=precise_pending,
                   tree_json=json.dumps(tree, ensure_ascii=False).replace("</", "<\\/"), groups=groups, hit_tokens=hit_tokens,
                   conllu=sent.to_conllu(sentence_id), prev_id=prev_id, next_id=next_id, context=context,
                   tree_children=tree_children)
+
+
+@router.post("/sentences/{sentence_id}/precise")
+def sentence_precise(request: Request, sentence_id: int, db: Session = Depends(get_session)):
+    row = db.get(SentenceRow, sentence_id)
+    if row is None:
+        raise HTTPException(404)
+    if row.parse_level == 1:
+        enqueue(db, "deepparse", {"sentence_ids": [sentence_id]}, title=f"Точный разбор предложения ID {sentence_id}")
+        db.commit()
+        flash(request, "Точный разбор поставлен в очередь — обновите страницу через минуту", "success")
+    return redirect(f"/sentences/{sentence_id}")
 
 
 # ------------------------------------------------------------------ задачи

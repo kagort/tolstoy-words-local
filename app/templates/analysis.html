@@ -306,6 +306,8 @@
   <div class="shrink">Скачать: <a href="/export/structure.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/structure.csv{{ qs(request) }}">CSV</a></div>
 </div>
 {% set h, a = structure.hits, structure.all %}
+{% if structure.fast %}<p class="help">Предложения со словами словаря разобраны точно; среди всех предложений выборки {{ structure.fast }} разобраны предварительно (быстрым парсером),
+  поэтому глубина дерева, клаузы и обороты в колонке «Все предложения» — приблизительные. Точный разбор всего текста — кнопка в карточке текста.</p>{% endif %}
 <div class="grid cols-2">
   <div class="panel">
     <table>
