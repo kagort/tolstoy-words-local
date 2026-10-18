@@ -144,7 +144,11 @@
 {# ============================================================== ЧАСТОТЫ #}
 {% if tab == 'freq' and freq %}
 <div class="row" style="margin-bottom:10px">
-  <div class="muted">Выборка: {{ freq.n_texts }} текстов, {{ "{:,}".format(freq.corpus_words).replace(",", " ") }} словоупотреблений.</div>
+  <div class="muted">Выборка: {{ freq.n_texts }} текстов, {{ "{:,}".format(freq.corpus_words).replace(",", " ") }} словоупотреблений.
+    {% if freq_filtered %}Показаны <strong>{{ freq.rows|length }} выбранных слов</strong>: вместе {{ freq.selected_total }} вхождений, {{ freq.selected_ipm }} ipm ·
+      <a href="/analysis{{ qs(request, all_words='1') }}">показать весь словарь</a>
+    {% elif request.query_params.get('all_words') and sel.words %}Показан весь словарь · <a href="/analysis{{ qs(request, all_words=None) }}">только выбранные слова ({{ sel.words|length }})</a>{% endif %}
+    <span class="help" style="display:block">ipm — вхождений на миллион слов всей выборки текстов (так частоты сравнимы между корпусами разного размера); «доля» — какую часть вхождений слов этой таблицы составляет слово.</span></div>
   <div class="shrink">Скачать таблицу: <a href="/export/frequency.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/frequency.csv{{ qs(request) }}">CSV</a> · <a href="/export/frequency.json{{ qs(request) }}">JSON</a></div>
 </div>
 <div class="panel"><div id="chart-freq" class="chart"></div></div>
@@ -161,11 +165,13 @@
   <table>
     <tr><th><input type="checkbox" title="отметить все" onchange="document.querySelectorAll('.freq-check').forEach(c => { c.checked = this.checked; syncWord(c); })"></th>
       <th>Слово</th><th>Лемма</th><th>Категория</th><th class="num">Вхождений</th><th class="num">ipm</th><th class="num">Предложений</th><th class="num">Текстов</th>
+      <th class="num" title="какую часть всех вхождений слов этой таблицы составляет слово">Доля, %</th>
       <th class="num" title="Мера неравномерности Грайса: 0 — равномерно по текстам, ближе к 1 — сосредоточено в немногих">DP</th><th>Перейти</th><th>Все предложения со словом</th></tr>
     {% for r in freq.rows %}
     <tr><td><input type="checkbox" class="freq-check" value="{{ r.entry_id }}" {{ 'checked' if r.entry_id in sel.words }} onchange="syncWord(this)"></td>
       <td><strong>{{ r.word }}</strong></td><td>{{ r.lemma }} <span class="muted small">{{ pos_label(r.upos) }}</span></td><td>{{ r.category }}</td>
       <td class="num">{{ r.count }}</td><td class="num">{{ r.ipm }}</td><td class="num">{{ r.sentences }}</td><td class="num">{{ r.texts }}</td>
+      <td class="num">{{ r.share }}</td>
       <td class="num">{{ r.dp if r.dp is not none else '' }}</td>
       <td class="small nowrap">{% if r.count %}<a href="/analysis?tab=profile&{{ sq }}&entry_id={{ r.entry_id }}">профиль</a> ·
         <a href="/analysis?tab=conc&{{ sq }}&entry_id={{ r.entry_id }}">примеры</a>{% endif %}</td>
@@ -381,8 +387,9 @@
 (function () {
   const rows = {{ freq.rows[:40]|tojson }}.filter(r => r.count > 0);
   drawChart('chart-freq', [{ type: 'bar', x: rows.map(r => r.word), y: rows.map(r => r.ipm), text: rows.map(r => r.count + ' вхожд.'),
-    hovertemplate: '%{x}: %{y} ipm (%{text})<extra></extra>', marker: { color: cssVar('--accent') } }],
-    { title: { text: 'Частота на миллион слов (ipm)', font: { size: 14 } }, yaxis: { title: 'ipm' } });
+    customdata: rows.map(r => r.share),
+    hovertemplate: '%{x}: %{y} ipm (%{text}; доля %{customdata}%)<extra></extra>', marker: { color: cssVar('--accent') } }],
+    { title: { text: {{ ('Выбранные слова: частота на миллион слов выборки (ipm)' if freq_filtered else 'Частота на миллион слов выборки (ipm)')|tojson }}, font: { size: 14 } }, yaxis: { title: 'ipm' } });
   {% if heat.words and heat.texts|length > 1 %}
   const heat = {{ heat|tojson }};
   drawChart('chart-heat', [{ type: 'heatmap', z: heat.z, x: heat.texts, y: heat.words, colorscale: 'Blues', reversescale: true, hovertemplate: '%{y} — %{x}: %{z} ipm<extra></extra>' }],
