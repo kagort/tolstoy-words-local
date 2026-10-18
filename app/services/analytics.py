@@ -367,9 +367,12 @@ def sentence_structure(session: Session, dictionary_id: int, text_ids: list[int]
         hit_sids = hit_sids.where(Hit.entry_id == entry_id)
     elif entry_ids:
         hit_sids = hit_sids.where(Hit.entry_id.in_(entry_ids))
+    fast = session.scalar(select(func.count()).select_from(SentenceRow)
+                          .where(SentenceRow.text_id.in_(ids), SentenceRow.parse_level == 1)) or 0
     return {
         "hits": _structure_stats(session, SentenceRow.id.in_(hit_sids)),
         "all": _structure_stats(session, SentenceRow.text_id.in_(ids)),
+        "fast": fast,  # предложений предварительного разбора (двухступенчатая обработка)
     }
 
 

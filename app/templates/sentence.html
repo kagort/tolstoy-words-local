@@ -14,7 +14,13 @@
     <span class="role-attribute">~ определение</span><span class="role-adverbial">··· обстоятельство</span>
     · щёлкните по слову, чтобы увидеть его связи
   </div>
-  <div class="small muted" style="margin-top:6px">Тип: {{ SENT_TYPE_LABELS.get(row.sent_type, row.sent_type) }} · клауз: {{ row.n_clauses }} · глубина дерева: {{ row.tree_depth }} · слов: {{ row.n_words }}
+  {% if row.parse_level == 1 %}
+  <div class="flash info small" style="margin:8px 0 0">Это <strong>предварительный разбор</strong> быстрым парсером: в нём нет слов словарей, поэтому точный разбор не выполнялся.
+    Роли и дерево могут содержать ошибки.
+    {% if precise_pending %}Точный разбор уже в очереди — обновите страницу через минуту.
+    {% else %}<form class="inline" method="post" action="/sentences/{{ row.id }}/precise"><button class="small" type="submit">Точный разбор этого предложения</button></form>{% endif %}</div>
+  {% endif %}
+  <div class="small muted" style="margin-top:6px">Разбор: {{ 'точный' if row.parse_level == 2 else 'предварительный' }} · Тип: {{ SENT_TYPE_LABELS.get(row.sent_type, row.sent_type) }} · клауз: {{ row.n_clauses }} · глубина дерева: {{ row.tree_depth }} · слов: {{ row.n_words }}
     {% if groups %}· однородные ряды: {% for g in groups %}[{{ g.members|join(', ') }}] <span class="badge">{{ g.type }}</span> {% endfor %}{% endif %}</div>
 </div>
 

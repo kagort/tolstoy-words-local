@@ -34,11 +34,19 @@
       <tr><td>Словоупотреблений</td><td class="num">{{ doc.n_words }}</td></tr>
       <tr><td>Исходный файл</td><td class="num">{{ doc.source_filename or '' }}</td></tr>
       <tr><td>Конвейер разбора</td><td class="num small">{{ doc.pipeline_version or '—' }}</td></tr>
+      {% if levels and levels.total %}
+      <tr><td title="точный разбор основным парсером — для предложений со словами словарей; остальные разобраны предварительно (быстрым парсером)">Синтаксический разбор</td>
+        <td class="num small">точный: {{ levels.precise }}{% if levels.fast %} · предварительный: {{ levels.fast }}{% endif %}</td></tr>
+      {% endif %}
       <tr><td>Загружен</td><td class="num">{{ doc.created_at.strftime('%d.%m.%Y %H:%M') if doc.created_at }}</td></tr>
     </table>
     <p class="row">
       {% if doc.status == 'ready' %}<a class="btn" href="/texts/{{ doc.id }}/stats">📊 Статистический портрет</a>{% endif %}
       <a class="btn secondary" href="/export/text/{{ doc.id }}.conllu">Скачать разметку (CoNLL-U)</a>
+      {% if levels and levels.fast and doc.status == 'ready' %}
+      <form class="inline shrink" method="post" action="/texts/{{ doc.id }}/precise" title="разобрать основным парсером все предложения — точнее портрет и структура, но долго">
+        <button class="secondary" type="submit" {{ 'disabled' if precise_pending }}>{{ 'Точный разбор в очереди…' if precise_pending else 'Точный разбор всего текста (' ~ levels.fast ~ ' предл.)' }}</button></form>
+      {% endif %}
       <form class="inline shrink" method="post" action="/texts/{{ doc.id }}/reparse"><button class="secondary" type="submit">Разобрать заново</button></form>
       <form class="inline shrink" method="post" action="/texts/{{ doc.id }}/delete" onsubmit="return confirm('Удалить текст и всю его разметку?')"><button class="danger" type="submit">Удалить</button></form>
     </p>

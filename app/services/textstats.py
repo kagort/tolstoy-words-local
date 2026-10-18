@@ -278,9 +278,12 @@ def compute(session: Session, text_id: int) -> dict:
         "seg_words": [seg_words.get(b, 0) for b in range(SEGMENTS)],
     }
 
+    from app.services.deepparse import parse_levels
+
     return {
         "version": STATS_VERSION,
         "pipeline": doc.pipeline_version,
+        "levels": parse_levels(session, text_id),
         "size": {
             "tokens": n_tokens, "words": n_words, "sentences": n_sent, "paragraphs": n_par,
             "chars": len(doc.norm_text or ""), "avg_word_len": round(statistics.mean(word_lens), 2) if word_lens else 0,

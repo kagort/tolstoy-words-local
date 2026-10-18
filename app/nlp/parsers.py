@@ -257,22 +257,22 @@ class StanzaParser:
         return out
 
 
-_PARSER: Parser | None = None
+_PARSERS: dict[str, Parser] = {}
 
 
 def get_parser(backend: str | None = None) -> Parser:
-    """Ленивая загрузка парсера (модели загружаются один раз на процесс)."""
-    global _PARSER
+    """Ленивая загрузка парсера (модели загружаются один раз на процесс; быстрый и основной — отдельно)."""
     from app.config import settings
 
     backend = (backend or settings.nlp_backend).lower()
-    if _PARSER is not None and _PARSER.name == backend:
-        return _PARSER
+    if backend in _PARSERS:
+        return _PARSERS[backend]
     if backend == "stanza":
-        _PARSER = StanzaParser(model_dir=settings.stanza_dir or None)
-    elif backend == "natasha":
-        _PARSER = NatashaParser()
+        parser = StanzaParser(model_dir=settings.stanza_dir or None)
+    elif backend == "natasha" or backend.startswith("natasha-"):  # «natasha-…» — отдельный экземпляр (тесты двух ступеней)
+        parser = NatashaParser()
     else:
-        raise ValueError(f"Неизвестный NLP_BACKEND: {backend}")
-    log.info("NLP-парсер загружен: %s", _PARSER.version)
-    return _PARSER
+        raise ValueError(f"Неизвестный парсер: {backend}")
+    _PARSERS[backend] = parser
+    log.info("NLP-парсер загружен: %s", parser.version)
+    return parser
