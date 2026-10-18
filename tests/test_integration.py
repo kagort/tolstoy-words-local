@@ -306,6 +306,45 @@ def test_selection_report_stopwords(client):
         r = client.get(url)
         assert r.status_code == 200 and len(r.content) > 50, url
 
+    # волна 3: имена собственные (извлекаются после разбора автоматически), правки, семантика, темы
+    from app.services import entities as E
+    from app.services import semantic as S
+
+    with SessionLocal() as s:
+        ix = E.entity_index(s, all_ids)
+        assert not ix["missing"] and ix["n_mentions"] > 0
+        names = {x["name"]: x for x in ix["items"]}
+        assert any("Толстой" in n for n in names), names.keys()
+        tol = next(n for n in names if "Толстой" in n)
+        assert E.mentions(s, all_ids, tol)["sentences"]
+        E.set_override(s, tol, "PER", "Лев Толстой")
+        s.commit()
+        assert "Лев Толстой" in {x["name"] for x in E.entity_index(s, all_ids)["items"]}
+        E.set_override(s, "Лев Толстой", None, None, hidden=True)
+        s.commit()
+        assert "Лев Толстой" not in {x["name"] for x in E.entity_index(s, all_ids)["items"]}
+        sim = S.similar_words(s, ["запах"], all_ids, only_in_corpus=False)
+        assert sim["items"] and all(w["word"] != "запах" for w in sim["items"])
+        assert S.dictionary_map(s, d.id)["points"]
+        assert S.topics(s, all_ids, k=3)["n_chunks"] >= 1
+    r = client.post("/entities/override", data={"norm": "Лев Толстой", "etype": "", "canonical": ""}, follow_redirects=False)
+    assert r.status_code == 303
+    for tab, extra in (("entities", ""), ("entities", "&etype=PER&unit=paragraph&cross=PER&nolatin=1"),
+                       ("semantic", f"&entry_id={e_zapah.id}&k=2"), ("semantic", "&seed=запах, аромат&any=1&groups=3"), ("topics", "&k=3")):
+        r = client.get(f"/analysis?tab={tab}&{base}{extra}")
+        assert r.status_code == 200, (tab, extra)
+    assert client.get(f"/api/entities/mentions?{base}&name={tol}").status_code == 200
+    assert client.get(f"/api/entities/cooccurrence?{base}&name={tol}&entry={e_zapah.id}").status_code == 200
+    r = client.post(f"/dictionaries/{d.id}/add-words", data={"words": ["аромат", "благоухание"]}, follow_redirects=False)
+    assert r.status_code == 303
+    with SessionLocal() as s:
+        assert s.query(DictionaryEntry).filter_by(dictionary_id=d.id, surface="благоухание").count() == 1
+    for url in (f"/export/entities.xlsx?{base}", f"/export/entities.csv?{base}&etype=PER"):
+        r = client.get(url)
+        assert r.status_code == 200 and len(r.content) > 50, url
+    assert client.post("/entities/extract", data={"text_ids": [str(texts["Дым"])]}, follow_redirects=False).status_code == 303
+    run_jobs()
+
     # страница задач: удаление выполненных
     assert client.get("/jobs").status_code == 200
     assert client.post("/jobs/clear", data={"what": "finished"}, follow_redirects=False).status_code == 303

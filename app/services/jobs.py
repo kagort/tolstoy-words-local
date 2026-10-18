@@ -87,7 +87,9 @@ def run_job(job_id: int) -> None:
     from app.services.ingest import run_ingest
     from app.services.matching import run_match
 
-    handlers = {"ingest": run_ingest, "match": run_match, "deepparse": run_deepparse}
+    from app.services.entities import run_ner
+
+    handlers = {"ingest": run_ingest, "match": run_match, "deepparse": run_deepparse, "ner": run_ner}
     with SessionLocal() as s:
         job = s.get(Job, job_id)
         kind, params = job.kind, dict(job.params or {})

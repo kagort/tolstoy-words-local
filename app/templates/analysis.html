@@ -91,8 +91,8 @@
 </form>
 
 <div class="tabs">
-  {% for key, label in [('overview', 'Обзор'), ('report', '📋 Отчёт'), ('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('colloc', 'Коллокации'), ('keywords', 'Ключевые слова'), ('map', 'Карта текста'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
-  <a class="{{ 'active' if tab == key }}" href="/analysis?tab={{ key }}&dictionary_id={{ dict_id }}&{{ sel.query() }}{% if entry_id and key in ('profile','conc','structure','compare','colloc') %}&entry_id={{ entry_id }}{% endif %}">{{ label }}</a>
+  {% for key, label in [('overview', 'Обзор'), ('report', '📋 Отчёт'), ('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('colloc', 'Коллокации'), ('keywords', 'Ключевые слова'), ('map', 'Карта текста'), ('entities', 'Имена'), ('semantic', 'Семантика'), ('topics', 'Темы'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
+  <a class="{{ 'active' if tab == key }}" href="/analysis?tab={{ key }}&dictionary_id={{ dict_id }}&{{ sel.query() }}{% if entry_id and key in ('profile','conc','structure','compare','colloc','semantic') %}&entry_id={{ entry_id }}{% endif %}">{{ label }}</a>
   {% endfor %}
 </div>
 
@@ -141,6 +141,8 @@
 
 {% include "_report.html" %}
 {% include "_wave2.html" %}
+{% include "_entities.html" %}
+{% include "_semantic.html" %}
 
 {# ============================================================== ЧАСТОТЫ #}
 {% if tab == 'freq' and freq %}

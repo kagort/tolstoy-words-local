@@ -273,3 +273,27 @@ def test_association_measures():
     assert association(0, 10, 10, 100)["pmi"] is None
     assert juilland_d([5, 5, 5, 5]) == 1.0 and juilland_d([20, 0, 0, 0]) == 0.0
     assert tf_idf(5, 100, 1, 10) > tf_idf(5, 100, 10, 10) > 0
+
+
+def test_entity_normalization():
+    from app.services.entities import normalize
+
+    assert normalize([("Андрею", "PROPN", {"Case": "Dat", "Gender": "Masc"}), ("Болконскому", "PROPN", {"Case": "Dat", "Gender": "Masc"})], "PER") == "Андрей Болконский"
+    assert normalize([("Наташи", "PROPN", {"Case": "Gen", "Gender": "Fem"}), ("Ростовой", "PROPN", {"Case": "Gen", "Gender": "Fem"})], "PER") == "Наташа Ростова"
+    assert normalize([("Лысых", "ADJ", {"Case": "Loc", "Number": "Plur"}), ("Горах", "PROPN", {"Case": "Loc", "Number": "Plur"})], "LOC") == "Лысые Горы"
+    assert normalize([("Москву", "PROPN", {"Case": "Acc"})], "LOC") == "Москва"
+    assert normalize([("газета", "NOUN", {"Case": "Nom"}), ("«", "PUNCT", {}), ("Правда", "NOUN", {}), ("»", "PUNCT", {})], "ORG") == "газета «Правда»"
+
+
+def test_semantic_math():
+    import numpy as np
+
+    from app.services.entities import spring_layout
+    from app.services.semantic import kmeans, pca2
+
+    x = np.array([[1, 0, 0], [0.9, 0.1, 0], [0, 1, 0], [0, 0.9, 0.1]], dtype=np.float32)
+    lab = kmeans(x, 2)
+    assert lab[0] == lab[1] and lab[2] == lab[3] and lab[0] != lab[2]
+    assert pca2(x).shape == (4, 2)
+    pos = spring_layout(["a", "b", "c"], [("a", "b", 3)])
+    assert set(pos) == {"a", "b", "c"} and all(abs(v) <= 1 for p in pos.values() for v in p)

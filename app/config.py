@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     #             только предложения со словами словарей и по кнопке «Точный разбор»; full — всё основным парсером
     processing_mode: str = "two_stage"
     fast_parser: str = "natasha"
+    # после разбора текста автоматически извлекать имена собственные (персоны, места, организации)
+    ner_on_ingest: bool = True
 
     # Фоновый обработчик
     worker_poll_seconds: float = 2.0

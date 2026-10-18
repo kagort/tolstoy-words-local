@@ -1,0 +1,127 @@
+{# ============================================================== СЕМАНТИКА #}
+{% if tab == 'semantic' %}
+<p class="help">Смысловая близость слов считается по векторам navec (модель распределённой семантики: слова, встречающиеся в похожих контекстах, получают близкие векторы).
+  Векторы обучены на новостных текстах, поэтому для архаичной лексики возможны неточности.</p>
+
+<div class="panel">
+  <h3 style="margin-top:0">1. Похожие по смыслу слова — кандидаты в словарь</h3>
+  <div class="row">
+    <div><label>Исходные слова (через запятую; пусто — {{ 'выбранные слова' if sel.words else 'весь словарь' }})</label>
+      <input type="text" name="seed" form="sel-form" value="{{ seed_text }}" placeholder="например: запах, аромат"></div>
+    <div class="shrink"><label class="check"><input type="checkbox" name="any" value="1" form="sel-form" {{ 'checked' if request.query_params.get('any') }}> и слова, которых нет в выборке</label></div>
+    <div class="shrink"><button type="submit" form="sel-form">Найти</button></div>
+  </div>
+  <p class="muted small">По: {{ seed_label }}.{% if sim.missing %} Нет в модели: {{ sim.missing|join(', ') }}.{% endif %}</p>
+  {% if sim['items'] %}
+  <form method="post" action="/dictionaries/{{ dict_id }}/add-words">
+    <input type="hidden" name="back" value="{{ request.url.path }}?{{ request.url.query }}">
+    <div class="word-grid" style="max-height:none">
+      {% for w in sim['items'] %}<label class="check-item" title="близость {{ w.sim }}; в выборке {{ w.count }} раз"><input type="checkbox" name="words" value="{{ w.word }}"> {{ w.word }}
+        <span class="muted small">{{ w.sim }} · {{ w.count }}</span></label>{% endfor %}
+    </div>
+    <p><button type="submit" class="small">Добавить отмеченные в словарь «{% for d in dictionaries if d.id == dict_id %}{{ d.name }}{% endfor %}»</button>
+      <span class="help">Рядом со словом: косинусная близость (до 1) и частота в выборке.</span></p>
+  </form>
+  {% else %}<p class="muted">Похожих слов не найдено.</p>{% endif %}
+</div>
+
+<div class="grid cols-2">
+  <div class="panel"><h3 style="margin-top:0">2. Смысловая карта словаря</h3>
+    {% if smap.points %}
+    <div class="row"><div class="shrink"><label>Групп</label><select name="groups" form="sel-form">{% for n in range(2, 13) %}<option {{ 'selected' if smap.k == n }}>{{ n }}</option>{% endfor %}</select></div>
+      <div class="shrink"><button type="submit" form="sel-form" class="small">Перестроить</button></div></div>
+    <div id="chart-smap" class="chart" style="min-height:440px"></div>
+    <table class="small">{% for g in smap.groups %}<tr><td class="nowrap"><strong>Группа {{ g.id }}</strong><div class="muted">связность {{ g.cohesion }}</div></td><td>{{ g.words|join(', ') }}</td></tr>{% endfor %}</table>
+    <p class="help">Близкие по смыслу слова оказываются рядом (проекция 300-мерных векторов на плоскость), цвет — автоматическая группа.
+      Группы помогают разбить словарь на категории. {% if smap.missing %}Нет в модели: {{ smap.missing|join(', ') }}.{% endif %}</p>
+    {% else %}<p class="muted">Для карты нужно хотя бы 2 слова словаря, известных модели.</p>{% endif %}
+  </div>
+
+  <div class="panel"><h3 style="margin-top:0">3. Употребления (значения) слова</h3>
+    <div class="row">
+      <div><label>Слово</label><select name="entry_id" form="sel-form">{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }} ({{ word_counts.get(e.id, 0) }})</option>{% endfor %}</select></div>
+      <div class="shrink"><label>Групп</label><select name="k" form="sel-form">{% for n in range(2, 9) %}<option {{ 'selected' if sense_k == n }}>{{ n }}</option>{% endfor %}</select></div>
+      <div class="shrink"><button type="submit" form="sel-form" class="small">Показать</button></div>
+    </div>
+    {% if senses and senses.clusters %}
+    <div id="chart-senses" class="chart" style="min-height:360px"></div>
+    <p class="help">Каждая точка — одно вхождение ({{ senses.n }}); близкие точки — похожие контексты (знаменательные слова в окне ±5). Группы часто соответствуют значениям слова или омонимам
+      («дух» — настроение / духи-запах / дух войска) либо разным темам, где слово встречается.</p>
+    {% else %}<p class="muted">Недостаточно вхождений для группировки.</p>{% endif %}
+  </div>
+</div>
+
+{% if senses and senses.clusters %}
+<div class="grid cols-2">
+  {% for c in senses.clusters %}
+  <div class="panel word-card"><h4 style="margin:0 0 6px">Группа {{ c.id }} <span class="muted small">— {{ c.size }} вхождений ({{ c.share }} %)</span></h4>
+    <div>{% for w in c.words %}<span class="chip">{{ w }}</span>{% endfor %}</div>
+    <div class="examples">{% for ex in c.examples %}<div class="example"><a class="muted small" href="/sentences/{{ ex.sentence_id }}">🌳 {{ ex.sentence_id }}</a> {{ ex.text }}</div>{% endfor %}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  {% if smap.points %}
+  const sm = {{ smap|tojson }};
+  const groups = [...new Set(sm.points.map(p => p.group))];
+  drawChart('chart-smap', groups.map(g => { const ps = sm.points.filter(p => p.group === g);
+    return { type: 'scatter', mode: 'markers+text', name: 'группа ' + g, x: ps.map(p => p.x), y: ps.map(p => p.y), text: ps.map(p => p.word),
+      textposition: 'top center', marker: { size: 11 }, hovertemplate: '%{text}<extra>группа ' + g + '</extra>' }; }),
+    { xaxis: { visible: false }, yaxis: { visible: false }, legend: { orientation: 'h', y: -0.05 }, margin: { l: 10, r: 10, t: 10, b: 10 } });
+  {% endif %}
+  {% if senses and senses.clusters %}
+  const sn = {{ senses|tojson }};
+  const cl = [...new Set(sn.points.map(p => p.cluster))].sort((a, b) => a - b);
+  drawChart('chart-senses', cl.map(c => { const ps = sn.points.filter(p => p.cluster === c);
+    return { type: 'scatter', mode: 'markers', name: 'группа ' + c, x: ps.map(p => p.x), y: ps.map(p => p.y), text: ps.map(p => p.snippet),
+      customdata: ps.map(p => p.sentence_id), marker: { size: 8, opacity: 0.75 }, hovertemplate: '%{text}<extra>группа ' + c + '</extra>' }; }),
+    { xaxis: { visible: false }, yaxis: { visible: false }, legend: { orientation: 'h', y: -0.05 }, margin: { l: 10, r: 10, t: 10, b: 10 } });
+  const el = document.getElementById('chart-senses');
+  if (el && el.on) el.on('plotly_click', ev => { const id = ev.points[0].customdata; if (id) window.open('/sentences/' + id, '_blank'); });
+  {% endif %}
+});
+</script>
+{% endif %}
+
+{# ============================================================== ТЕМЫ #}
+{% if tab == 'topics' %}
+<div class="panel row">
+  <div class="shrink"><label>Число тем</label><select name="k" form="sel-form">{% for n in range(3, 21) %}<option {{ 'selected' if tp_k == n }}>{{ n }}</option>{% endfor %}</select></div>
+  <div class="shrink"><button type="submit" form="sel-form">Построить</button></div>
+  <div class="muted small">Темы находятся автоматически (неотрицательное матричное разложение, NMF) по фрагментам текстов выборки ~1000 слов; учитываются знаменательные леммы{{ ' без стоп-слов' if sel.stop }}.
+    Название темы придумывает исследователь по её словам.</div>
+  {% if tp and tp.topics %}<div class="shrink">Скачать: <a href="/export/topics.xlsx{{ qs(request) }}">XLSX</a></div>{% endif %}
+</div>
+{% if tp_too_big %}<div class="panel muted">В выборке {{ tp_too_big }} слов — больше 3 млн. Сузьте выборку текстов (панель «Выборка»).</div>
+{% elif tp and tp.topics %}
+<p class="muted">Фрагментов: {{ tp.n_chunks }}, словарь модели: {{ tp.vocab }} лемм. {% if not sel.stop %}<span class="help">Совет: включите стоп-слова — темы станут чище.</span>{% endif %}</p>
+<div class="grid cols-2">
+  {% for t in tp.topics %}<div class="panel word-card"><h4 style="margin:0 0 6px">Тема {{ t.id }} <span class="muted small">— {{ t.share }} % выборки</span></h4>
+    <div>{% for w in t.words %}<span class="chip">{{ w }}</span>{% endfor %}</div></div>{% endfor %}
+</div>
+{% if tp.by_text|length > 1 %}
+<div class="panel"><h3 style="margin-top:0">Темы по текстам</h3><div id="chart-tp-texts" class="chart" style="min-height:{{ 160 + 26 * tp.by_text|length }}px"></div></div>
+{% elif tp.timeline %}
+<div class="panel"><h3 style="margin-top:0">Темы по ходу текста</h3><div id="chart-tp-time" class="chart" style="min-height:420px"></div></div>
+{% endif %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const tp = {{ tp|tojson }};
+  const labels = tp.topics.map(t => `тема ${t.id}: ${t.words.slice(0, 3).join(', ')}`);
+  {% if tp.by_text|length > 1 %}
+  drawChart('chart-tp-texts', [{ type: 'heatmap', z: tp.by_text.map(t => t.dist), x: labels, y: tp.by_text.map(t => t.title),
+    colorscale: 'Blues', reversescale: true, hovertemplate: '%{y}<br>%{x}: %{z} %<extra></extra>' }],
+    { xaxis: { tickangle: -30, automargin: true }, yaxis: { automargin: true }, margin: { l: 200, r: 10, t: 10, b: 140 } });
+  {% elif tp.timeline %}
+  const n = tp.timeline.length;
+  drawChart('chart-tp-time', tp.topics.map((t, j) => ({ type: 'scatter', mode: 'lines', stackgroup: 'one', name: labels[j],
+    x: tp.timeline.map((_, i) => Math.round(100 * (i + 0.5) / n)), y: tp.timeline.map(r => r[j]) })),
+    { xaxis: { title: '% текста' }, yaxis: { title: '% фрагмента', range: [0, 100] }, legend: { orientation: 'h', y: -0.2 }, margin: { l: 50, r: 10, t: 10, b: 120 } });
+  {% endif %}
+});
+</script>
+{% else %}<div class="panel muted">Слишком мало текста для тем (нужно хотя бы несколько тысяч слов).</div>{% endif %}
+{% endif %}
