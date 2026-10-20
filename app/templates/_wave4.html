@@ -1,0 +1,112 @@
+{# ============================================================== АВТОРСТВО (СТИЛОМЕТРИЯ) #}
+{% if tab == 'stylo' and sty %}
+<div class="panel row">
+  <div class="shrink"><label>Единицы</label><select name="unit" form="sel-form"><option value="text" {{ 'selected' if sty.unit == 'text' }}>целые тексты</option><option value="chunk" {{ 'selected' if sty.unit == 'chunk' }}>фрагменты текстов</option></select></div>
+  <div class="shrink"><label>Размер фрагмента, слов</label><select name="chunk" form="sel-form">{% for c in [2000, 5000, 10000, 20000] %}<option {{ 'selected' if sty.chunk == c }}>{{ c }}</option>{% endfor %}</select></div>
+  <div class="shrink"><label>Самых частых слов (MFW)</label><select name="mfw" form="sel-form">{% for n in MFW_CHOICES %}<option {{ 'selected' if sty.mfw == n }}>{{ n }}</option>{% endfor %}</select></div>
+  <div><label>Расстояние</label><select name="kind" form="sel-form">{% for k, v in DISTANCES.items() %}<option value="{{ k }}" {{ 'selected' if sty.kind == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div><label>Кто автор? — спорный текст</label><select name="target" form="sel-form"><option value="">— не выбран —</option>{% for t in sty_texts %}<option value="{{ t.id }}" {{ 'selected' if t.id == sty_target }}>{% if t.author %}{{ t.author }}, {% endif %}«{{ t.title }}»</option>{% endfor %}</select></div>
+  <div class="shrink"><button type="submit" form="sel-form">Показать</button></div>
+  {% if sty.matrix %}<div class="shrink">Скачать: <a href="/export/stylometry.xlsx{{ qs(request) }}">XLSX</a></div>{% endif %}
+</div>
+<p class="help">Метод Delta (Burrows, 2002) сравнивает тексты по относительным частотам {{ sty.mfw }} самых частых слов выборки — в основном служебных («и», «в», «не», «что»…),
+  употребление которых автор почти не контролирует. Стоп-слова здесь не применяются. Автор текста берётся из его сведений (поле «Автор»).
+  Надёжные результаты — от {{ STY_MIN_WORDS }} слов на единицу и от нескольких текстов каждого автора; фрагменты позволяют работать и с малым числом текстов.</p>
+{% if sty.error %}<div class="panel muted">{{ sty.error }}</div>{% else %}
+{% if sty.small %}<div class="flash error">Тексты короче {{ STY_MIN_WORDS }} слов (результаты по ним ненадёжны): {{ sty.small|join(', ') }}.</div>{% endif %}
+<div class="stat-tiles" style="margin-bottom:12px">
+  <div class="tile"><div class="tile-num">{{ sty.units|length }}</div><div class="tile-label">{{ 'фрагментов' if sty.unit == 'chunk' else 'текстов' }} в сравнении</div></div>
+  <div class="tile"><div class="tile-num">{{ sty.units|map(attribute='author')|unique|list|length }}</div><div class="tile-label">авторов</div></div>
+  <div class="tile"><div class="tile-num">{{ sty.purity ~ ' %' if sty.purity is not none else '—' }}</div><div class="tile-label">единиц, ближайший сосед которых — того же автора (насколько метод «узнаёт» авторов в этой выборке)</div></div>
+</div>
+{% if sty.ranking %}
+<div class="panel"><h3 style="margin-top:0">Кто автор «{{ sty.ranking.title }}»?</h3>
+  <table><tr><th>#</th><th>Автор</th><th class="num">Среднее расстояние</th><th class="num">Текстов автора</th><th class="num">Единиц</th></tr>
+    {% for r in sty.ranking.rows %}<tr><td>{{ loop.index }}</td><td>{% if loop.first %}<strong>{{ r.author }}</strong>{% else %}{{ r.author }}{% endif %}</td><td class="num">{{ r.distance }}</td><td class="num">{{ r.texts }}</td><td class="num">{{ r.units }}</td></tr>{% endfor %}
+  </table>
+  <p class="help">Чем меньше расстояние, тем ближе стиль. Отрыв первого от второго: {{ sty.ranking.margin if sty.ranking.margin is not none else '—' }}.
+    Если отрыв мал (меньше ~0,05 для Cosine Delta), атрибуция ненадёжна. Метод выбирает только среди авторов, чьи тексты есть в выборке.</p></div>
+{% endif %}
+<div class="grid cols-2">
+  <div class="panel"><h3 style="margin-top:0">Дендрограмма (кластеры по стилю)</h3><div id="chart-dendro" class="chart" style="min-height:{{ 140 + 22 * sty.units|length }}px"></div>
+    <p class="help">Чем раньше (левее) соединяются ветви, тем ближе стиль. Цвет подписи — автор.</p></div>
+  <div class="panel"><h3 style="margin-top:0">Карта текстов</h3><div id="chart-mds" class="chart" style="min-height:440px"></div>
+    <p class="help">Расстояния между точками приближённо отражают стилистические расстояния (многомерное шкалирование). Цвет — автор.</p></div>
+</div>
+{% if sty.units|length <= 60 %}<div class="panel"><h3 style="margin-top:0">Матрица расстояний</h3><div id="chart-dist" class="chart" style="min-height:{{ 160 + 20 * sty.units|length }}px"></div></div>{% endif %}
+<div class="panel table-scroll"><table><tr><th>{{ 'Фрагмент' if sty.unit == 'chunk' else 'Текст' }}</th><th>Автор</th><th class="num">Слов</th><th>Ближайший по стилю</th><th></th></tr>
+  {% for u in sty.units %}<tr><td>{{ u.label }}</td><td class="small">{{ u.author }}</td><td class="num">{{ u.n_words }}</td><td class="small">{{ u.nearest }} <span class="muted">({{ u.nearest_author }})</span></td>
+    <td>{% if u.nearest_author == u.author %}<span class="badge done">тот же автор</span>{% else %}<span class="badge warn">другой автор</span>{% endif %}</td></tr>{% endfor %}</table>
+  <details><summary class="small">Признаки: {{ sty.features|length }} самых частых слов</summary><p class="small">{{ sty.features|join(', ') }}</p></details>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const st = {{ sty|tojson }};
+  const authors = [...new Set(st.units.map(u => u.author))];
+  const palette = ['#2f5fb3', '#d1495b', '#2a9d8f', '#e9a23b', '#7b5ea7', '#4a7c59', '#c06c84', '#3d5a80', '#8d6e63', '#00838f'];
+  const colorOf = a => palette[authors.indexOf(a) % palette.length];
+  const order = st.dendro.order;
+  const segs = st.dendro.segments.map(s => ({ type: 'scatter', mode: 'lines', x: [s[0], s[2]], y: [s[1], s[3]], line: { color: cssVar('--muted'), width: 1.4 }, hoverinfo: 'skip', showlegend: false }));
+  segs.push({ type: 'scatter', mode: 'markers', x: order.map(() => 0), y: order.map((_, i) => i), marker: { size: 9, color: order.map(i => colorOf(st.units[i].author)) },
+    text: order.map(i => `${st.units[i].label} — ${st.units[i].author}`), hovertemplate: '%{text}<extra></extra>', showlegend: false });
+  drawChart('chart-dendro', segs, { xaxis: { title: 'расстояние', zeroline: false }, margin: { l: 220, r: 10, t: 10, b: 40 },
+    yaxis: { tickvals: order.map((_, i) => i), ticktext: order.map(i => st.units[i].label), automargin: true, autorange: 'reversed' } });
+  drawChart('chart-mds', authors.map(a => { const idx = st.units.map((u, i) => i).filter(i => st.units[i].author === a);
+    return { type: 'scatter', mode: st.units.length > 25 ? 'markers' : 'markers+text', name: a, x: idx.map(i => st.map[i].x), y: idx.map(i => st.map[i].y), text: idx.map(i => st.units[i].label),
+      textposition: 'top center', marker: { size: 10, color: colorOf(a) }, hovertemplate: '%{text}<extra>' + a + '</extra>' }; }),
+    { xaxis: { visible: false }, yaxis: { visible: false }, legend: { orientation: 'h', y: -0.05 }, margin: { l: 10, r: 10, t: 10, b: 10 } });
+  if (document.getElementById('chart-dist')) {
+    drawChart('chart-dist', [{ type: 'heatmap', z: st.matrix, x: st.units.map(u => u.label), y: st.units.map(u => u.label), colorscale: 'Blues',
+      hovertemplate: '%{y} — %{x}: %{z}<extra></extra>' }], { xaxis: { tickangle: -45, automargin: true }, yaxis: { automargin: true, autorange: 'reversed' }, margin: { l: 200, r: 10, t: 10, b: 160 } });
+  }
+});
+</script>
+{% endif %}
+{% endif %}
+
+{# ============================================================== СРАВНЕНИЕ ТЕКСТОВ #}
+{% if tab == 'textcmp' %}
+<div class="panel">
+  <label>Тексты для сравнения (2–5, из выборки)</label>
+  <div class="word-grid" style="max-height:180px">{% for t in tc_texts %}<label class="check-item"><input type="checkbox" name="cmp" value="{{ t.id }}" form="sel-form" {{ 'checked' if t.id in tc_chosen }}>
+    {% if t.author %}{{ t.author }}, {% endif %}«{{ t.title }}» <span class="muted small">{{ t.n_words }} сл.</span></label>{% endfor %}</div>
+  <p><button type="submit" form="sel-form">Сравнить</button>{% if tc and tc.texts|length > 1 %} · Скачать: <a href="/export/textcmp.xlsx{{ qs(request) }}">XLSX</a>{% endif %}</p>
+</div>
+{% if tc and tc.texts|length > 1 %}
+<div class="grid cols-2">
+  <div class="panel"><h3 style="margin-top:0">Лепестковая диаграмма</h3><div id="chart-radar" class="chart" style="min-height:480px"></div>
+    <p class="help">Каждая ось — метрика; 0 — наименьшее значение среди сравниваемых текстов, 1 — наибольшее. Показывает профиль текста, а не «лучше/хуже».</p></div>
+  <div class="panel table-scroll"><h3 style="margin-top:0">Метрики</h3>
+    <table><tr><th>Метрика</th>{% for t in tc.texts %}<th class="num">{{ t.title }}</th>{% endfor %}</tr>
+      {% for r in tc.rows %}<tr><td class="small">{{ r.label }}</td>{% for v in r['values'] %}<td class="num">{{ v if v is not none else '—' }}</td>{% endfor %}</tr>{% endfor %}
+    </table></div>
+</div>
+<div class="grid cols-2">
+  <div class="panel"><h3 style="margin-top:0">Общая и особая лексика</h3>
+    <p class="small"><strong>Общие частотные слова всех текстов:</strong> {% for w in tc.common %}<span class="chip">{{ w }}</span>{% else %}<span class="muted">нет</span>{% endfor %}</p>
+    {% for t in tc.texts %}<p class="small"><strong>Только в «{{ t.title }}»</strong> (среди 300 частотных): {% for w in tc.unique[loop.index0] %}<span class="chip">{{ w }}</span>{% else %}<span class="muted">—</span>{% endfor %}</p>{% endfor %}
+    <p class="help">Знаменательные леммы из 300 самых частых в каждом тексте{% if sel.stop %}, без стоп-слов{% endif %}.</p></div>
+  <div class="panel"><h3 style="margin-top:0">Ключевые слова каждого текста против остальных</h3>
+    {% for t in tc.texts %}<p class="small"><strong>«{{ t.title }}»:</strong> {% for w in tc.keywords[loop.index0] %}<span class="chip">{{ w }}</span>{% else %}<span class="muted">значимых нет</span>{% endfor %}</p>{% endfor %}
+    <p class="help">Значимо чаще (G² ≥ 3,84), чем в остальных сравниваемых текстах.</p></div>
+</div>
+<div class="grid cols-2">
+  <div class="panel"><h3 style="margin-top:0">Пересечение частотной лексики (Жаккар)</h3><div id="chart-jac" class="chart" style="min-height:{{ 160 + 40 * tc.texts|length }}px"></div>
+    <p class="help">Доля общих слов среди 300 частотных знаменательных лемм двух текстов (1 — одинаковые).</p></div>
+  {% if tc.delta %}<div class="panel"><h3 style="margin-top:0">Стилометрическое расстояние (Cosine Delta)</h3><div id="chart-delta" class="chart" style="min-height:{{ 160 + 40 * tc.texts|length }}px"></div>
+    <p class="help">По 100 самым частым словам (см. вкладку «Авторство»): чем меньше, тем ближе стиль.</p></div>{% endif %}
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const tc = {{ tc|tojson }};
+  const names = tc.texts.map(t => t.title);
+  drawChart('chart-radar', tc.radar.series.map(s => ({ type: 'scatterpolar', r: s.values.concat([s.values[0]]), theta: tc.radar.labels.concat([tc.radar.labels[0]]),
+    name: s.title, fill: 'toself', opacity: 0.55 })), { polar: { radialaxis: { range: [0, 1], showticklabels: false } }, legend: { orientation: 'h', y: -0.1 }, margin: { l: 60, r: 60, t: 30, b: 60 } });
+  drawChart('chart-jac', [{ type: 'heatmap', z: tc.jaccard, x: names, y: names, colorscale: 'Blues', reversescale: true, zmin: 0, zmax: 1, hovertemplate: '%{y} — %{x}: %{z}<extra></extra>' }],
+    { yaxis: { automargin: true, autorange: 'reversed' }, xaxis: { automargin: true }, margin: { l: 160, r: 10, t: 10, b: 100 } });
+  if (tc.delta) drawChart('chart-delta', [{ type: 'heatmap', z: tc.delta, x: names, y: names, colorscale: 'Blues', hovertemplate: '%{y} — %{x}: %{z}<extra></extra>' }],
+    { yaxis: { automargin: true, autorange: 'reversed' }, xaxis: { automargin: true }, margin: { l: 160, r: 10, t: 10, b: 100 } });
+});
+</script>
+{% elif tc %}<div class="panel muted">Отметьте хотя бы два текста.</div>{% endif %}
+{% endif %}

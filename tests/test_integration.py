@@ -345,6 +345,32 @@ def test_selection_report_stopwords(client):
     assert client.post("/entities/extract", data={"text_ids": [str(texts["Дым"])]}, follow_redirects=False).status_code == 303
     run_jobs()
 
+    # волна 4: авторство, сравнение текстов, проверка на признаки машинного текста
+    from app.services import aicheck as C
+    from app.services.stylometry import analyze
+    from app.services.textcompare import compare
+
+    with SessionLocal() as s:
+        st = analyze(s, all_ids, mfw=50, unit="text", target=texts["Сирень"])
+        assert st["matrix"] and len(st["units"]) == len(all_ids) and st["ranking"]["rows"]
+        assert "Нужно хотя бы 3" in analyze(s, all_ids[:2], unit="text").get("error", "")
+        tc = compare(s, all_ids[:3])
+        assert len(tc["texts"]) == 3 and tc["rows"] and tc["delta"] and len(tc["jaccard"]) == 3
+        rep = C.report(s, C.parse_raw("Короткий текст про запах сирени."))
+        assert not rep["enough"] and rep["rows"]
+        assert rep["model"]["ok"] is False  # в тестовой базе мало образцов — калибровки нет, вердикта нет
+    for tab, extra in (("stylo", "&mfw=50"), ("stylo", f"&unit=chunk&chunk=2000&target={texts['Сирень']}"), ("textcmp", ""),
+                       ("textcmp", f"&cmp={texts['Сирень']}&cmp={texts['Дым']}")):
+        r = client.get(f"/analysis?tab={tab}&{base}{extra}")
+        assert r.status_code == 200, (tab, extra)
+    r = client.post("/check", data={"text": "Важно отметить, что запах играет ключевую роль. " * 80})
+    assert r.status_code == 200 and "Отчёт" in r.text and "не откалибрована" in r.text
+    assert client.get(f"/check?text_id={texts['Сирень']}").status_code == 200
+    assert client.post("/check", files={"file": ("a.txt", "Запах сирени.".encode("utf-8"), "text/plain")}).status_code == 200
+    for url in (f"/export/stylometry.xlsx?{base}&mfw=50", f"/export/textcmp.xlsx?{base}"):
+        r = client.get(url)
+        assert r.status_code == 200 and len(r.content) > 50, url
+
     # страница задач: удаление выполненных
     assert client.get("/jobs").status_code == 200
     assert client.post("/jobs/clear", data={"what": "finished"}, follow_redirects=False).status_code == 303

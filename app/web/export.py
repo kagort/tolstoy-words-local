@@ -366,6 +366,46 @@ def export_topics(fmt: str, request: Request, db: Session = Depends(get_session)
     return _send(frames, fmt, "topics", _params(db, request) | {"Тем": tp["k"], "Фрагментов": tp["n_chunks"]})
 
 
+@router.get("/stylometry.{fmt}")
+def export_stylometry(fmt: str, request: Request, db: Session = Depends(get_session)):
+    if fmt not in FORMATS:
+        raise HTTPException(400)
+    from app.web.pages import _stylo_context
+
+    st = _stylo_context(db, request, _selection(db, request))["sty"]
+    if not st.get("matrix"):
+        raise HTTPException(404, st.get("error") or "Нет данных")
+    labels = [u["label"] for u in st["units"]]
+    frames = {"Единицы": pd.DataFrame([{"Единица": u["label"], "Автор": u["author"], "Слов": u["n_words"], "Ближайший": u["nearest"],
+                                        "Автор ближайшего": u["nearest_author"]} for u in st["units"]]),
+              "Расстояния": pd.DataFrame(st["matrix"], index=labels, columns=labels).reset_index().rename(columns={"index": "Единица"}),
+              "Признаки (MFW)": pd.DataFrame({"Слово": st["features"]})}
+    if st.get("ranking"):
+        frames["Кто автор"] = pd.DataFrame(st["ranking"]["rows"]).rename(columns={"author": "Автор", "distance": "Среднее расстояние",
+                                                                                  "units": "Единиц", "texts": "Текстов"})
+    return _send(frames, fmt, "stylometry", _params(db, request) | {"MFW": st["mfw"], "Расстояние": st["kind"], "Единицы": st["unit"],
+                                                                    "Точность ближайшего соседа, %": st.get("purity")})
+
+
+@router.get("/textcmp.{fmt}")
+def export_textcmp(fmt: str, request: Request, db: Session = Depends(get_session)):
+    if fmt not in FORMATS:
+        raise HTTPException(400)
+    from app.web.pages import _textcmp_context
+
+    tc = _textcmp_context(db, request, _selection(db, request))["tc"]
+    if not tc:
+        raise HTTPException(404)
+    names = [t["title"] for t in tc["texts"]]
+    frames = {"Метрики": pd.DataFrame([{"Метрика": r["label"], **dict(zip(names, r["values"]))} for r in tc["rows"]]),
+              "Лексика": pd.DataFrame([{"Текст": n, "Только в этом тексте": ", ".join(u), "Ключевые слова": ", ".join(k)}
+                                       for n, u, k in zip(names, tc["unique"], tc["keywords"])]),
+              "Жаккар": pd.DataFrame(tc["jaccard"], index=names, columns=names).reset_index().rename(columns={"index": "Текст"})}
+    if tc["delta"]:
+        frames["Cosine Delta"] = pd.DataFrame(tc["delta"], index=names, columns=names).reset_index().rename(columns={"index": "Текст"})
+    return _send(frames, fmt, "textcmp", _params(db, request))
+
+
 @router.get("/hits.conllu")
 def export_hits_conllu(request: Request, db: Session = Depends(get_session)):
     qp = request.query_params
