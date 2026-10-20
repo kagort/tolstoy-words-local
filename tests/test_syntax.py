@@ -297,3 +297,28 @@ def test_semantic_math():
     assert pca2(x).shape == (4, 2)
     pos = spring_layout(["a", "b", "c"], [("a", "b", 3)])
     assert set(pos) == {"a", "b", "c"} and all(abs(v) <= 1 for p in pos.values() for v in p)
+
+
+def test_stylometry_math_and_ai_features():
+    import numpy as np
+
+    from app.services.aicheck import _logreg, _mattr, features
+    from app.services.stylometry import dendrogram_coords, distance_matrix, mds2, upgma, zscores
+
+    words = [["и", "в", "не", "что"] * 50, ["и", "в", "не", "что"] * 49 + ["он"] * 4, ["он", "она", "был"] * 60]
+    z, feats = zscores(words, 5)
+    d = distance_matrix(z, "cosine")
+    assert d.shape == (3, 3) and d[0, 1] < d[0, 2] and abs(d[0, 0]) < 1e-9
+    assert distance_matrix(z, "burrows")[0, 1] < distance_matrix(z, "burrows")[0, 2]
+    m = upgma(d)
+    assert m[0][:2] == (0, 1) and len(dendrogram_coords(m, 3)["segments"]) == 6 and mds2(d).shape == (3, 2)
+    x = np.array([[0.0], [0.1], [0.9], [1.0]])
+    w, b = _logreg((x - 0.5) / 0.4, np.array([0, 0, 1, 1]))
+    assert w[0] > 0
+    assert _mattr(["а", "б"] * 100, window=10) == 0.2
+    s = [{"paragraph": 0, "text": "Важно отметить, что запах играет ключевую роль.",
+          "tokens": [("Важно", "важно", "ADV", {}), ("отметить", "отметить", "VERB", {}), (",", ",", "PUNCT", {}), ("что", "что", "SCONJ", {}),
+                     ("запах", "запах", "NOUN", {}), ("играет", "играть", "VERB", {}), ("ключевую", "ключевой", "ADJ", {}),
+                     ("роль", "роль", "NOUN", {}), (".", ".", "PUNCT", {})]}]
+    f = features(s)
+    assert f["n_words"] == 7 and f["markers"] > 0 and f["commas"] > 0

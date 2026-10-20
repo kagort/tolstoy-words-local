@@ -91,7 +91,7 @@
 </form>
 
 <div class="tabs">
-  {% for key, label in [('overview', 'Обзор'), ('report', '📋 Отчёт'), ('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('colloc', 'Коллокации'), ('keywords', 'Ключевые слова'), ('map', 'Карта текста'), ('entities', 'Имена'), ('semantic', 'Семантика'), ('topics', 'Темы'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
+  {% for key, label in [('overview', 'Обзор'), ('report', '📋 Отчёт'), ('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('colloc', 'Коллокации'), ('keywords', 'Ключевые слова'), ('map', 'Карта текста'), ('entities', 'Имена'), ('semantic', 'Семантика'), ('topics', 'Темы'), ('stylo', 'Авторство'), ('textcmp', 'Сравнение текстов'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
   <a class="{{ 'active' if tab == key }}" href="/analysis?tab={{ key }}&dictionary_id={{ dict_id }}&{{ sel.query() }}{% if entry_id and key in ('profile','conc','structure','compare','colloc','semantic') %}&entry_id={{ entry_id }}{% endif %}">{{ label }}</a>
   {% endfor %}
 </div>
@@ -143,6 +143,7 @@
 {% include "_wave2.html" %}
 {% include "_entities.html" %}
 {% include "_semantic.html" %}
+{% include "_wave4.html" %}
 
 {# ============================================================== ЧАСТОТЫ #}
 {% if tab == 'freq' and freq %}

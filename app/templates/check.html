@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Проверка текста{% endblock %}
+{% block head %}<script src="/static-vendor/plotly.min.js"></script>{% endblock %}
+{% block content %}
+<h1>Проверка текста: признаки машинной генерации</h1>
+<div class="flash info"><strong>Это не доказательство.</strong> Отчёт показывает, насколько текст по набору объяснимых стилистических признаков
+  похож на тексты, которые в вашей базе помечены как «сгенерирован нейросетью», и на остальные тексты. Такие оценки ошибаются в обе стороны:
+  ровный «правильный» стиль школьника или неносителя языка может выглядеть «машинным», а отредактированный текст модели — «человеческим».
+  Используйте отчёт как повод для разговора, а не для оценки работы.</div>
+
+<div class="grid cols-2">
+  <form class="panel" method="post" action="/check" enctype="multipart/form-data">
+    <h3 style="margin-top:0">Вставьте текст или загрузите файл</h3>
+    <textarea name="text" rows="10" placeholder="Текст работы (от {{ MIN_WORDS }} слов; лучше 500 и больше)">{{ pasted }}</textarea>
+    <label>или файл .txt / .docx / .fb2</label><input type="file" name="file" accept=".txt,.docx,.fb2">
+    <p><button type="submit">Проверить</button> <span class="help">Текст не сохраняется в базе.</span></p>
+  </form>
+  <form class="panel" method="get" action="/check">
+    <h3 style="margin-top:0">…или текст из базы</h3>
+    <select name="text_id">{% for t in texts %}<option value="{{ t.id }}" {{ 'selected' if t.id == text_id }}>{% if t.author %}{{ t.author }}, {% endif %}«{{ t.title }}»{{ ' — нейросеть' if t.source_type == 'generated' }}</option>{% endfor %}</select>
+    <p><button type="submit" class="secondary">Проверить</button></p>
+    <p class="help">Модель калибруется на текстах базы с типом «сгенерирован нейросетью» и «литература / естественный» (по фрагментам ~400 слов).
+      Чем больше и разнообразнее эти тексты по жанрам, тем честнее оценка. Тип текста задаётся при загрузке или в карточке текста.</p>
+  </form>
+</div>
+
+{% if rep %}
+{% set m = rep.model %}
+<div class="panel report-head">
+  <h2 style="margin:0 0 6px">Отчёт: {{ label }}</h2>
+  <div class="muted">{{ rep.n_words }} слов, {{ rep.features.n_sentences or 0 }} предложений{% if rep.n_parts %}, проверено фрагментов по ~400 слов: {{ rep.n_parts }}{% endif %}.</div>
+  {% if not rep.enough %}
+  <div class="flash error" style="margin-top:10px">Слишком короткий текст ({{ rep.n_words }} слов &lt; {{ MIN_WORDS }}): статистические признаки на таком объёме ненадёжны, общая оценка не выводится. Ниже — только значения признаков.</div>
+  {% elif not m.ok %}
+  <div class="flash error" style="margin-top:10px">Модель не откалибрована: в базе нужно хотя бы по ~4000 слов текстов с типом «сгенерирован нейросетью» и «литература / естественный»
+    (сейчас фрагментов: нейросеть — {{ m.n_ai }}, люди — {{ m.n_human }}). Загрузите образцы и повторите.</div>
+  {% elif rep.prob is not none %}
+  <div class="stat-tiles">
+    <div class="tile"><div class="tile-num">{{ rep.level }}</div><div class="tile-label">признаков, типичных для текстов нейросетей в вашей базе</div></div>
+    <div class="tile"><div class="tile-num">{{ rep.prob }} %</div><div class="tile-label">сходство с нейросетевыми образцами{% if rep.n_parts > 1 %} (по фрагментам: {{ rep.prob_lo }}–{{ rep.prob_hi }} %){% endif %}</div></div>
+    <div class="tile"><div class="tile-num">{{ m.cv_accuracy if m.cv_accuracy is not none else '—' }}{{ ' %' if m.cv_accuracy is not none }}</div><div class="tile-label">точность модели на ваших текстах (перекрёстная проверка по текстам)</div></div>
+    <div class="tile"><div class="tile-num">{{ m.texts_ai }} / {{ m.texts_human }}</div><div class="tile-label">текстов-образцов: нейросеть / люди</div></div>
+  </div>
+  {% if m.texts_ai < 5 or m.texts_human < 5 %}<p class="help" style="color:var(--err)">Образцов мало ({{ m.texts_ai }} и {{ m.texts_human }} текстов). Если тексты людей и нейросетей в базе различаются жанром, темой или эпохой, модель различает именно их,
+    а точность завышена. Для работы с ученическими текстами загрузите образцы того же жанра: сочинения, написанные людьми, и сочинения, сгенерированные моделями.</p>{% endif %}
+  {% endif %}
+</div>
+
+<div class="panel table-scroll"><h3 style="margin-top:0">Признаки (по силе влияния на оценку)</h3>
+  {% if m.ok %}<div id="chart-feat" class="chart" style="min-height:{{ 120 + 28 * rep.rows|length }}px"></div>{% endif %}
+  <table>
+    <tr><th>Признак</th><th class="num">Этот текст</th>{% if m.ok %}<th class="num">Тексты людей (среднее)</th><th class="num">Тексты нейросетей</th><th>Ближе к</th>{% endif %}<th>Что значит</th></tr>
+    {% for r in rep.rows %}
+    <tr><td>{{ r.label }}</td><td class="num"><strong>{{ r.value if r.value is not none else '—' }}</strong></td>
+      {% if m.ok %}<td class="num">{{ r.human }}</td><td class="num">{{ r.ai }}</td>
+      <td class="small">{% if r.position is defined and r.position is not none %}{% if r.position >= 0.65 %}<span class="badge error">нейросетям</span>{% elif r.position <= 0.35 %}<span class="badge done">людям</span>{% else %}<span class="badge">посередине</span>{% endif %}{% endif %}</td>{% endif %}
+      <td class="small muted">{{ r.help }}</td></tr>
+    {% endfor %}
+  </table>
+  <p class="help">«Ближе к» — где значение лежит между средним по текстам людей и по текстам нейросетей в вашей базе. Шкала на графике: 0 — как у людей, 1 — как у нейросетей.
+    Список шаблонных связок — файл <code>app/data/ai_markers_ru.txt</code>.</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if rep and rep.model.ok %}
+<script>
+(function () {
+  const rows = {{ rep.rows|tojson }}.filter(r => r.position !== undefined && r.position !== null).reverse();
+  drawChart('chart-feat', [{ type: 'bar', orientation: 'h', y: rows.map(r => r.label), x: rows.map(r => r.position),
+    marker: { color: rows.map(r => r.position >= 0.65 ? cssVar('--err') : (r.position <= 0.35 ? cssVar('--ok') : cssVar('--muted'))) },
+    customdata: rows.map(r => [r.value, r.human, r.ai]),
+    hovertemplate: '%{y}<br>этот текст: %{customdata[0]}<br>люди: %{customdata[1]}, нейросети: %{customdata[2]}<extra></extra>' }],
+    { xaxis: { range: [-0.25, 1.25], tickvals: [0, 0.5, 1], ticktext: ['как у людей', '', 'как у нейросетей'] },
+      yaxis: { automargin: true }, margin: { l: 300, r: 20, t: 10, b: 40 },
+      shapes: [0, 1].map(x => ({ type: 'line', x0: x, x1: x, y0: 0, y1: 1, yref: 'paper', line: { dash: 'dot', color: cssVar('--muted') } })) });
+})();
+</script>
+{% endif %}
+{% endblock %}

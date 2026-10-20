@@ -774,6 +774,33 @@ def dictionary_add_words(request: Request, dict_id: int, words: list[str] = Form
     return redirect(back if back.startswith("/") else f"/dictionaries/{dict_id}")
 
 
+def _stylo_context(db: Session, request: Request, sel) -> dict:
+    from app.services import stylometry as ST
+
+    qp = request.query_params
+    unit = qp.get("unit") if qp.get("unit") in ("text", "chunk") else ("chunk" if len(sel.ids) < 4 else "text")
+    chunk = _int(qp.get("chunk")) or 5000
+    chunk = chunk if chunk in (2000, 5000, 10000, 20000) else 5000
+    target = _int(qp.get("target"))
+    res = ST.analyze(db, sel.ids, mfw=_int(qp.get("mfw")) or 100, kind=qp.get("kind") or "cosine", unit=unit, chunk=chunk,
+                     target=target if target in sel.ids else None)
+    texts = list(db.execute(select(TextDoc.id, TextDoc.title, TextDoc.author).where(TextDoc.id.in_(sel.ids or [-1]))
+                            .order_by(TextDoc.author, TextDoc.title)))
+    return {"sty": res, "sty_texts": texts, "sty_target": target, "MFW_CHOICES": ST.MFW_CHOICES, "DISTANCES": ST.DISTANCES,
+            "STY_MIN_WORDS": ST.MIN_WORDS}
+
+
+def _textcmp_context(db: Session, request: Request, sel) -> dict:
+    from app.services.textcompare import compare
+
+    chosen = [int(x) for x in request.query_params.getlist("cmp") if x.isdigit() and int(x) in sel.ids][:5]
+    if not chosen:
+        chosen = sel.ids[:4]
+    texts = list(db.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.n_words).where(TextDoc.id.in_(sel.ids or [-1]))
+                            .order_by(TextDoc.author, TextDoc.title)))
+    return {"tc": compare(db, chosen, sel.stopset) if len(chosen) >= 1 else None, "tc_texts": texts, "tc_chosen": chosen}
+
+
 @router.get("/api/entities/mentions")
 def entity_mentions(request: Request, db: Session = Depends(get_session)):
     from app.services.entities import mentions
@@ -847,6 +874,10 @@ def analysis(request: Request, db: Session = Depends(get_session)):
         ctx.update(_semantic_context(db, request, dict_id, sel, entry_id))
     elif tab == "topics":
         ctx.update(_topics_context(db, request, sel))
+    elif tab == "stylo":
+        ctx.update(_stylo_context(db, request, sel))
+    elif tab == "textcmp":
+        ctx.update(_textcmp_context(db, request, sel))
     elif tab == "freq":
         # отмеченные слова — только они (переключатель all_words показывает весь словарь)
         words = None if qp.get("all_words") else (sel.words or None)
@@ -981,6 +1012,50 @@ def sentence_precise(request: Request, sentence_id: int, db: Session = Depends(g
         db.commit()
         flash(request, "Точный разбор поставлен в очередь — обновите страницу через минуту", "success")
     return redirect(f"/sentences/{sentence_id}")
+
+
+# ------------------------------------------------------------------ проверка текста на признаки машинного текста
+
+
+@router.get("/check")
+def check_page(request: Request, text_id: str | None = None, db: Session = Depends(get_session)):
+    from app.services import aicheck as C
+
+    rep, label = None, ""
+    tid = _int(text_id)
+    if tid:
+        doc = db.get(TextDoc, tid)
+        if doc is not None and doc.status == "ready":
+            sents = C.db_sentences(db, tid, limit_words=20000)
+            rep, label = C.report(db, sents), f"«{doc.title}»" + (" (первые ~20 тыс. слов)" if (doc.n_words or 0) > 20000 else "")
+    texts = list(db.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.source_type)
+                            .where(TextDoc.status == "ready").order_by(TextDoc.title)))
+    return render(request, "check.html", rep=rep, label=label, texts=texts, text_id=tid, pasted="", MIN_WORDS=C.MIN_WORDS)
+
+
+@router.post("/check")
+async def check_submit(request: Request, text: str = Form(""), file: UploadFile | None = File(None), db: Session = Depends(get_session)):
+    from app.nlp.normalize import extract_text
+    from app.services import aicheck as C
+
+    body, label = text.strip(), "вставленный текст"
+    if file is not None and file.filename:
+        try:
+            body = extract_text(file.filename, await file.read()).strip()
+            label = f"файл «{file.filename}»"
+        except Exception as exc:  # noqa: BLE001
+            flash(request, f"Файл не прочитан: {exc}", "error")
+    if not body:
+        flash(request, "Вставьте текст или выберите файл", "error")
+        return redirect("/check")
+    words = body.split()
+    if len(words) > 20000:
+        body = " ".join(words[:20000])
+        label += " (первые 20 тыс. слов)"
+    rep = C.report(db, C.parse_raw(body))
+    texts = list(db.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.source_type)
+                            .where(TextDoc.status == "ready").order_by(TextDoc.title)))
+    return render(request, "check.html", rep=rep, label=label, texts=texts, text_id=None, pasted=text, MIN_WORDS=C.MIN_WORDS)
 
 
 # ------------------------------------------------------------------ задачи
