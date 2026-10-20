@@ -192,7 +192,28 @@ def text_detail(request: Request, text_id: int, page: int = 1, db: Session = Dep
                             .offset((page - 1) * per_page).limit(per_page)))
     corpora = list(db.scalars(select(Corpus).order_by(Corpus.name)))
     pages_n = max(1, -(-(doc.n_sentences or 0) // per_page))
-    return render(request, "text_detail.html", doc=doc, sents=sents, corpora=corpora, page=page, pages=pages_n)
+    from app.services.deepparse import parse_levels
+
+    pending = db.scalar(select(Job.id).where(Job.kind == "deepparse", Job.status.in_(["queued", "running"]),
+                                            Job.params["text_id"].as_integer() == text_id))
+    return render(request, "text_detail.html", doc=doc, sents=sents, corpora=corpora, page=page, pages=pages_n,
+                  levels=parse_levels(db, text_id), precise_pending=bool(pending))
+
+
+@router.post("/texts/{text_id}/precise")
+def text_precise(request: Request, text_id: int, db: Session = Depends(get_session)):
+    """Точный разбор всех предложений текста основным парсером (ступень 2 для всего текста)."""
+    doc = db.get(TextDoc, text_id)
+    if doc is None:
+        raise HTTPException(404)
+    busy = db.scalar(select(Job.id).where(Job.kind == "deepparse", Job.status.in_(["queued", "running"]),
+                                         Job.params["text_id"].as_integer() == text_id))
+    if not busy:
+        enqueue(db, "deepparse", {"text_id": text_id}, title=f"Точный разбор всего текста «{doc.title}»")
+        db.commit()
+        flash(request, "Точный разбор всего текста поставлен в очередь (прогресс — на странице «Задачи»). "
+                       "После него словари пересчитаются, а портрет обновится.", "success")
+    return redirect(f"/texts/{text_id}")
 
 
 @router.get("/texts/{text_id}/stats")
@@ -248,12 +269,27 @@ def text_reparse(request: Request, text_id: int, db: Session = Depends(get_sessi
 
 @router.post("/texts/{text_id}/delete")
 def text_delete(request: Request, text_id: int, db: Session = Depends(get_session)):
-    doc = db.get(TextDoc, text_id)
-    if doc is not None:
-        db.execute(delete(Hit).where(Hit.text_id == text_id))
-        db.delete(doc)
-        db.commit()
-        flash(request, f"Текст «{doc.title}» удалён", "success")
+    return _delete_texts(request, db, [text_id])
+
+
+@router.post("/texts/delete")
+def texts_delete(request: Request, text_ids: list[str] = Form([]), db: Session = Depends(get_session)):
+    """Удаление нескольких отмеченных текстов со всеми связями."""
+    return _delete_texts(request, db, [int(t) for t in text_ids if t.isdigit()])
+
+
+def _delete_texts(request: Request, db: Session, ids: list[int]):
+    from app.services.textdelete import request_delete
+
+    if not ids:
+        flash(request, "Не отмечено ни одного текста", "error")
+        return redirect("/texts")
+    job = request_delete(db, ids)
+    db.commit()
+    if job:
+        n = len(job.params["text_ids"])
+        flash(request, f"Удаление {n} текст(ов) со всеми связями поставлено в очередь — они уже не участвуют в анализе. "
+                       "Большой текст удаляется до минуты (прогресс — на странице «Задачи»).", "success")
     return redirect("/texts")
 
 
@@ -303,12 +339,19 @@ def corpus_update(request: Request, corpus_id: int, name: str = Form(...), descr
 
 
 @router.post("/corpora/{corpus_id}/delete")
-def corpus_delete(request: Request, corpus_id: int, db: Session = Depends(get_session)):
+def corpus_delete(request: Request, corpus_id: int, with_texts: str | None = Form(None), db: Session = Depends(get_session)):
     c = db.get(Corpus, corpus_id)
     if c:
+        ids = [t.id for t in c.texts]
         db.delete(c)
+        if with_texts and ids:
+            from app.services.textdelete import request_delete
+
+            request_delete(db, ids)
+            flash(request, f"Корпус удалён; удаление его текстов ({len(ids)}) со всеми связями поставлено в очередь", "success")
+        else:
+            flash(request, "Корпус удалён (тексты остались в базе)", "success")
         db.commit()
-        flash(request, "Корпус удалён (тексты остались в базе)", "success")
     return redirect("/corpora")
 
 
@@ -584,6 +627,199 @@ def _report_context(db: Session, request: Request, dict_id: int, sel) -> dict:
             "rep_default_words": not sel.words, "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
 
 
+def _default_entry(db: Session, dict_id: int, sel, text_ids: list[int]) -> int | None:
+    if sel.words:
+        return sel.words[0]
+    rows = [r for r in A.frequency(db, dict_id, text_ids)["rows"] if r["count"]]
+    return rows[0]["entry_id"] if rows else None
+
+
+def colloc_params(qp) -> dict:
+    return {"mode": qp.get("mode") or "window", "window": _int(qp.get("window")) or 3, "pos": qp.get("pos") or "content",
+            "min_count": _int(qp.get("min_count")) or 2, "sort": qp.get("sort") or "logdice"}
+
+
+def _colloc_context(db: Session, request: Request, dict_id: int, sel, entry_id: int | None) -> dict:
+    from app.services.collocations import MODES, POS_GROUPS, collocations, orbit_layout
+    from app.services.stats import MEASURE_HELP, MEASURES
+
+    p = colloc_params(request.query_params)
+    entry_id = entry_id or _default_entry(db, dict_id, sel, sel.ids)
+    col = collocations(db, entry_id, sel.ids, stop=sel.stopset, **p) if entry_id else None
+    matrix = None
+    if col and col["rows"]:
+        keys = [k for k in MEASURES if k != "count"]
+        top_rows = col["rows"][:25]
+        # ранг внутри каждой меры (0 — худший, 1 — лучший) для тепловой карты «коллокат × мера»
+        z = []
+        for r in top_rows:
+            line = []
+            for k in keys:
+                vals = sorted(x.get(k) for x in top_rows if x.get(k) is not None)
+                v = r.get(k)
+                line.append(round(vals.index(v) / max(len(vals) - 1, 1), 3) if v is not None and len(vals) > 1 else None)
+            z.append(line)
+        matrix = {"lemmas": [r["lemma"] + (f" ({r['rel']})" if r["rel"] else "") for r in top_rows],
+                  "measures": [MEASURES[k] for k in keys], "z": z,
+                  "values": [[r.get(k) for k in keys] for r in top_rows]}
+    return {"col": col, "col_params": p, "entry_id": entry_id, "orbit": orbit_layout(col["rows"][:30], p["sort"]) if col else [],
+            "matrix": matrix, "MEASURES": MEASURES, "MEASURE_HELP": MEASURE_HELP, "COLLOC_MODES": MODES, "POS_GROUPS": POS_GROUPS}
+
+
+def _keywords_context(db: Session, request: Request, sel) -> dict:
+    from app.services.collocations import POS_GROUPS
+    from app.services.keywords import MAX_TFIDF_TEXTS, keywords, reference_ids, tfidf_by_text
+
+    qp = request.query_params
+    ref = qp.get("ref") or ""
+    pos = qp.get("pos") or "content"
+    min_count = _int(qp.get("min_count")) or 3
+    ref_ids, ref_label = reference_ids(db, sel.ids, ref)
+    return {"kw": keywords(db, sel.ids, ref_ids, pos=pos, min_count=min_count, stop=sel.stopset),
+            "tfidf": tfidf_by_text(db, sel.ids, pos=pos, stop=sel.stopset), "kw_ref": ref, "kw_ref_label": ref_label,
+            "kw_pos": pos, "kw_min": min_count, "POS_GROUPS": POS_GROUPS, "MAX_TFIDF_TEXTS": MAX_TFIDF_TEXTS}
+
+
+def _map_context(db: Session, request: Request, dict_id: int, sel) -> dict:
+    from app.services.textmap import SEGMENT_CHOICES, text_map
+
+    qp = request.query_params
+    texts = list(db.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.n_words)
+                            .where(TextDoc.id.in_(sel.ids or [-1])).order_by(TextDoc.author, TextDoc.title)))
+    text_id = _int(qp.get("text_id"))
+    if text_id not in {t.id for t in texts}:
+        text_id = texts[0].id if texts else None
+    segments = _int(qp.get("segments")) or 50
+    tm = text_map(db, text_id, dict_id, sel.words, segments) if text_id else None
+    return {"tm": tm, "map_texts": texts, "map_text_id": text_id, "SEGMENT_CHOICES": SEGMENT_CHOICES}
+
+
+@router.get("/api/texts/{text_id}/passage")
+def text_passage(text_id: int, request: Request, db: Session = Depends(get_session)):
+    """Предложения отрезка текста с подсветкой вхождений — для щелчка по карте текста."""
+    from app.services.textmap import passage
+
+    qp = request.query_params
+    words = [int(x) for x in qp.getlist("words") if x.isdigit()]
+    return {"sentences": passage(db, text_id, _int(qp.get("from")) or 1, _int(qp.get("to")) or 1,
+                                 _int(qp.get("dictionary_id")), words)}
+
+
+def _entities_context(db: Session, request: Request, dict_id: int, sel) -> dict:
+    from app.services import entities as E
+
+    qp = request.query_params
+    etype = qp.get("etype") if qp.get("etype") in E.ETYPES else None
+    unit = qp.get("unit") if qp.get("unit") in E.UNITS else "sentence"
+    ix = E.entity_index(db, sel.ids, etype, qp.get("q") or "")
+    if qp.get("nolatin"):
+        ix["items"] = [x for x in ix["items"] if any("а" <= ch.lower() <= "я" or ch.lower() == "ё" for ch in x["name"])]
+        ix["total"] = len(ix["items"]) if len(ix["items"]) < ix["total"] else ix["total"]
+        ix["n_mentions"] = sum(x["count"] for x in ix["items"])
+    cross = qp.get("cross") if qp.get("cross") in ("LOC", "PER", "ORG") else "LOC"
+    return {"ents": ix, "ent_etype": etype, "ent_unit": unit, "ent_cross": cross,
+            "network": E.persons_network(db, sel.ids, unit) if ix["n_mentions"] else None,
+            "ent_dict": E.entity_dictionary(db, sel.ids, dict_id, sel.words, cross, unit) if ix["n_mentions"] else None,
+            "ETYPES": E.ETYPES, "ETYPE_ONE": E.ETYPE_ONE, "UNITS": E.UNITS}
+
+
+def _semantic_context(db: Session, request: Request, dict_id: int, sel, entry_id: int | None) -> dict:
+    from app.services import semantic as S
+
+    qp = request.query_params
+    entries = list(db.scalars(select(DictionaryEntry).where(DictionaryEntry.dictionary_id == dict_id)))
+    by_id = {e.id: e for e in entries}
+    seed_text = (qp.get("seed") or "").strip()
+    if seed_text:
+        seeds = [w.strip() for w in seed_text.replace(";", ",").replace("\n", ",").split(",") if w.strip()]
+        seed_label = ", ".join(seeds)
+    elif sel.words:
+        seeds = [by_id[w].lemma for w in sel.words if w in by_id]
+        seed_label = "выбранные слова: " + ", ".join(by_id[w].surface for w in sel.words if w in by_id)
+    else:
+        seeds = [e.lemma for e in entries]
+        seed_label = "весь словарь"
+    sim = S.similar_words(db, seeds, sel.ids, exclude={e.lemma for e in entries} | {e.surface for e in entries},
+                          only_in_corpus=not qp.get("any"))
+    k_groups = _int(qp.get("groups"))
+    entry_id = entry_id or _default_entry(db, dict_id, sel, sel.ids)
+    k = max(2, min(_int(qp.get("k")) or 3, 8))
+    return {"sim": sim, "seed_text": seed_text, "seed_label": seed_label,
+            "smap": S.dictionary_map(db, dict_id, k_groups if k_groups and 2 <= k_groups <= 12 else None),
+            "senses": S.senses(db, entry_id, sel.ids, k=k, stop=sel.stopset) if entry_id else None,
+            "entry_id": entry_id, "sense_k": k}
+
+
+def _topics_context(db: Session, request: Request, sel) -> dict:
+    from app.services import semantic as S
+
+    k = max(3, min(_int(request.query_params.get("k")) or 8, 20))
+    words = A.corpus_words(db, sel.ids)
+    if words > 3_000_000:
+        return {"tp": None, "tp_k": k, "tp_too_big": words}
+    return {"tp": S.topics(db, sel.ids, k=k, stop=sel.stopset), "tp_k": k, "tp_too_big": 0}
+
+
+@router.post("/dictionaries/{dict_id}/add-words")
+def dictionary_add_words(request: Request, dict_id: int, words: list[str] = Form([]), back: str = Form(""),
+                         db: Session = Depends(get_session)):
+    """Добавить в словарь слова, отмеченные среди «похожих по смыслу»."""
+    d = db.get(Dictionary, dict_id)
+    if d is None:
+        raise HTTPException(404)
+    items = parse_dictionary_text(", ".join(w for w in words if w.strip()))
+    new = add_entries(db, d, items) if items else []
+    db.commit()
+    flash(request, f"В словарь «{d.name}» добавлено слов: {len(new)}. Вхождения ищутся в фоне (страница «Задачи»).", "success")
+    return redirect(back if back.startswith("/") else f"/dictionaries/{dict_id}")
+
+
+@router.get("/api/entities/mentions")
+def entity_mentions(request: Request, db: Session = Depends(get_session)):
+    from app.services.entities import mentions
+    from app.services.selection import from_params
+
+    sel = from_params(db, request.query_params)
+    return mentions(db, sel.ids, request.query_params.get("name", ""))
+
+
+@router.get("/api/entities/cooccurrence")
+def entity_cooccurrence(request: Request, db: Session = Depends(get_session)):
+    from app.services.entities import cooccurrence_examples
+    from app.services.selection import from_params
+
+    qp = request.query_params
+    sel = from_params(db, qp)
+    return {"sentences": cooccurrence_examples(db, sel.ids, qp.get("name", ""), _int(qp.get("entry")) or 0,
+                                               qp.get("unit") or "sentence")}
+
+
+@router.post("/entities/override")
+def entity_override(request: Request, norm: str = Form(...), etype: str = Form(""), canonical: str = Form(""),
+                    hidden: str | None = Form(None), back: str = Form("/analysis?tab=entities"), db: Session = Depends(get_session)):
+    from app.services.entities import set_override
+
+    set_override(db, norm.strip(), etype or None, canonical, bool(hidden))
+    db.commit()
+    flash(request, f"Правка для «{norm}» сохранена" + (f": объединено с «{canonical.strip()}»" if canonical.strip() else ""), "success")
+    return redirect(back if back.startswith("/") else "/analysis?tab=entities")
+
+
+@router.post("/entities/extract")
+def entities_extract(request: Request, text_ids: list[str] = Form([]), back: str = Form("/analysis?tab=entities"),
+                     db: Session = Depends(get_session)):
+    """Поставить в очередь извлечение имён для текстов без разметки (тексты, загруженные до версии 0.6)."""
+    n = 0
+    for tid in [int(t) for t in text_ids if t.isdigit()]:
+        doc = db.get(TextDoc, tid)
+        if doc is not None and doc.status == "ready":
+            enqueue(db, "ner", {"text_id": tid}, title=f"Имена собственные: «{doc.title}»")
+            n += 1
+    db.commit()
+    flash(request, f"Извлечение имён поставлено в очередь для {n} текстов (прогресс — на странице «Задачи»)", "success")
+    return redirect(back if back.startswith("/") else "/analysis?tab=entities")
+
+
 @router.get("/analysis")
 def analysis(request: Request, db: Session = Depends(get_session)):
     ctx = _analysis_context(db, request)
@@ -599,13 +835,29 @@ def analysis(request: Request, db: Session = Depends(get_session)):
         ctx.update(_overview_context(db, request, dict_id, text_ids))
     elif tab == "report":
         ctx.update(_report_context(db, request, dict_id, sel))
+    elif tab == "colloc":
+        ctx.update(_colloc_context(db, request, dict_id, sel, entry_id))
+    elif tab == "keywords":
+        ctx.update(_keywords_context(db, request, sel))
+    elif tab == "map":
+        ctx.update(_map_context(db, request, dict_id, sel))
+    elif tab == "entities":
+        ctx.update(_entities_context(db, request, dict_id, sel))
+    elif tab == "semantic":
+        ctx.update(_semantic_context(db, request, dict_id, sel, entry_id))
+    elif tab == "topics":
+        ctx.update(_topics_context(db, request, sel))
     elif tab == "freq":
-        ctx["freq"] = A.frequency(db, dict_id, text_ids)
-        ctx["heat"] = A.frequency_by_text(db, dict_id, text_ids)
+        # отмеченные слова — только они (переключатель all_words показывает весь словарь)
+        words = None if qp.get("all_words") else (sel.words or None)
+        ctx["freq"] = A.only_words(A.frequency(db, dict_id, text_ids), words)
+        ctx["heat"] = A.frequency_by_text(db, dict_id, text_ids, entry_ids=words)
+        ctx["freq_filtered"] = bool(words)
     elif tab == "conc":
         ctx["conc"] = A.concordance(
             db, dict_id, text_ids, entry_id=entry_id, entry_ids=sel.words, role=qp.get("role") or None,
             rel_type=qp.get("rel_type") or None, related_lemma=qp.get("related") or None,
+            near=qp.get("near") or None, window=_int(qp.get("window")) or 3,
             include_invalid=bool(qp.get("invalid")), page=_int(qp.get("page")) or 1,
         )
     elif tab == "profile":
@@ -709,10 +961,26 @@ def sentence_view(request: Request, sentence_id: int, token: int | None = None, 
     context = _context_rows(db, row, 3)
     prev_id = db.scalar(select(SentenceRow.id).where(SentenceRow.text_id == row.text_id, SentenceRow.idx == row.idx - 1))
     next_id = db.scalar(select(SentenceRow.id).where(SentenceRow.text_id == row.text_id, SentenceRow.idx == row.idx + 1))
+    precise_pending = row.parse_level == 1 and bool(db.scalar(
+        select(Job.id).where(Job.kind == "deepparse", Job.status.in_(["queued", "running"]),
+                             Job.params["sentence_ids"].contains([sentence_id]))))
     return render(request, "sentence.html", row=row, sent=sent, doc=doc, roles=roles, rels=rels, focus=focus,
+                  precise_pending=precise_pending,
                   tree_json=json.dumps(tree, ensure_ascii=False).replace("</", "<\\/"), groups=groups, hit_tokens=hit_tokens,
                   conllu=sent.to_conllu(sentence_id), prev_id=prev_id, next_id=next_id, context=context,
                   tree_children=tree_children)
+
+
+@router.post("/sentences/{sentence_id}/precise")
+def sentence_precise(request: Request, sentence_id: int, db: Session = Depends(get_session)):
+    row = db.get(SentenceRow, sentence_id)
+    if row is None:
+        raise HTTPException(404)
+    if row.parse_level == 1:
+        enqueue(db, "deepparse", {"sentence_ids": [sentence_id]}, title=f"Точный разбор предложения ID {sentence_id}")
+        db.commit()
+        flash(request, "Точный разбор поставлен в очередь — обновите страницу через минуту", "success")
+    return redirect(f"/sentences/{sentence_id}")
 
 
 # ------------------------------------------------------------------ задачи

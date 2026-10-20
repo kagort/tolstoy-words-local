@@ -117,8 +117,14 @@ def check_nlp(sentence: str) -> None:
     from app.nlp.pipeline import process_text
     from app.nlp.syntax import REL_LABELS, SentenceAnalysis
 
+    from app.config import settings
+
     parser = get_parser()
-    print(f"Парсер: {parser.version}\n")
+    print(f"Парсер: {parser.version}")
+    if settings.two_stage:
+        print(f"Двухступенчатая обработка: весь текст — {get_parser(settings.fast_parser).version}, "
+              f"предложения со словами словарей — {parser.version}")
+    print()
     for batch in process_text(sentence, parser):
         for ps in batch:
             print(ps.sentence.to_conllu())

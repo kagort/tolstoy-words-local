@@ -35,6 +35,10 @@ def client():
     return c
 
 
+def page_text(client):
+    return client.get("/analysis").text
+
+
 def run_jobs():
     from app.services.jobs import run_pending
 
@@ -198,6 +202,15 @@ def test_selection_report_stopwords(client):
     assert r.status_code == 200 and "Сводный отчёт" in r.text and "rep-freq" in r.text and "Сравнение с корпусом" in r.text
     # отчёт без выбранных слов берёт самые частые
     assert "10 самых частых" in client.get(f"/analysis?tab=report&{base}").text
+    # частоты: при выбранных словах — только они, с долей; all_words — весь словарь
+    r = client.get(f"/analysis?tab=freq&{base}&words={e_dym.id}")
+    assert "Показаны <strong>1 выбранных слов" in r.text and "показать весь словарь" in r.text
+    with SessionLocal() as s:
+        f = A.only_words(A.frequency(s, d.id, all_ids), [e_dym.id, e_zapah.id])
+        assert {x["entry_id"] for x in f["rows"]} == {e_dym.id, e_zapah.id}
+        assert abs(sum(x["share"] for x in f["rows"]) - 100) < 0.2
+    assert "Показан весь словарь" in client.get(f"/analysis?tab=freq&{base}&words={e_dym.id}&all_words=1").text
+    assert client.get(f"/export/frequency.xlsx?{base}&words={e_dym.id}").status_code == 200
     # корпус A выбирается в форме вкладки сравнения
     r = client.get(f"/analysis?tab=compare&{base}&corpus_b=")
     assert 'name="corpus_id" form="sel-form"' in r.text and "disabled" not in r.text.split("Корпус A")[1][:200]
@@ -217,6 +230,8 @@ def test_selection_report_stopwords(client):
     assert "# text =" in conllu
 
     # стоп-слова: встроенный список, свой список, фильтр в портрете и профиле
+    # скрипты и стили подключаются с меткой версии — браузер не возьмёт старый app.js из кэша
+    assert "/static/app.js?v=" in page_text(client) and "function checkTop" in client.get("/static/app.js").text
     page = client.get("/stopwords")
     assert page.status_code == 200 and "Встроенный" in page.text
     assert "быть" in client.get("/stopwords/builtin.txt").text
@@ -250,6 +265,85 @@ def test_selection_report_stopwords(client):
     client.post("/stopwords", data={"name": "Встроенный+", "words": "князь", "with_builtin": "1"})
     with SessionLocal() as s:
         assert {"и", "князь"} <= set(s.query(StopList).filter_by(name="Встроенный+").one().words)
+
+    # волна 2: коллокации (окно и синтаксис), ключевые слова, карта текста, фильтр «рядом» в конкордансе
+    from app.services.collocations import collocations, orbit_layout
+    from app.services.keywords import keywords, reference_ids, tfidf_by_text
+    from app.services.textmap import passage, text_map
+
+    with SessionLocal() as s:
+        win = collocations(s, e_zapah.id, all_ids, mode="window", window=3, min_count=1, pos="all")
+        lem = {r["lemma"]: r for r in win["rows"]}
+        assert win["fx"] >= 4 and "сладкий" in lem and lem["сладкий"]["logdice"] is not None
+        syn = collocations(s, e_zapah.id, all_ids, mode="syntax", min_count=1, pos="all")
+        # синтаксические коллокаты берутся из связей (вхождение со «сладкий» выше отмечено как ложное и не учитывается)
+        assert syn["rows"] and all(r["rel"] and r["rel_label"] for r in syn["rows"]) and syn["span"] == 1
+        assert "сладкий" not in {r["lemma"] for r in collocations(s, e_zapah.id, all_ids, min_count=1, pos="all",
+                                                                    stop=frozenset({"сладкий"}))["rows"]}
+        orb = orbit_layout(win["rows"], "logdice")
+        assert orb[0]["ring"] == 1 and all("x" in r for r in orb)
+        near = A.concordance(s, d.id, all_ids, entry_id=e_zapah.id, near="сладкий", window=3)
+        assert near["total"] == lem["сладкий"]["count"]
+        ref, _ = reference_ids(s, [texts["Сирень"]], "")
+        kw = keywords(s, [texts["Сирень"]], ref, min_count=1)
+        assert kw["words_a"] > 0 and kw["positive"] and kw["positive"][0]["ll"] >= kw["positive"][-1]["ll"]
+        tf = tfidf_by_text(s, all_ids)
+        assert len(tf["texts"]) == len(all_ids)
+        tm = text_map(s, texts["Сирень"], d.id, [e_zapah.id], 10)
+        assert tm["rows"][0]["total"] == sum(tm["rows"][0]["count"]) >= 1 and len(tm["seg_words"]) == 10
+        pas = passage(s, texts["Сирень"], 1, 3, d.id)
+        assert pas and any(x["marks"] for x in pas)
+    for tab, extra in (("colloc", f"&entry_id={e_zapah.id}"), ("colloc", f"&entry_id={e_zapah.id}&mode=syntax&min_count=1"),
+                       ("keywords", ""), ("keywords", f"&ref={corpus.id}"), ("map", f"&text_id={texts['Сирень']}&segments=20")):
+        r = client.get(f"/analysis?tab={tab}&{base}{extra}&stop=ru")
+        assert r.status_code == 200, (tab, extra)
+    assert "chart-orbit" in client.get(f"/analysis?tab=colloc&{base}&entry_id={e_zapah.id}&min_count=1&pos=all").text
+    assert "chart-map" in client.get(f"/analysis?tab=map&{base}&text_id={texts['Сирень']}").text
+    assert client.get(f"/api/texts/{texts['Сирень']}/passage?from=1&to=5&dictionary_id={d.id}").json()["sentences"]
+    for url in (f"/export/collocations.xlsx?{base}&entry_id={e_zapah.id}&min_count=1", f"/export/collocations.csv?{base}&entry_id={e_zapah.id}&mode=syntax&min_count=1",
+                f"/export/keywords.xlsx?{base}", f"/export/keywords.csv?{base}&ref={corpus.id}",
+                f"/export/textmap.xlsx?{base}&text_id={texts['Сирень']}", f"/export/concordance.csv?{base}&entry_id={e_zapah.id}&near=сладкий&window=3"):
+        r = client.get(url)
+        assert r.status_code == 200 and len(r.content) > 50, url
+
+    # волна 3: имена собственные (извлекаются после разбора автоматически), правки, семантика, темы
+    from app.services import entities as E
+    from app.services import semantic as S
+
+    with SessionLocal() as s:
+        ix = E.entity_index(s, all_ids)
+        assert not ix["missing"] and ix["n_mentions"] > 0
+        names = {x["name"]: x for x in ix["items"]}
+        assert any("Толстой" in n for n in names), names.keys()
+        tol = next(n for n in names if "Толстой" in n)
+        assert E.mentions(s, all_ids, tol)["sentences"]
+        E.set_override(s, tol, "PER", "Лев Толстой")
+        s.commit()
+        assert "Лев Толстой" in {x["name"] for x in E.entity_index(s, all_ids)["items"]}
+        E.set_override(s, "Лев Толстой", None, None, hidden=True)
+        s.commit()
+        assert "Лев Толстой" not in {x["name"] for x in E.entity_index(s, all_ids)["items"]}
+        sim = S.similar_words(s, ["запах"], all_ids, only_in_corpus=False)
+        assert sim["items"] and all(w["word"] != "запах" for w in sim["items"])
+        assert S.dictionary_map(s, d.id)["points"]
+        assert S.topics(s, all_ids, k=3)["n_chunks"] >= 1
+    r = client.post("/entities/override", data={"norm": "Лев Толстой", "etype": "", "canonical": ""}, follow_redirects=False)
+    assert r.status_code == 303
+    for tab, extra in (("entities", ""), ("entities", "&etype=PER&unit=paragraph&cross=PER&nolatin=1"),
+                       ("semantic", f"&entry_id={e_zapah.id}&k=2"), ("semantic", "&seed=запах, аромат&any=1&groups=3"), ("topics", "&k=3")):
+        r = client.get(f"/analysis?tab={tab}&{base}{extra}")
+        assert r.status_code == 200, (tab, extra)
+    assert client.get(f"/api/entities/mentions?{base}&name={tol}").status_code == 200
+    assert client.get(f"/api/entities/cooccurrence?{base}&name={tol}&entry={e_zapah.id}").status_code == 200
+    r = client.post(f"/dictionaries/{d.id}/add-words", data={"words": ["аромат", "благоухание"]}, follow_redirects=False)
+    assert r.status_code == 303
+    with SessionLocal() as s:
+        assert s.query(DictionaryEntry).filter_by(dictionary_id=d.id, surface="благоухание").count() == 1
+    for url in (f"/export/entities.xlsx?{base}", f"/export/entities.csv?{base}&etype=PER"):
+        r = client.get(url)
+        assert r.status_code == 200 and len(r.content) > 50, url
+    assert client.post("/entities/extract", data={"text_ids": [str(texts["Дым"])]}, follow_redirects=False).status_code == 303
+    run_jobs()
 
     # страница задач: удаление выполненных
     assert client.get("/jobs").status_code == 200

@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     nlp_backend: str = "stanza"  # stanza | natasha
     stanza_dir: str = ""
     parse_batch_size: int = 64
+    # two_stage — весь текст быстро разбирается FAST_PARSER (Natasha), а основным парсером (NLP_BACKEND, Stanza)
+    #             только предложения со словами словарей и по кнопке «Точный разбор»; full — всё основным парсером
+    processing_mode: str = "two_stage"
+    fast_parser: str = "natasha"
+    # после разбора текста автоматически извлекать имена собственные (персоны, места, организации)
+    ner_on_ingest: bool = True
 
     # Фоновый обработчик
     worker_poll_seconds: float = 2.0
@@ -34,6 +40,11 @@ class Settings(BaseSettings):
     job_stale_minutes: float = 5.0
     # после стольких падений обработчика на одной задаче она помечается ошибкой (защита от бесконечного цикла)
     job_max_attempts: int = 3
+
+    @property
+    def two_stage(self) -> bool:
+        """Двухступенчатая обработка включена и имеет смысл (быстрый и основной парсеры различаются)."""
+        return self.processing_mode.lower() == "two_stage" and self.fast_parser.lower() != self.nlp_backend.lower()
 
     @property
     def sqlalchemy_url(self) -> str:

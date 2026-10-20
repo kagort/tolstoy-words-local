@@ -48,7 +48,7 @@ class TextDoc(Base):
     source_filename: Mapped[str | None] = mapped_column(String(500))
     raw_text: Mapped[str] = mapped_column(Text)
     norm_text: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(32), default="uploaded")  # uploaded|processing|ready|error
+    status: Mapped[str] = mapped_column(String(32), default="uploaded")  # uploaded|queued|processing|ready|error|deleting
     error: Mapped[str | None] = mapped_column(Text)
     pipeline_version: Mapped[str | None] = mapped_column(String(100))
     n_sentences: Mapped[int] = mapped_column(Integer, default=0)
@@ -76,9 +76,14 @@ class Corpus(Base):
     texts: Mapped[list[TextDoc]] = relationship(secondary=corpus_texts, back_populates="corpora", order_by="TextDoc.id")
 
 
+# уровни разбора предложения (двухступенчатая обработка, волна 1)
+PARSE_FAST = 1  # предварительный разбор быстрым парсером (Natasha) — для статистики всего текста
+PARSE_PRECISE = 2  # разбор основным парсером (NLP_BACKEND, обычно Stanza) — по нему ищутся вхождения словарей
+
+
 class SentenceRow(Base):
     __tablename__ = "sentences"
-    __table_args__ = (UniqueConstraint("text_id", "idx"),)
+    __table_args__ = (UniqueConstraint("text_id", "idx"), Index("ix_sentences_text_level", "text_id", "parse_level"))
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     text_id: Mapped[int] = mapped_column(ForeignKey("texts.id", ondelete="CASCADE"), index=True)
@@ -93,6 +98,7 @@ class SentenceRow(Base):
     has_homogeneous: Mapped[bool] = mapped_column(Boolean, default=False)
     has_participial: Mapped[bool] = mapped_column(Boolean, default=False)
     has_gerund: Mapped[bool] = mapped_column(Boolean, default=False)
+    parse_level: Mapped[int] = mapped_column(SmallInteger, default=PARSE_PRECISE, server_default=str(PARSE_PRECISE))
 
 
 class TokenRow(Base):
@@ -161,6 +167,8 @@ class Hit(Base):
     __table_args__ = (
         UniqueConstraint("entry_id", "token_id"),
         Index("ix_hits_dict_text", "dictionary_id", "text_id"),
+        Index("ix_hits_token_id", "token_id"),
+        Index("ix_hits_text_id", "text_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -186,6 +194,7 @@ class TokenRelation(Base):
     __table_args__ = (
         Index("ix_rel_entry_type", "entry_id", "rel_type", "related_lemma"),
         Index("ix_rel_dict_text", "dictionary_id", "text_id"),
+        Index("ix_rel_text_id", "text_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -205,6 +214,33 @@ class TokenRelation(Base):
     rule: Mapped[str | None] = mapped_column(String(32))
     confidence: Mapped[float] = mapped_column(Float, default=1.0)
     negated: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class Entity(Base):
+    """Упоминание имени собственного (NER, Natasha/Slovnet): персона, место, организация или иное название."""
+
+    __tablename__ = "entities"
+    __table_args__ = (Index("ix_entities_text_type", "text_id", "etype"), Index("ix_entities_norm", "norm"))
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    text_id: Mapped[int] = mapped_column(ForeignKey("texts.id", ondelete="CASCADE"))
+    sentence_id: Mapped[int] = mapped_column(ForeignKey("sentences.id", ondelete="CASCADE"), index=True)
+    etype: Mapped[str] = mapped_column(String(8))  # PER | LOC | ORG
+    start_char: Mapped[int] = mapped_column(Integer)
+    end_char: Mapped[int] = mapped_column(Integer)
+    surface: Mapped[str] = mapped_column(Text)
+    norm: Mapped[str] = mapped_column(Text)  # начальная форма: «Андрею Болконскому» → «Андрей Болконский»
+
+
+class EntityOverride(Base):
+    """Ручная правка имени: другой класс, слияние с другим именем (варианты одного героя) или скрытие ошибки."""
+
+    __tablename__ = "entity_overrides"
+
+    norm: Mapped[str] = mapped_column(Text, primary_key=True)
+    etype: Mapped[str | None] = mapped_column(String(8))
+    canonical: Mapped[str | None] = mapped_column(Text)
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
 
 class StopList(Base):

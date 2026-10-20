@@ -91,8 +91,8 @@
 </form>
 
 <div class="tabs">
-  {% for key, label in [('overview', 'Обзор'), ('report', '📋 Отчёт'), ('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
-  <a class="{{ 'active' if tab == key }}" href="/analysis?tab={{ key }}&dictionary_id={{ dict_id }}&{{ sel.query() }}{% if entry_id and key in ('profile','conc','structure','compare') %}&entry_id={{ entry_id }}{% endif %}">{{ label }}</a>
+  {% for key, label in [('overview', 'Обзор'), ('report', '📋 Отчёт'), ('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('colloc', 'Коллокации'), ('keywords', 'Ключевые слова'), ('map', 'Карта текста'), ('entities', 'Имена'), ('semantic', 'Семантика'), ('topics', 'Темы'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
+  <a class="{{ 'active' if tab == key }}" href="/analysis?tab={{ key }}&dictionary_id={{ dict_id }}&{{ sel.query() }}{% if entry_id and key in ('profile','conc','structure','compare','colloc','semantic') %}&entry_id={{ entry_id }}{% endif %}">{{ label }}</a>
   {% endfor %}
 </div>
 
@@ -140,11 +140,18 @@
 {% endif %}
 
 {% include "_report.html" %}
+{% include "_wave2.html" %}
+{% include "_entities.html" %}
+{% include "_semantic.html" %}
 
 {# ============================================================== ЧАСТОТЫ #}
 {% if tab == 'freq' and freq %}
 <div class="row" style="margin-bottom:10px">
-  <div class="muted">Выборка: {{ freq.n_texts }} текстов, {{ "{:,}".format(freq.corpus_words).replace(",", " ") }} словоупотреблений.</div>
+  <div class="muted">Выборка: {{ freq.n_texts }} текстов, {{ "{:,}".format(freq.corpus_words).replace(",", " ") }} словоупотреблений.
+    {% if freq_filtered %}Показаны <strong>{{ freq.rows|length }} выбранных слов</strong>: вместе {{ freq.selected_total }} вхождений, {{ freq.selected_ipm }} ipm ·
+      <a href="/analysis{{ qs(request, all_words='1') }}">показать весь словарь</a>
+    {% elif request.query_params.get('all_words') and sel.words %}Показан весь словарь · <a href="/analysis{{ qs(request, all_words=None) }}">только выбранные слова ({{ sel.words|length }})</a>{% endif %}
+    <span class="help" style="display:block">ipm — вхождений на миллион слов всей выборки текстов (так частоты сравнимы между корпусами разного размера); «доля» — какую часть вхождений слов этой таблицы составляет слово.</span></div>
   <div class="shrink">Скачать таблицу: <a href="/export/frequency.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/frequency.csv{{ qs(request) }}">CSV</a> · <a href="/export/frequency.json{{ qs(request) }}">JSON</a></div>
 </div>
 <div class="panel"><div id="chart-freq" class="chart"></div></div>
@@ -161,11 +168,13 @@
   <table>
     <tr><th><input type="checkbox" title="отметить все" onchange="document.querySelectorAll('.freq-check').forEach(c => { c.checked = this.checked; syncWord(c); })"></th>
       <th>Слово</th><th>Лемма</th><th>Категория</th><th class="num">Вхождений</th><th class="num">ipm</th><th class="num">Предложений</th><th class="num">Текстов</th>
+      <th class="num" title="какую часть всех вхождений слов этой таблицы составляет слово">Доля, %</th>
       <th class="num" title="Мера неравномерности Грайса: 0 — равномерно по текстам, ближе к 1 — сосредоточено в немногих">DP</th><th>Перейти</th><th>Все предложения со словом</th></tr>
     {% for r in freq.rows %}
     <tr><td><input type="checkbox" class="freq-check" value="{{ r.entry_id }}" {{ 'checked' if r.entry_id in sel.words }} onchange="syncWord(this)"></td>
       <td><strong>{{ r.word }}</strong></td><td>{{ r.lemma }} <span class="muted small">{{ pos_label(r.upos) }}</span></td><td>{{ r.category }}</td>
       <td class="num">{{ r.count }}</td><td class="num">{{ r.ipm }}</td><td class="num">{{ r.sentences }}</td><td class="num">{{ r.texts }}</td>
+      <td class="num">{{ r.share }}</td>
       <td class="num">{{ r.dp if r.dp is not none else '' }}</td>
       <td class="small nowrap">{% if r.count %}<a href="/analysis?tab=profile&{{ sq }}&entry_id={{ r.entry_id }}">профиль</a> ·
         <a href="/analysis?tab=conc&{{ sq }}&entry_id={{ r.entry_id }}">примеры</a>{% endif %}</td>
@@ -186,6 +195,8 @@
   <div><label>Слово</label><select name="entry_id" form="sel-form"><option value="">{{ 'выбранные слова (' ~ sel.words|length ~ ')' if sel.words else 'все слова словаря' }}</option>{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
   <div><label>Роль слова в предложении</label><select name="role" form="sel-form"><option value="">любая</option>{% for k in ROLE_LABELS %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('role') == k }}>{{ role_label(k) }}</option>{% endfor %}</select></div>
   <div><label>Тип связи</label><select name="rel_type" form="sel-form"><option value="">любой</option>{% for k in REL_LABELS %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('rel_type') == k }}>{{ rel_label(k) }}</option>{% endfor %}</select></div>
+  {% if request.query_params.get('near') %}<div class="shrink"><label>Рядом (±{{ request.query_params.get('window', 3) }} сл.)</label>
+    <input type="text" name="near" form="sel-form" value="{{ request.query_params.get('near') }}" style="width:140px"><input type="hidden" name="window" form="sel-form" value="{{ request.query_params.get('window', 3) }}"></div>{% endif %}
   <div><label>Связанное слово (лемма)</label><input type="text" name="related" form="sel-form" value="{{ request.query_params.get('related', '') }}" placeholder="например: сладкий"></div>
   <div class="shrink"><label class="check"><input type="checkbox" name="invalid" form="sel-form" value="1" {{ 'checked' if request.query_params.get('invalid') }}> показать ложные</label></div>
   <div class="shrink"><button type="submit" form="sel-form">Найти</button></div>
@@ -306,6 +317,8 @@
   <div class="shrink">Скачать: <a href="/export/structure.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/structure.csv{{ qs(request) }}">CSV</a></div>
 </div>
 {% set h, a = structure.hits, structure.all %}
+{% if structure.fast %}<p class="help">Предложения со словами словаря разобраны точно; среди всех предложений выборки {{ structure.fast }} разобраны предварительно (быстрым парсером),
+  поэтому глубина дерева, клаузы и обороты в колонке «Все предложения» — приблизительные. Точный разбор всего текста — кнопка в карточке текста.</p>{% endif %}
 <div class="grid cols-2">
   <div class="panel">
     <table>
@@ -379,8 +392,9 @@
 (function () {
   const rows = {{ freq.rows[:40]|tojson }}.filter(r => r.count > 0);
   drawChart('chart-freq', [{ type: 'bar', x: rows.map(r => r.word), y: rows.map(r => r.ipm), text: rows.map(r => r.count + ' вхожд.'),
-    hovertemplate: '%{x}: %{y} ipm (%{text})<extra></extra>', marker: { color: cssVar('--accent') } }],
-    { title: { text: 'Частота на миллион слов (ipm)', font: { size: 14 } }, yaxis: { title: 'ipm' } });
+    customdata: rows.map(r => r.share),
+    hovertemplate: '%{x}: %{y} ipm (%{text}; доля %{customdata}%)<extra></extra>', marker: { color: cssVar('--accent') } }],
+    { title: { text: {{ ('Выбранные слова: частота на миллион слов выборки (ipm)' if freq_filtered else 'Частота на миллион слов выборки (ipm)')|tojson }}, font: { size: 14 } }, yaxis: { title: 'ipm' } });
   {% if heat.words and heat.texts|length > 1 %}
   const heat = {{ heat|tojson }};
   drawChart('chart-heat', [{ type: 'heatmap', z: heat.z, x: heat.texts, y: heat.words, colorscale: 'Blues', reversescale: true, hovertemplate: '%{y} — %{x}: %{z} ipm<extra></extra>' }],

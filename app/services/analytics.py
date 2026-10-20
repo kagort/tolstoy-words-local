@@ -96,10 +96,21 @@ def frequency(session: Session, dictionary_id: int, text_ids: list[int]) -> dict
     return {"rows": rows, "corpus_words": n_words, "n_texts": len(text_ids)}
 
 
-def frequency_by_text(session: Session, dictionary_id: int, text_ids: list[int], top: int = 15) -> dict:
-    """Матрица ipm «слово × текст» для тепловой карты."""
+def only_words(freq: dict, entry_ids: list[int] | None) -> dict:
+    """Оставляет в таблице частот только выбранные слова (если выбраны) и добавляет долю каждого
+    слова среди оставшихся, % («какую часть всех вхождений этих слов составляет слово»)."""
+    rows = [r for r in freq["rows"] if not entry_ids or r["entry_id"] in set(entry_ids)]
+    total = sum(r["count"] for r in rows)
+    rows = [{**r, "share": round(100 * r["count"] / total, 1) if total else 0.0} for r in rows]
+    return {**freq, "rows": rows, "selected_total": total,
+            "selected_ipm": round(ipm(total, freq["corpus_words"]), 2) if freq["corpus_words"] else 0.0}
+
+
+def frequency_by_text(session: Session, dictionary_id: int, text_ids: list[int], top: int = 15,
+                      entry_ids: list[int] | None = None) -> dict:
+    """Матрица ipm «слово × текст» для тепловой карты (entry_ids — только выбранные слова)."""
     texts = list(session.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.n_words).where(TextDoc.id.in_(text_ids or [-1])).order_by(TextDoc.id)))
-    freq = frequency(session, dictionary_id, text_ids)["rows"][:top]
+    freq = only_words(frequency(session, dictionary_id, text_ids), entry_ids)["rows"][:top]
     ids = [r["entry_id"] for r in freq]
     counts = defaultdict(dict)
     if ids:
@@ -134,6 +145,21 @@ def forms_distribution(session: Session, entry_id: int, text_ids: list[int]) -> 
 # ------------------------------------------------------------------ конкорданс
 
 
+def near_condition(lemma: str, window: int):
+    """Вхождение, рядом с которым (не дальше window слов, знаки препинания не считаются) есть лемма — как в оконных коллокациях."""
+    from sqlalchemy import and_, exists
+    from sqlalchemy.orm import aliased
+
+    t2, t3 = aliased(TokenRow), aliased(TokenRow)
+    between = (select(func.count()).select_from(t3)
+               .where(t3.sentence_id == Hit.sentence_id, t3.upos != "PUNCT",
+                      t3.idx.between(func.least(t2.idx, Hit.token_idx), func.greatest(t2.idx, Hit.token_idx)))
+               .correlate(Hit, t2).scalar_subquery())
+    return exists(select(t2.id).correlate(Hit).where(and_(t2.sentence_id == Hit.sentence_id, t2.lemma_norm == norm(lemma),
+                                          t2.upos != "PUNCT", t2.idx != Hit.token_idx, between <= window + 1)))
+
+
+
 def concordance(
     session: Session,
     dictionary_id: int,
@@ -144,6 +170,8 @@ def concordance(
     role: str | None = None,
     rel_type: str | None = None,
     related_lemma: str | None = None,
+    near: str | None = None,
+    window: int = 3,
     include_invalid: bool = False,
     page: int = 1,
     per_page: int = 50,
@@ -175,6 +203,8 @@ def concordance(
         if related_lemma:
             sub = sub.where(TokenRelation.related_lemma == related_lemma.lower())
         q = q.where(Hit.id.in_(sub))
+    if near:
+        q = q.where(near_condition(near, window))
     total = session.scalar(select(func.count()).select_from(q.subquery())) or 0
     rows = session.execute(q.order_by(TextDoc.id, SentenceRow.idx, Hit.token_idx).offset((page - 1) * per_page).limit(per_page)).all()
     items = []
@@ -367,9 +397,12 @@ def sentence_structure(session: Session, dictionary_id: int, text_ids: list[int]
         hit_sids = hit_sids.where(Hit.entry_id == entry_id)
     elif entry_ids:
         hit_sids = hit_sids.where(Hit.entry_id.in_(entry_ids))
+    fast = session.scalar(select(func.count()).select_from(SentenceRow)
+                          .where(SentenceRow.text_id.in_(ids), SentenceRow.parse_level == 1)) or 0
     return {
         "hits": _structure_stats(session, SentenceRow.id.in_(hit_sids)),
         "all": _structure_stats(session, SentenceRow.text_id.in_(ids)),
+        "fast": fast,  # предложений предварительного разбора (двухступенчатая обработка)
     }
 
 

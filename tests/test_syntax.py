@@ -254,3 +254,46 @@ def test_fix_lemma_replaces_nonexistent_lemma_only():
     assert fix_lemma("шёл", "ийти", "VERB", past) == "идти"  # ошибка лемматизатора Stanza
     assert fix_lemma("наполнял", "наполнять", "VERB", past) == "наполнять"  # верная лемма не меняется
     assert fix_lemma("Rome", "Rome", "PROPN", {}) == "Rome"  # латиница и имена собственные не трогаем
+
+
+def test_association_measures():
+    from app.services.stats import association, juilland_d, tf_idf
+
+    # сочетание вдвое чаще ожидаемого: PMI = 1
+    m = association(c=20, fx=100, fy=1000, n=10_000, span=1)
+    assert m["expected"] == 10.0 and m["pmi"] == 1.0 and m["g2"] > 0
+    assert 0 < m["npmi"] < 1 and m["mi3"] > m["pmi"] and m["tscore"] > 0
+    assert m["dp_fwd"] > 0 and m["dp_bwd"] > 0
+    # реже ожидаемого: отрицательные PMI и G²
+    m = association(c=2, fx=100, fy=1000, n=10_000)
+    assert m["pmi"] < 0 and m["g2"] < 0
+    # направленность: редкий коллокат почти всегда рядом с частым узлом → ΔP(узел|коллокат) велика
+    m = association(c=9, fx=1000, fy=10, n=100_000)
+    assert m["dp_bwd"] > m["dp_fwd"]
+    assert association(0, 10, 10, 100)["pmi"] is None
+    assert juilland_d([5, 5, 5, 5]) == 1.0 and juilland_d([20, 0, 0, 0]) == 0.0
+    assert tf_idf(5, 100, 1, 10) > tf_idf(5, 100, 10, 10) > 0
+
+
+def test_entity_normalization():
+    from app.services.entities import normalize
+
+    assert normalize([("Андрею", "PROPN", {"Case": "Dat", "Gender": "Masc"}), ("Болконскому", "PROPN", {"Case": "Dat", "Gender": "Masc"})], "PER") == "Андрей Болконский"
+    assert normalize([("Наташи", "PROPN", {"Case": "Gen", "Gender": "Fem"}), ("Ростовой", "PROPN", {"Case": "Gen", "Gender": "Fem"})], "PER") == "Наташа Ростова"
+    assert normalize([("Лысых", "ADJ", {"Case": "Loc", "Number": "Plur"}), ("Горах", "PROPN", {"Case": "Loc", "Number": "Plur"})], "LOC") == "Лысые Горы"
+    assert normalize([("Москву", "PROPN", {"Case": "Acc"})], "LOC") == "Москва"
+    assert normalize([("газета", "NOUN", {"Case": "Nom"}), ("«", "PUNCT", {}), ("Правда", "NOUN", {}), ("»", "PUNCT", {})], "ORG") == "газета «Правда»"
+
+
+def test_semantic_math():
+    import numpy as np
+
+    from app.services.entities import spring_layout
+    from app.services.semantic import kmeans, pca2
+
+    x = np.array([[1, 0, 0], [0.9, 0.1, 0], [0, 1, 0], [0, 0.9, 0.1]], dtype=np.float32)
+    lab = kmeans(x, 2)
+    assert lab[0] == lab[1] and lab[2] == lab[3] and lab[0] != lab[2]
+    assert pca2(x).shape == (4, 2)
+    pos = spring_layout(["a", "b", "c"], [("a", "b", 3)])
+    assert set(pos) == {"a", "b", "c"} and all(abs(v) <= 1 for p in pos.values() for v in p)

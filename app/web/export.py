@@ -109,11 +109,12 @@ def export_frequency(fmt: str, request: Request, db: Session = Depends(get_sessi
     if fmt not in FORMATS:
         raise HTTPException(400, "Формат: csv, xlsx или json")
     dict_id, ids = _ctx(db, request)
-    f = A.frequency(db, dict_id, ids)
-    df = pd.DataFrame(f["rows"]).rename(columns={
+    words = None if request.query_params.get("all_words") else (_words(db, request) or None)
+    f = A.only_words(A.frequency(db, dict_id, ids), words)
+    df = pd.DataFrame(f["rows"]).rename(columns={"share": "Доля среди слов таблицы, %",
         "word": "Слово", "lemma": "Лемма", "upos": "Часть речи", "category": "Категория", "count": "Вхождений",
         "ipm": "ipm", "sentences": "Предложений", "texts": "Текстов", "dp": "DP (неравномерность)"}).drop(columns=["entry_id"], errors="ignore")
-    heat = A.frequency_by_text(db, dict_id, ids, top=200)
+    heat = A.frequency_by_text(db, dict_id, ids, top=200, entry_ids=words)
     df_heat = pd.DataFrame(heat["z"], index=heat["words"], columns=heat["texts"]).reset_index().rename(columns={"index": "Слово (ipm по текстам)"}) if heat["words"] else pd.DataFrame()
     params = _params(db, request) | {"Слов в корпусе": f["corpus_words"], "Текстов": f["n_texts"]}
     return _send({"Частоты": df, "По текстам (ipm)": df_heat}, fmt, "frequency", params)
@@ -127,6 +128,7 @@ def export_concordance(fmt: str, request: Request, db: Session = Depends(get_ses
     dict_id, ids = _ctx(db, request)
     c = A.concordance(db, dict_id, ids, entry_id=_int(qp.get("entry_id")), entry_ids=_words(db, request), role=qp.get("role") or None,
                       rel_type=qp.get("rel_type") or None, related_lemma=qp.get("related") or None,
+                      near=qp.get("near") or None, window=_int(qp.get("window")) or 3,
                       include_invalid=bool(qp.get("invalid")), page=1, per_page=100_000, context_chars=10_000)
     df = pd.DataFrame([{
         "Слово словаря": i["word"], "Левый контекст": i["left"], "Словоформа": i["kw"], "Правый контекст": i["right"],
@@ -257,6 +259,111 @@ def export_report(fmt: str, request: Request, db: Session = Depends(get_session)
     params = _params(db, request) | {"Слов в выборке": rep["corpus_words"], "Текстов в выборке": rep["n_texts"],
                                      "Вхождений выбранных слов": rep["total"]}
     return _send(frames, fmt, "report", params)
+
+
+@router.get("/collocations.{fmt}")
+def export_collocations(fmt: str, request: Request, db: Session = Depends(get_session)):
+    if fmt not in FORMATS:
+        raise HTTPException(400)
+    from app.services.collocations import collocations
+    from app.services.stats import MEASURES
+    from app.web.pages import colloc_params
+
+    entry_id = _int(request.query_params.get("entry_id"))
+    if not entry_id:
+        raise HTTPException(400, "Не выбрано слово (entry_id)")
+    p = colloc_params(request.query_params)
+    col = collocations(db, entry_id, _ctx(db, request)[1], stop=_selection(db, request).stopset, **{**p}, top=100_000)
+    cols = {"lemma": "Коллокат", "rel_label": "Связь", "pos": "Часть речи", **MEASURES, "expected": "Ожидаемая частота",
+            "fy": "Частота коллоката в выборке"}
+    df = pd.DataFrame(col["rows"])
+    if not df.empty:
+        df = df[[c for c in cols if c in df.columns]].rename(columns=cols)
+    entry = db.get(DictionaryEntry, entry_id)
+    params = _params(db, request) | {"Слово": entry.surface if entry else "", "Вхождений слова": col["fx"], "Слов в выборке": col["n"],
+                                     "Режим": "окно ±%s" % col["window"] if col["mode"] == "window" else "синтаксические связи",
+                                     "Мин. частота": col["min_count"]}
+    return _send({"Коллокации": df}, fmt, f"collocations-{entry.surface if entry else entry_id}", params)
+
+
+@router.get("/keywords.{fmt}")
+def export_keywords(fmt: str, request: Request, db: Session = Depends(get_session)):
+    if fmt not in FORMATS:
+        raise HTTPException(400)
+    from app.web.pages import _keywords_context
+
+    ctx = _keywords_context(db, request, _selection(db, request))
+    kw = ctx["kw"]
+    names = {"lemma": "Лемма", "pos": "Часть речи", "count_a": "Частота в выборке", "count_b": "Частота в опорном",
+             "ipm_a": "ipm выборки", "ipm_b": "ipm опорного", "ll": "G²", "log_ratio": "Log-ratio", "significant": "Значимо (p<0.05)"}
+    frames = {"Ключевые слова": pd.DataFrame(kw["positive"]).rename(columns=names),
+              "Отрицательные": pd.DataFrame(kw["negative"]).rename(columns=names)}
+    if ctx["tfidf"]["texts"]:
+        frames["TF-IDF по текстам"] = pd.DataFrame([{"Текст": t["title"], "Автор": t["author"], "Лемма": w["lemma"],
+                                                      "Частота": w["count"], "TF-IDF×1000": w["score"]}
+                                                     for t in ctx["tfidf"]["texts"] for w in t["words"]])
+    params = _params(db, request) | {"Опорный корпус": ctx["kw_ref_label"], "Слов в выборке": kw["words_a"],
+                                     "Слов в опорном": kw["words_b"]}
+    return _send(frames, fmt, "keywords", params)
+
+
+@router.get("/textmap.{fmt}")
+def export_textmap(fmt: str, request: Request, db: Session = Depends(get_session)):
+    if fmt not in FORMATS:
+        raise HTTPException(400)
+    from app.web.pages import _map_context
+
+    tm = _map_context(db, request, _int(request.query_params.get("dictionary_id")), _selection(db, request))["tm"]
+    if not tm:
+        raise HTTPException(404, "Нет текста")
+    head = {"Отрезок": list(range(1, tm["segments"] + 1)), "Предложения с": tm["seg_from"], "по": tm["seg_to"], "Слов в отрезке": tm["seg_words"]}
+    frames = {}
+    for metric, title in (("count", "Вхождения"), ("ipm", "ipm")):
+        data = dict(head)
+        for r in tm["summary"] + tm["rows"]:
+            data[r["label"]] = r[metric]
+        frames[title] = pd.DataFrame(data)
+    frames["Дисперсия"] = pd.DataFrame([{"Слово": r["label"], "Вхождений": r["total"], "Отрезков со словом": r["range"],
+                                         "DP": r["dp"], "D Жуйяна": r["d"]} for r in tm["summary"] + tm["rows"]])
+    return _send(frames, fmt, f"textmap-{tm['text_id']}", _params(db, request) | {"Текст": tm["title"], "Отрезков": tm["segments"]})
+
+
+@router.get("/entities.{fmt}")
+def export_entities(fmt: str, request: Request, db: Session = Depends(get_session)):
+    if fmt not in FORMATS:
+        raise HTTPException(400)
+    from app.services import entities as E
+
+    sel = _selection(db, request)
+    qp = request.query_params
+    etype = qp.get("etype") if qp.get("etype") in E.ETYPES else None
+    ix = E.entity_index(db, sel.ids, etype, qp.get("q") or "", top=1_000_000)
+    frames = {"Имена": pd.DataFrame([{"Имя": x["name"], "Класс": x["label"], "Упоминаний": x["count"], "Текстов": x["texts"],
+                                      "Слитые варианты": ", ".join(x["variants"]), "Ручная правка": "да" if x["edited"] else ""}
+                                     for x in ix["items"]])}
+    unit = qp.get("unit") if qp.get("unit") in E.UNITS else "sentence"
+    net = E.persons_network(db, sel.ids, unit, top=100)
+    frames["Сеть персонажей"] = pd.DataFrame([{"Персона 1": e["a"], "Персона 2": e["b"], "Совместно": e["w"]} for e in net["edges"]])
+    cross = qp.get("cross") if qp.get("cross") in E.ETYPES else "LOC"
+    ed = E.entity_dictionary(db, sel.ids, _int(qp.get("dictionary_id")) or 0, sel.words, cross, unit, top=200, top_words=50)
+    if ed["names"]:
+        frames["Имена × словарь"] = pd.DataFrame(ed["z"], index=ed["names"], columns=[w["word"] for w in ed["words"]]).reset_index().rename(columns={"index": "Имя"})
+    return _send(frames, fmt, "entities", _params(db, request) | {"Связь": E.UNITS[unit], "Класс для сопоставления": E.ETYPES[cross]})
+
+
+@router.get("/topics.{fmt}")
+def export_topics(fmt: str, request: Request, db: Session = Depends(get_session)):
+    if fmt not in FORMATS:
+        raise HTTPException(400)
+    from app.web.pages import _topics_context
+
+    tp = _topics_context(db, request, _selection(db, request))["tp"]
+    if not tp or not tp["topics"]:
+        raise HTTPException(404, "Темы не построены")
+    frames = {"Темы": pd.DataFrame([{"Тема": t["id"], "Доля, %": t["share"], "Слова": ", ".join(t["words"])} for t in tp["topics"]])}
+    frames["По текстам, %"] = pd.DataFrame([{"Текст": b["title"], "Фрагментов": b["chunks"],
+                                              **{f"тема {t['id']}": b["dist"][j] for j, t in enumerate(tp["topics"])}} for b in tp["by_text"]])
+    return _send(frames, fmt, "topics", _params(db, request) | {"Тем": tp["k"], "Фрагментов": tp["n_chunks"]})
 
 
 @router.get("/hits.conllu")

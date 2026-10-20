@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import SessionLocal
-from app.models import Corpus, Dictionary, SentenceRow, TextDoc
+from app.models import PARSE_FAST, PARSE_PRECISE, Corpus, Dictionary, SentenceRow, TextDoc
 from app.nlp.normalize import extract_text, normalize_text
 from app.nlp.parsers import get_parser
 from app.nlp.pipeline import count_segments, process_text
@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 SENT_COLS = (
     "id", "text_id", "idx", "paragraph_idx", "text", "n_words", "tree_depth", "n_clauses", "sent_type",
-    "is_direct_speech", "has_homogeneous", "has_participial", "has_gerund",
+    "is_direct_speech", "has_homogeneous", "has_participial", "has_gerund", "parse_level",
 )
 TOKEN_COLS = (
     "sentence_id", "text_id", "idx", "form", "form_norm", "lemma", "lemma_norm", "upos", "feats", "head",
@@ -96,8 +96,19 @@ def mark_interrupted(text_id: int, message: str) -> None:
         s.commit()
 
 
+def pipeline_label() -> str:
+    """Описание конвейера для texts.pipeline_version (от него зависит кэш статистического портрета)."""
+    if settings.two_stage:
+        return f"{get_parser(settings.fast_parser).version} → {get_parser().version} (двухступенчатый); syntax {SYNTAX_VERSION}"
+    return f"{get_parser().version}; syntax {SYNTAX_VERSION}"
+
+
 def run_ingest(job_id: int | None, text_id: int) -> None:
-    parser = get_parser()
+    # ступень 1: весь текст — быстрым парсером (или сразу основным, если двухступенчатая обработка выключена)
+    if settings.two_stage:
+        parser, level = get_parser(settings.fast_parser), PARSE_FAST
+    else:
+        parser, level = get_parser(), PARSE_PRECISE
     with SessionLocal() as s:
         doc = s.get(TextDoc, text_id)
         if doc is None:
@@ -105,7 +116,7 @@ def run_ingest(job_id: int | None, text_id: int) -> None:
         s.execute(delete(SentenceRow).where(SentenceRow.text_id == text_id))
         doc.status = "processing"
         doc.error = None
-        doc.meta = {k: v for k, v in (doc.meta or {}).items() if k != "stats"}  # статистика пересчитается
+        doc.meta = {k: v for k, v in (doc.meta or {}).items() if k not in ("stats", "ner")}  # статистика и имена пересчитаются
         s.commit()
         content = doc.norm_text or normalize_text(doc.raw_text)
         title = doc.title
@@ -124,7 +135,7 @@ def run_ingest(job_id: int | None, text_id: int) -> None:
                     srows.append((
                         sid, text_id, sent_idx, ps.paragraph_idx, ps.sentence.text, m["n_words"], m["tree_depth"],
                         m["n_clauses"], m["sent_type"], ps.is_direct_speech, m["has_homogeneous"],
-                        m["has_participial"], m["has_gerund"],
+                        m["has_participial"], m["has_gerund"], level,
                     ))
                     for t in ps.sentence.tokens:
                         trows.append((
@@ -149,11 +160,14 @@ def run_ingest(job_id: int | None, text_id: int) -> None:
         doc.n_sentences = sent_idx
         doc.n_tokens = n_tokens
         doc.n_words = n_words
-        doc.pipeline_version = f"{parser.version}; syntax {SYNTAX_VERSION}"
-        # новые тексты сразу сопоставляем со всеми словарями
+        doc.pipeline_version = pipeline_label()
+        # новые тексты сразу сопоставляем со всеми словарями (в двухступенчатом режиме здесь же
+        # предложения со словами словарей получат точный разбор — ступень 2)
         for d in s.scalars(select(Dictionary)):
             enqueue(s, "match", {"dictionary_id": d.id, "text_ids": [text_id]},
                     title=f"Словарь «{d.name}» × текст «{title}»")
+        if settings.ner_on_ingest:
+            enqueue(s, "ner", {"text_id": text_id}, title=f"Имена собственные: «{title}»")
         s.commit()
     # статистический портрет считаем сразу, чтобы страница открывалась мгновенно
     try:

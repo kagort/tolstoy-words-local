@@ -26,7 +26,12 @@
     <p><button type="submit">Сохранить</button> <a class="btn secondary" href="/analysis?corpus_id={{ corpus.id }}">Анализ корпуса</a></p>
   </div>
 </form>
-<form method="post" action="/corpora/{{ corpus.id }}/delete" onsubmit="return confirm('Удалить корпус? Тексты останутся в базе.')">
-  <button class="danger" type="submit">Удалить корпус</button>
+<div class="row" style="margin-top:12px">
+<form class="shrink" method="post" action="/corpora/{{ corpus.id }}/delete" onsubmit="return confirm('Удалить корпус? Тексты останутся в базе.')">
+  <button class="danger" type="submit">Удалить только корпус</button>
 </form>
+<form class="shrink" method="post" action="/corpora/{{ corpus.id }}/delete" onsubmit="return confirm('Удалить корпус и ВСЕ его тексты ({{ member|length }}) со всей разметкой и вхождениями? Тексты удалятся и из других корпусов. Отменить нельзя.')">
+  <input type="hidden" name="with_texts" value="1"><button class="danger" type="submit">🗑 Удалить корпус вместе с текстами</button>
+</form>
+</div>
 {% endblock %}
