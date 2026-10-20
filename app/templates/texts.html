@@ -6,19 +6,28 @@
 <details class="panel" {% if not texts %}open{% endif %}>
   <summary><strong>Загрузить тексты</strong></summary>
   <form method="post" action="/texts/upload" enctype="multipart/form-data" id="upload-form">
-    <label>1. Выберите файлы (.txt, .docx, .fb2; до {{ max_mb }} МБ каждый). Можно сразу несколько: Ctrl+щелчок или Shift+щелчок в окне выбора.</label>
-    <input type="file" name="files" id="upload-files" multiple required accept=".txt,.docx,.fb2">
+    <label>1. Выберите файлы (.txt, .docx, .fb2; до {{ max_mb }} МБ каждый) — можно сразу много (Ctrl+A, Ctrl+щелчок, Shift+щелчок в окне выбора)
+      — или один <strong>ZIP-архив</strong> с текстами (таблицу метаданных можно положить в тот же архив).</label>
+    <input type="file" name="files" id="upload-files" multiple required accept=".txt,.docx,.fb2,.zip">
+    <div class="muted small" id="upload-count"></div>
 
-    <div id="per-file" style="display:none">
-      <label style="margin-top:14px">2. Сведения о каждом файле. Пустое поле — берётся из общих сведений ниже (или из таблицы метаданных).</label>
+    <label style="margin-top:14px">2. Таблица метаданных (CSV / XLSX) — для пакетной загрузки</label>
+    <input type="file" name="meta_file" id="meta-file" accept=".csv,.tsv,.xlsx">
+    <p class="help">Первая строка — заголовки: <code>файл, название, автор, год, жанр, тип, модель, корпус</code>; обязательна только колонка «файл» —
+      имя файла с расширением или без: строка «1» относится к файлу <code>1.txt</code> (и к <code>001.txt</code>). Разделитель — запятая, точка с запятой или табуляция.
+      Год — «1863» или «1901-1902»; тип — «литература» или «нейросеть»; прочерк «-» — нет данных; корпус — название (несколько — через «;»), корпус создаётся сам.
+      После загрузки система сообщит, каким файлам не нашлось строки и каким строкам — файла.</p>
+
+    <details id="per-file" style="display:none;margin-top:10px">
+      <summary>3. Сведения о каждом файле вручную (необязательно; заполненное поле важнее таблицы метаданных)</summary>
       <div class="table-scroll">
         <table id="per-file-table">
           <tr><th>Файл</th><th>Название</th><th>Автор</th><th>Год(ы)</th><th>Жанр</th><th>Тип</th><th>Модель/промпт</th></tr>
         </table>
       </div>
-    </div>
+    </details>
 
-    <label style="margin-top:14px">3. Общие сведения — для всех файлов, у которых поле выше не заполнено</label>
+    <label style="margin-top:14px">4. Общие сведения — для файлов, у которых нет своих сведений ни в таблице, ни выше</label>
     <div class="row">
       <div><label>Автор</label><input type="text" name="author" id="c-author"></div>
       <div><label>Год или годы (1863 или 1863–1869)</label><input type="text" name="years" id="c-years"></div>
@@ -28,19 +37,16 @@
       <div><label>Модель/промпт (для сгенерированных)</label><input type="text" name="generator"></div>
     </div>
 
-    <details style="margin-top:10px">
-      <summary>…или таблица метаданных для многих файлов (CSV / XLSX)</summary>
-      <p class="help">Колонки: <code>файл;название;автор;год;жанр;тип;модель</code> — обязательна только «файл» (имя файла с расширением или без).
-        Тип: «литература» или «нейросеть». Поля, заполненные в таблице «Сведения о каждом файле», важнее таблицы метаданных.</p>
-      <input type="file" name="meta_file" accept=".csv,.txt,.tsv,.xlsx">
-    </details>
 
     <div class="row" style="margin-top:10px">
       <div><label>Добавить в корпуса</label>
         <select name="corpus_ids" multiple size="3">{% for c in corpora %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
-      <div><label>…или создать новый корпус</label><input type="text" name="new_corpus" placeholder="Название корпуса"></div>
+      <div><label>…или создать новый корпус (для всех загружаемых)</label><input type="text" name="new_corpus" placeholder="Название корпуса, например: Русская проза XIX–XX вв."></div>
     </div>
-    <p><button type="submit">Загрузить и разобрать</button></p>
+    <label class="check"><input type="checkbox" name="by_author" value="1"> разложить по подкорпусам авторов (корпус с именем каждого автора создаётся сам)</label>
+    <label class="check"><input type="checkbox" name="skip_existing" value="1" checked> не загружать повторно файлы, которые уже есть в базе (по имени файла)</label>
+    <p><button type="submit" id="upload-btn">Загрузить и разобрать</button>
+      <span class="help">Большой пакет (десятки романов) передаётся на сервер несколько минут — не закрывайте страницу; разбор потом идёт в фоне.</span></p>
   </form>
 </details>
 
@@ -66,7 +72,7 @@
   <tr>
     <td><input type="checkbox" class="del-check" name="text_ids" value="{{ t.id }}" form="del-form" {{ 'disabled' if t.status == 'deleting' }}></td>
     <td class="muted">{{ t.id }}</td>
-    <td><a href="/texts/{{ t.id }}">{{ t.title }}</a>{% if t.status == 'ready' %} <a href="/texts/{{ t.id }}/stats" title="статистический портрет текста" style="text-decoration:none">📊</a>{% endif %}</td>
+    <td><a href="/texts/{{ t.id }}" title="файл: {{ t.source_filename or '' }}{% if (t.meta or {}).get('file_id') %}; ID в таблице метаданных: {{ t.meta.file_id }}{% endif %}">{{ t.title }}</a>{% if t.status == 'ready' %} <a href="/texts/{{ t.id }}/stats" title="статистический портрет текста" style="text-decoration:none">📊</a>{% endif %}</td>
     <td>{{ t.author or '' }}</td>
     <td>{{ t.years }}</td>
     <td>{{ t.genre or '' }}</td>
@@ -96,19 +102,28 @@
     const i = document.createElement('input'); i.type = 'text'; i.name = name; i.value = value || ''; i.placeholder = placeholder || '';
     return i;
   }
+  const counter = document.getElementById('upload-count');
+  document.getElementById('upload-form').addEventListener('submit', () => {
+    const btn = document.getElementById('upload-btn');
+    btn.disabled = true; btn.textContent = 'Передаю файлы на сервер…';
+  });
   input.addEventListener('change', () => {
     table.querySelectorAll('tr.f').forEach(r => r.remove());
     const files = Array.from(input.files);
-    box.style.display = files.length ? '' : 'none';
+    const mb = files.reduce((s, f) => s + f.size, 0) / 1048576;
+    counter.textContent = files.length ? `Выбрано файлов: ${files.length}, ${mb.toFixed(1)} МБ` : '';
+    // ручная таблица нужна для 1–2 файлов; для пакета — свёрнута (сведения берутся из таблицы метаданных)
+    box.style.display = files.length && !files.every(f => f.name.toLowerCase().endsWith('.zip')) ? '' : 'none';
+    box.open = files.length <= 3 && !document.getElementById('meta-file').files.length;
     files.forEach(f => {
       const tr = document.createElement('tr'); tr.className = 'f';
       const td0 = document.createElement('td'); td0.className = 'small'; td0.textContent = f.name;
       const hidden = document.createElement('input'); hidden.type = 'hidden'; hidden.name = 'f_names'; hidden.value = f.name;
       td0.appendChild(hidden); tr.appendChild(td0);
-      [['f_titles', f.name.replace(/\.[^.]+$/, ''), ''], ['f_authors', '', 'как в общих'], ['f_years', '', 'как в общих'],
-       ['f_genres', '', 'как в общих']].forEach(([n, v, ph]) => { const td = document.createElement('td'); td.appendChild(text(n, v, ph)); tr.appendChild(td); });
+      [['f_titles', '', 'из таблицы или ' + f.name.replace(/\.[^.]+$/, '')], ['f_authors', '', 'из таблицы / общих'], ['f_years', '', 'из таблицы / общих'],
+       ['f_genres', '', 'из таблицы / общих']].forEach(([n, v, ph]) => { const td = document.createElement('td'); td.appendChild(text(n, v, ph)); tr.appendChild(td); });
       const sel = document.createElement('select'); sel.name = 'f_types';
-      sel.innerHTML = '<option value="">как в общих</option>' + Object.entries(types).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
+      sel.innerHTML = '<option value="">из таблицы / общих</option>' + Object.entries(types).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
       const tdS = document.createElement('td'); tdS.appendChild(sel); tr.appendChild(tdS);
       const tdG = document.createElement('td'); tdG.appendChild(text('f_generators', '', '')); tr.appendChild(tdG);
       table.appendChild(tr);

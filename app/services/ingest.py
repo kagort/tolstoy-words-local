@@ -43,6 +43,7 @@ def create_text(
     generator: str | None = None,
     corpus_ids: list[int] | None = None,
     enqueue_job: bool = True,
+    extra_meta: dict | None = None,
 ) -> TextDoc:
     raw = extract_text(filename, data)
     doc = TextDoc(
@@ -57,7 +58,7 @@ def create_text(
         raw_text=raw,
         norm_text=normalize_text(raw),
         status="queued",
-        meta={},
+        meta=dict(extra_meta or {}),
     )
     if corpus_ids:
         doc.corpora = list(session.scalars(select(Corpus).where(Corpus.id.in_(corpus_ids))))
