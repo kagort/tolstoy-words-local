@@ -42,6 +42,11 @@ code .env
 
 Остальное можно не трогать. `NLP_BACKEND=stanza` — точный парсер (образ соберётся дольше и будет весить ~2 ГБ). Для быстрой пробы можно поставить `NLP_BACKEND=natasha`.
 
+**Модели Stanza (~600 МБ) скачиваются не при сборке, а при первом запуске** обработчика — задачей «Загрузка моделей Stanza» на странице «Задачи»
+(с повторами; уже скачанные файлы не качаются заново). Они хранятся в томе Docker `stanza_models` и переживают пересборку образа.
+Пока модели качаются, тексты уже можно загружать: их разбирает Natasha, а точный разбор выполнится после загрузки моделей.
+Скачать вручную: `docker compose run --rm worker python -m app.cli download-models`.
+
 ### 1.4. Запустить
 ```powershell
 docker compose up -d --build
@@ -199,6 +204,8 @@ python -m app.worker                    # окно 2: обработчик за�
 | `DB_PASSWORD … Задайте DB_PASSWORD в файле .env` | Не создан `.env` или в нём нет `DB_PASSWORD` (шаг 1.3) |
 | Страница входа: «Пароль администратора не задан» | Задайте `ADMIN_PASSWORD` в `.env`, затем `docker compose up -d` |
 | Тексты висят «в очереди» | Не запущен обработчик: `docker compose ps`, `docker compose logs worker` |
+| Сборка падает на шаге `if [ "$NLP_BACKEND" = "stanza" ] … pip install torch …` (`exit code: 1`) | Обрыв скачивания PyTorch (~200 МБ). Настоящая причина — выше в выводе; посмотреть: `docker compose build --progress=plain worker 2>&1 \| Select-String -Context 0,6 "ERROR"` (PowerShell). Обычно помогает повторить `docker compose up -d --build` (pip теперь повторяет загрузку 10 раз) или включить VPN. Временно можно собрать без Stanza: `NLP_BACKEND=natasha` в `.env`. До версии 0.7.2 на этом же шаге качались модели с HuggingFace — теперь это делается после запуска (см. ниже) |
+| На странице «Задачи» ошибка задачи «Загрузка моделей Stanza» | Нет доступа к huggingface.co или raw.githubusercontent.com. Включите VPN или задайте в `.env` зеркало `HF_ENDPOINT=https://hf-mirror.com` (или прокси `HTTPS_PROXY=http://адрес:порт`), выполните `docker compose up -d` и нажмите «Повторить». Задачи точного разбора, упавшие из-за отсутствия моделей, вернутся в очередь сами после загрузки |
 | `exec /entrypoint.sh: no such file or directory` | Скрипт получил концы строк Windows (CRLF). Выполните `git rm --cached -r . ; git reset --hard` (после `.gitattributes` файлы перезапишутся с LF) и пересоберите |
 | `failed to connect to the docker API … dockerDesktopLinuxEngine` | Не запущен Docker Desktop: запустите его и дождитесь «Engine running»; проверка — `docker version` (должен быть раздел Server) |
 | `The "K" variable is not set` (или другая буква) | В `.env` есть символ `$` — замените такие пароли (см. шаг 1.3). Если база уже создавалась со «вырезанным» паролем: `docker compose down -v` (удалит пустую базу) и запустить заново |

@@ -59,7 +59,8 @@ def set_progress(job_id: int, progress: float, message: str | None = None) -> No
 def claim_next(session: Session) -> Job | None:
     row = session.execute(
         text(
-            "SELECT id FROM jobs WHERE status = 'queued' ORDER BY id "
+            # загрузка моделей — вне очереди: от неё зависят задачи точного разбора
+            "SELECT id FROM jobs WHERE status = 'queued' ORDER BY (kind = 'models') DESC, id "
             "FOR UPDATE SKIP LOCKED LIMIT 1"
         )
     ).first()
@@ -88,9 +89,11 @@ def run_job(job_id: int) -> None:
     from app.services.matching import run_match
 
     from app.services.entities import run_ner
+    from app.services.models import run_download
     from app.services.textdelete import run_delete
 
-    handlers = {"ingest": run_ingest, "match": run_match, "deepparse": run_deepparse, "ner": run_ner, "delete_text": run_delete}
+    handlers = {"ingest": run_ingest, "match": run_match, "deepparse": run_deepparse, "ner": run_ner, "delete_text": run_delete,
+                "models": run_download}
     with SessionLocal() as s:
         job = s.get(Job, job_id)
         kind, params = job.kind, dict(job.params or {})

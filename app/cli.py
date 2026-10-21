@@ -149,6 +149,7 @@ def main() -> None:
     p2.add_argument("file", type=Path)
     p2.add_argument("--name", required=True)
     sub.add_parser("seed-demo")
+    sub.add_parser("download-models")
     sub.add_parser("run-jobs")
     p3 = sub.add_parser("check-nlp")
     p3.add_argument("sentence", nargs="?", default="Сладкий запах сирени, который шёл из сада, наполнял комнату и кружил голову.")
@@ -165,6 +166,14 @@ def main() -> None:
         print("Демо-данные поставлены в очередь.")
     elif a.cmd == "check-nlp":
         check_nlp(a.sentence)
+    elif a.cmd == "download-models":
+        from app.services.models import run_download, stanza_ready
+
+        if stanza_ready():
+            print("Модели Stanza уже скачаны.")
+        else:
+            run_download(None)
+            print("Модели Stanza скачаны.")
     elif a.cmd == "run-jobs":
         print(f"Выполнено задач: {run_pending()}")
 

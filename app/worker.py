@@ -27,10 +27,15 @@ def wait_for_db(attempts: int = 60) -> None:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     wait_for_db()
-    # модель загружаем заранее, чтобы первая задача не ждала
+    # модель загружаем заранее, чтобы первая задача не ждала; моделей Stanza нет — ставим их загрузку в очередь
     from app.nlp.parsers import get_parser
+    from app.services.models import ensure_download_job, needs_models
 
-    get_parser()
+    if needs_models():
+        logging.warning("Модели Stanza ещё не скачаны — ставлю задачу загрузки (страница «Задачи»)")
+        ensure_download_job()
+    else:
+        get_parser()
     if settings.two_stage:
         get_parser(settings.fast_parser)
         logging.info("Двухступенчатая обработка: весь текст — %s, предложения со словами словарей — %s",
