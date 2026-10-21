@@ -315,3 +315,19 @@ def test_stanza_models_job(tmp_path):
             assert s.query(Job).filter_by(kind="match", status="queued").count() == 1
     finally:
         settings.nlp_backend, settings.stanza_dir = old
+
+
+def test_models_downloaded_bytes(tmp_path, monkeypatch):
+    """Прогресс загрузки моделей: готовые файлы + недокачанные в кэше huggingface_hub, без двойного счёта."""
+    from app.config import settings
+    from app.services import models as M
+
+    monkeypatch.setattr(settings, "stanza_dir", str(tmp_path))
+    monkeypatch.setenv("HF_HOME", str(tmp_path / ".hf"))
+    (tmp_path / "ru" / "pos").mkdir(parents=True)
+    (tmp_path / "ru" / "pos" / "model.pt").write_bytes(b"x" * 1000)
+    blobs = tmp_path / ".hf" / "hub" / "blobs"
+    blobs.mkdir(parents=True)
+    (blobs / "abc").write_bytes(b"x" * 1000)  # уже скопирован в ru/ — не считается
+    (blobs / "def.incomplete").write_bytes(b"x" * 500)
+    assert M.downloaded_bytes() == 1500

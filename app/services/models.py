@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
+import threading
 import time
 
 from sqlalchemy import select
@@ -29,6 +31,8 @@ log = logging.getLogger(__name__)
 
 PROCESSORS = "tokenize,pos,lemma,depparse"
 ATTEMPTS = 5
+EXPECTED_MB = 600  # примерный объём русских моделей — только для подписи и полосы прогресса
+STALL_SECONDS = 180  # столько секунд без новых байтов — предупреждаем, что загрузка стоит
 
 
 def model_dir() -> str:
@@ -58,6 +62,63 @@ def ensure_download_job() -> int | None:
         return job.id
 
 
+def hf_cache_dir() -> str:
+    """Кэш huggingface_hub: туда Stanza сначала качает файл (*.incomplete), потом копирует в model_dir."""
+    return os.environ.get("HF_HOME") or os.path.join(os.path.expanduser("~"), ".cache", "huggingface")
+
+
+def downloaded_bytes() -> int:
+    """Сколько уже скачано: готовые файлы моделей + недокачанные файлы в кэше huggingface_hub."""
+    total = 0
+    cache = os.path.abspath(hf_cache_dir())
+    for root, dirs, files in os.walk(model_dir()):
+        if os.path.abspath(root) == cache:  # кэш внутри папки моделей считаем отдельно, без двойного счёта
+            dirs.clear()
+            continue
+        dirs[:] = [d for d in dirs if os.path.abspath(os.path.join(root, d)) != cache]
+        total += sum(_size(os.path.join(root, f)) for f in files)
+    for root, _dirs, files in os.walk(cache):
+        total += sum(_size(os.path.join(root, f)) for f in files if f.endswith(".incomplete"))
+    return total
+
+
+def _size(path: str) -> int:
+    try:
+        return os.path.getsize(path)
+    except OSError:  # файл переименовали или удалили между listdir и stat
+        return 0
+
+
+class _Monitor(threading.Thread):
+    """Раз в несколько секунд пишет в задачу, сколько скачано и с какой скоростью (и тем самым подаёт «пульс»)."""
+
+    def __init__(self, job_id: int, attempt: int, every: float = 5.0):
+        super().__init__(daemon=True)
+        self.job_id, self.attempt, self.every = job_id, attempt, every
+        self.stop = threading.Event()
+
+    def run(self) -> None:
+        prev, prev_t = downloaded_bytes(), time.monotonic()
+        last_growth = prev_t
+        while not self.stop.wait(self.every):
+            cur, t = downloaded_bytes(), time.monotonic()
+            speed = max(cur - prev, 0) / max(t - prev_t, 1e-6)
+            if cur > prev:
+                last_growth = t
+            prev, prev_t = cur, t
+            mb = cur / 2**20
+            msg = (f"Попытка {self.attempt} из {ATTEMPTS}: скачано {mb:.0f} МБ (всего около {EXPECTED_MB} МБ), "
+                   f"скорость {speed / 2**20:.2f} МБ/с")
+            idle = t - last_growth
+            if idle >= STALL_SECONDS:
+                msg += (f". Уже {idle / 60:.0f} мин нет новых данных — похоже, соединение с huggingface.co не идёт "
+                        "(см. «Если что-то не работает» в docs/DEPLOY.md)")
+            try:
+                set_progress(self.job_id, min(mb / EXPECTED_MB, 0.99), msg)
+            except Exception:  # noqa: BLE001 — в том числе запрос отмены: его обработает основной поток
+                return
+
+
 def run_download(job_id: int | None) -> None:
     """Задача «models»: скачивание с повторами (10 с, 30 с, 1 мин, 2 мин между попытками)."""
     import stanza
@@ -67,6 +128,9 @@ def run_download(job_id: int | None) -> None:
         if job_id:
             set_progress(job_id, (attempt - 1) / ATTEMPTS,
                          f"Скачивание моделей Stanza, попытка {attempt} из {ATTEMPTS} (уже скачанные файлы пропускаются)")
+        monitor = _Monitor(job_id, attempt) if job_id else None
+        if monitor:
+            monitor.start()
         try:
             stanza.download("ru", model_dir=model_dir(), processors=PROCESSORS, logging_level="WARN")
             if stanza_ready():
@@ -74,12 +138,18 @@ def run_download(job_id: int | None) -> None:
 
                 parsers._PARSERS.pop("stanza", None)
                 log.info("Модели Stanza скачаны в %s", model_dir())
+                if os.path.abspath(hf_cache_dir()).startswith(os.path.abspath(model_dir()) + os.sep):
+                    shutil.rmtree(hf_cache_dir(), ignore_errors=True)  # копии файлов уже в model_dir
                 requeue_waiting()
                 return
             last = RuntimeError("скачивание завершилось, но файлов модели нет")
         except Exception as exc:  # noqa: BLE001
             last = exc
             log.warning("Попытка %s скачать модели Stanza не удалась: %s", attempt, exc)
+        finally:
+            if monitor:
+                monitor.stop.set()
+                monitor.join(timeout=10)
         if attempt < ATTEMPTS:
             time.sleep((10, 30, 60, 120)[attempt - 1])
     raise RuntimeError(
