@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import get_session
 from app.models import Corpus, Dictionary, DictionaryEntry, Hit, Job, SentenceRow, TextDoc, TokenRelation, TokenRow
-from app.nlp.normalize import UnsupportedFormat, normalize_text
+from app.nlp.normalize import normalize_text
 from app.nlp.syntax import SentenceAnalysis
 from app.services import analytics as A
 from app.services.dictionaries import (
@@ -25,8 +25,7 @@ from app.services.dictionaries import (
     parse_dictionary_text,
     update_entry,
 )
-from app.services.ingest import create_text
-from app.services.metadata import lookup, normalize_source_type, parse_meta_table, parse_years
+from app.services.metadata import parse_years
 from app.services.jobs import enqueue
 from app.services.stopwords import options as stop_options
 from app.services.matching import load_sentences
@@ -126,14 +125,13 @@ async def texts_upload(
     meta_file: UploadFile | None = File(None),
     corpus_ids: list[str] = Form([]),
     new_corpus: str = Form(""),
+    by_author: str | None = Form(None),
+    skip_existing: str | None = Form(None),
     db: Session = Depends(get_session),
 ):
-    meta: dict = {}
-    if meta_file is not None and meta_file.filename:
-        try:
-            meta = parse_meta_table(meta_file.filename, await meta_file.read())
-        except Exception as exc:  # noqa: BLE001
-            flash(request, f"Таблица метаданных не прочитана: {exc}", "error")
+    from app.services.batchupload import run_batch
+
+    meta_upload = (meta_file.filename, await meta_file.read()) if meta_file is not None and meta_file.filename else None
     cids = [int(c) for c in corpus_ids if c.isdigit()]
     if new_corpus.strip():
         c = db.scalar(select(Corpus).where(Corpus.name == new_corpus.strip()))
@@ -149,35 +147,32 @@ async def texts_upload(
             return lst[k].strip() if k < len(lst) else ""
         per_file[name] = {"title": at(f_titles), "author": at(f_authors), "years": at(f_years), "genre": at(f_genres),
                           "source_type": at(f_types), "generator": at(f_generators)}
-    created, errors = 0, []
-    for f in [f for f in files if f.filename]:
-        data = await f.read()
-        if len(data) > settings.upload_max_mb * 1024 * 1024:
-            errors.append(f"{f.filename}: файл больше {settings.upload_max_mb} МБ")
-            continue
-        row = per_file.get(f.filename, {})
-        m = lookup(meta, f.filename)
-
-        def pick(field, common="", row=row, m=m):
-            return row.get(field) or m.get(field) or common
-
-        y1, y2 = parse_years(pick("years", years))
-        stype = normalize_source_type(pick("source_type")) or source_type or "natural"
-        try:
-            create_text(
-                db, filename=f.filename, data=data, title=pick("title") or None,
-                author=pick("author", author), year_from=y1, year_to=y2, genre=pick("genre", genre),
-                source_type=stype, generator=pick("generator", generator), corpus_ids=cids,
-            )
-            created += 1
-        except UnsupportedFormat as exc:
-            errors.append(str(exc))
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"{f.filename}: {exc}")
+    uploads = [(f.filename, await f.read()) for f in files if f.filename]
+    rep = run_batch(db, uploads, meta_upload=meta_upload, per_file=per_file, corpus_ids=cids,
+                    common={"author": author.strip(), "years": years.strip(), "genre": genre.strip(), "source_type": source_type,
+                            "generator": generator.strip()},
+                    by_author=bool(by_author), skip_existing=bool(skip_existing), max_mb=settings.upload_max_mb)
     db.commit()
-    if created:
-        flash(request, f"Загружено текстов: {created}. Разбор идёт в фоне — прогресс на странице «Задачи».", "success")
-    for e in errors:
+
+    def short(items, n=15):
+        return ", ".join(items[:n]) + (f" и ещё {len(items) - n}" if len(items) > n else "")
+
+    if rep.created:
+        flash(request, f"Загружено текстов: {rep.created}. Разбор идёт в фоне — прогресс на странице «Задачи».", "success")
+    if rep.meta_name:
+        flash(request, f"Таблица «{rep.meta_name}»: сведения найдены для {rep.matched} файлов.", "success" if not rep.no_meta else "info")
+    if rep.no_meta:
+        flash(request, f"Нет строки в таблице метаданных ({len(rep.no_meta)}): {short(rep.no_meta)} — для них взяты общие сведения.", "error")
+    if rep.rows_without_file:
+        flash(request, f"Строки таблицы без файла ({len(rep.rows_without_file)}): {short(rep.rows_without_file)}.", "info")
+    if rep.skipped:
+        flash(request, f"Пропущены уже загруженные файлы ({len(rep.skipped)}): {short(rep.skipped)}.", "info")
+    if rep.author_variants:
+        flash(request, "Похоже на одного автора в разных написаниях: " + "; ".join(" / ".join(g) for g in rep.author_variants[:10])
+              + ". Для системы это разные авторы (корпуса, «Авторство») — исправьте имя в карточке текста или в таблице и загрузите заново.", "error")
+    if rep.corpora_created:
+        flash(request, f"Созданы корпуса: {short(rep.corpora_created)}.", "success")
+    for e in rep.errors:
         flash(request, e, "error")
     return redirect("/texts")
 
@@ -774,6 +769,33 @@ def dictionary_add_words(request: Request, dict_id: int, words: list[str] = Form
     return redirect(back if back.startswith("/") else f"/dictionaries/{dict_id}")
 
 
+def _stylo_context(db: Session, request: Request, sel) -> dict:
+    from app.services import stylometry as ST
+
+    qp = request.query_params
+    unit = qp.get("unit") if qp.get("unit") in ("text", "chunk") else ("chunk" if len(sel.ids) < 4 else "text")
+    chunk = _int(qp.get("chunk")) or 5000
+    chunk = chunk if chunk in (2000, 5000, 10000, 20000) else 5000
+    target = _int(qp.get("target"))
+    res = ST.analyze(db, sel.ids, mfw=_int(qp.get("mfw")) or 100, kind=qp.get("kind") or "cosine", unit=unit, chunk=chunk,
+                     target=target if target in sel.ids else None)
+    texts = list(db.execute(select(TextDoc.id, TextDoc.title, TextDoc.author).where(TextDoc.id.in_(sel.ids or [-1]))
+                            .order_by(TextDoc.author, TextDoc.title)))
+    return {"sty": res, "sty_texts": texts, "sty_target": target, "MFW_CHOICES": ST.MFW_CHOICES, "DISTANCES": ST.DISTANCES,
+            "STY_MIN_WORDS": ST.MIN_WORDS}
+
+
+def _textcmp_context(db: Session, request: Request, sel) -> dict:
+    from app.services.textcompare import compare
+
+    chosen = [int(x) for x in request.query_params.getlist("cmp") if x.isdigit() and int(x) in sel.ids][:5]
+    if not chosen:
+        chosen = sel.ids[:4]
+    texts = list(db.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.n_words).where(TextDoc.id.in_(sel.ids or [-1]))
+                            .order_by(TextDoc.author, TextDoc.title)))
+    return {"tc": compare(db, chosen, sel.stopset) if len(chosen) >= 1 else None, "tc_texts": texts, "tc_chosen": chosen}
+
+
 @router.get("/api/entities/mentions")
 def entity_mentions(request: Request, db: Session = Depends(get_session)):
     from app.services.entities import mentions
@@ -847,6 +869,10 @@ def analysis(request: Request, db: Session = Depends(get_session)):
         ctx.update(_semantic_context(db, request, dict_id, sel, entry_id))
     elif tab == "topics":
         ctx.update(_topics_context(db, request, sel))
+    elif tab == "stylo":
+        ctx.update(_stylo_context(db, request, sel))
+    elif tab == "textcmp":
+        ctx.update(_textcmp_context(db, request, sel))
     elif tab == "freq":
         # отмеченные слова — только они (переключатель all_words показывает весь словарь)
         words = None if qp.get("all_words") else (sel.words or None)
@@ -981,6 +1007,50 @@ def sentence_precise(request: Request, sentence_id: int, db: Session = Depends(g
         db.commit()
         flash(request, "Точный разбор поставлен в очередь — обновите страницу через минуту", "success")
     return redirect(f"/sentences/{sentence_id}")
+
+
+# ------------------------------------------------------------------ проверка текста на признаки машинного текста
+
+
+@router.get("/check")
+def check_page(request: Request, text_id: str | None = None, db: Session = Depends(get_session)):
+    from app.services import aicheck as C
+
+    rep, label = None, ""
+    tid = _int(text_id)
+    if tid:
+        doc = db.get(TextDoc, tid)
+        if doc is not None and doc.status == "ready":
+            sents = C.db_sentences(db, tid, limit_words=20000)
+            rep, label = C.report(db, sents), f"«{doc.title}»" + (" (первые ~20 тыс. слов)" if (doc.n_words or 0) > 20000 else "")
+    texts = list(db.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.source_type)
+                            .where(TextDoc.status == "ready").order_by(TextDoc.title)))
+    return render(request, "check.html", rep=rep, label=label, texts=texts, text_id=tid, pasted="", MIN_WORDS=C.MIN_WORDS)
+
+
+@router.post("/check")
+async def check_submit(request: Request, text: str = Form(""), file: UploadFile | None = File(None), db: Session = Depends(get_session)):
+    from app.nlp.normalize import extract_text
+    from app.services import aicheck as C
+
+    body, label = text.strip(), "вставленный текст"
+    if file is not None and file.filename:
+        try:
+            body = extract_text(file.filename, await file.read()).strip()
+            label = f"файл «{file.filename}»"
+        except Exception as exc:  # noqa: BLE001
+            flash(request, f"Файл не прочитан: {exc}", "error")
+    if not body:
+        flash(request, "Вставьте текст или выберите файл", "error")
+        return redirect("/check")
+    words = body.split()
+    if len(words) > 20000:
+        body = " ".join(words[:20000])
+        label += " (первые 20 тыс. слов)"
+    rep = C.report(db, C.parse_raw(body))
+    texts = list(db.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.source_type)
+                            .where(TextDoc.status == "ready").order_by(TextDoc.title)))
+    return render(request, "check.html", rep=rep, label=label, texts=texts, text_id=None, pasted=text, MIN_WORDS=C.MIN_WORDS)
 
 
 # ------------------------------------------------------------------ задачи

@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -268,6 +269,9 @@ def get_parser(backend: str | None = None) -> Parser:
     if backend in _PARSERS:
         return _PARSERS[backend]
     if backend == "stanza":
+        if settings.stanza_dir and not os.path.isdir(os.path.join(settings.stanza_dir, "ru", "depparse")):
+            raise RuntimeError("Модели Stanza ещё не скачаны: дождитесь задачи «Загрузка моделей Stanza» на странице «Задачи» "
+                               "(или нажмите там «Повторить»), затем повторите эту задачу.")
         parser = StanzaParser(model_dir=settings.stanza_dir or None)
     elif backend == "natasha" or backend.startswith("natasha-"):  # «natasha-…» — отдельный экземпляр (тесты двух ступеней)
         parser = NatashaParser()

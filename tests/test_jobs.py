@@ -239,3 +239,95 @@ def test_delete_cancels_text_jobs_and_corpus_with_texts():
     run_pending()
     with SessionLocal() as s:
         assert s.get(Corpus, cid) is None and s.get(TextDoc, d1_id) is None
+
+
+def test_ai_check_calibrated_flow():
+    """С образцами обоих типов модель калибруется и отличает «машинный» шаблон от живого текста."""
+    import random
+
+    from app.db import SessionLocal
+    from app.services import aicheck as C
+    from app.services.ingest import create_text
+    from app.services.jobs import run_pending
+
+    rnd = random.Random(1)
+    human_bits = ["— Ты куда? — спросил он.", "Ну и пусть!", "Я долго молчал, глядя в окно, где медленно падал снег и кто-то шёл по двору.",
+                  "Она засмеялась.", "А что потом было, я уже не помню, да и вспоминать не хочу, честное слово.", "Тишина.",
+                  "Мы вышли на крыльцо, и ветер сразу ударил в лицо?", "— Пойдём, — сказала мать."]
+    ai_bits = ["Важно отметить, что аромат играет ключевую роль в создании уникальной атмосферы гармонии.",
+               "Кроме того, насыщенный запах трав создаёт удивительное ощущение, наполняя пространство гармонией.",
+               "Таким образом, богатый аромат цветов является неотъемлемой частью незабываемой атмосферы."]
+    with SessionLocal() as s:
+        for k in range(2):
+            h = "\n".join(" ".join(rnd.choice(human_bits) for _ in range(rnd.randint(1, 6))) for _ in range(260))
+            a = "\n".join(" ".join(rnd.choice(ai_bits) for _ in range(3)) for _ in range(160))
+            create_text(s, filename=f"h{k}.txt", data=h.encode("utf-8"), title=f"Люди {k}", source_type="natural")
+            create_text(s, filename=f"a{k}.txt", data=a.encode("utf-8"), title=f"Модель {k}", source_type="generated")
+        s.commit()
+    run_pending()
+    with SessionLocal() as s:
+        C._CALIB.clear()
+        m = C.calibrate(s)
+        assert m["ok"] and m["n_ai"] >= 10 and m["n_human"] >= 10 and m["cv_accuracy"] is not None
+        ai = C.report(s, C.parse_raw(" ".join(ai_bits) * 40))
+        hu = C.report(s, C.parse_raw("\n".join(" ".join(rnd.choice(human_bits) for _ in range(4)) for _ in range(60))))
+        assert ai["enough"] and ai["prob"] > hu["prob"] and ai["level"] in ("много", "заметно")
+        assert any(r["key"] == "markers" and r["position"] > 0.5 for r in ai["rows"])
+
+
+def test_stanza_models_job(tmp_path):
+    """Без моделей Stanza обработчик ставит задачу загрузки; упавшие из-за моделей задачи потом возвращаются в очередь."""
+    import os
+
+    from app.config import settings
+    from app.db import SessionLocal
+    from app.models import Job
+    from app.services import models as M
+    from app.services.jobs import claim_next, enqueue
+
+    old = settings.nlp_backend, settings.stanza_dir
+    settings.nlp_backend, settings.stanza_dir = "stanza", str(tmp_path)
+    try:
+        with SessionLocal() as s:
+            s.query(Job).delete()
+            s.commit()
+            other = enqueue(s, "match", {"dictionary_id": 999}, "раньше в очереди")
+            s.commit()
+        assert not M.stanza_ready() and M.needs_models()
+        jid = M.ensure_download_job()
+        assert jid and M.ensure_download_job() == jid  # вторая задача не ставится
+        with SessionLocal() as s:
+            assert claim_next(s).id == jid  # загрузка моделей — вне очереди
+            from app.nlp.parsers import get_parser
+            try:
+                get_parser("stanza")
+                raise AssertionError("должно быть исключение")
+            except RuntimeError as exc:
+                assert M.MISSING_MARK in str(exc)
+            job = s.get(Job, other.id)
+            job.status, job.error = "error", f"{M.MISSING_MARK}: дождитесь…"
+            s.commit()
+        os.makedirs(tmp_path / "ru" / "depparse")
+        (tmp_path / "resources.json").write_text("{}")
+        assert M.stanza_ready() and not M.needs_models() and M.ensure_download_job() is None
+        assert M.requeue_waiting() == 1
+        with SessionLocal() as s:
+            assert s.query(Job).filter_by(kind="match", status="queued").count() == 1
+    finally:
+        settings.nlp_backend, settings.stanza_dir = old
+
+
+def test_models_downloaded_bytes(tmp_path, monkeypatch):
+    """Прогресс загрузки моделей: готовые файлы + недокачанные в кэше huggingface_hub, без двойного счёта."""
+    from app.config import settings
+    from app.services import models as M
+
+    monkeypatch.setattr(settings, "stanza_dir", str(tmp_path))
+    monkeypatch.setenv("HF_HOME", str(tmp_path / ".hf"))
+    (tmp_path / "ru" / "pos").mkdir(parents=True)
+    (tmp_path / "ru" / "pos" / "model.pt").write_bytes(b"x" * 1000)
+    blobs = tmp_path / ".hf" / "hub" / "blobs"
+    blobs.mkdir(parents=True)
+    (blobs / "abc").write_bytes(b"x" * 1000)  # уже скопирован в ru/ — не считается
+    (blobs / "def.incomplete").write_bytes(b"x" * 500)
+    assert M.downloaded_bytes() == 1500

@@ -17,7 +17,10 @@ ALIASES = {
     "genre": ("жанр", "genre", "text_genre"),
     "source_type": ("тип", "type", "source_type", "тип текста"),
     "generator": ("модель", "генератор", "generator", "промпт", "prompt"),
+    "corpus": ("корпус", "корпуса", "подкорпус", "corpus", "corpora", "collection"),
 }
+# значения «нет данных» в таблицах: прочерки, пустые маркеры
+EMPTY_VALUES = {"-", "—", "–", "--", "нет", "n/a", "na", "nan", "none", "null", "?"}
 
 SOURCE_TYPE_WORDS = {
     "natural": ("natural", "литература", "естественный", "человек", "оригинал"),
@@ -52,11 +55,24 @@ def _canonical(header: str) -> str | None:
     return None
 
 
+def _num(key: str) -> str | None:
+    """«007» → «7»: числовые имена файлов («1.txt», «001.txt») совпадают с ID в таблице."""
+    return (key.lstrip("0") or "0") if key.isdigit() else None
+
+
 def file_keys(filename: str) -> list[str]:
-    """По каким ключам искать строку метаданных для файла: имя с расширением и без."""
+    """По каким ключам искать строку метаданных для файла: имя с расширением, без расширения, число без нулей."""
     name = PurePath(filename).name.lower()
     stem = PurePath(name).stem
-    return [name, stem]
+    keys = [name, stem]
+    if _num(stem):
+        keys.append(_num(stem))
+    return keys
+
+
+def _clean(value: str) -> str:
+    v = (value or "").strip()
+    return "" if v.lower() in EMPTY_VALUES else v
 
 
 def parse_meta_table(filename: str, data: bytes) -> dict[str, dict]:
@@ -84,12 +100,15 @@ def parse_meta_table(filename: str, data: bytes) -> dict[str, dict]:
         raise ValueError("В таблице метаданных нет колонки «файл» (имя файла, к которому относится строка)")
     out: dict[str, dict] = {}
     for r in rows[1:]:
-        rec = {k: (r[i].strip() if i < len(r) else "") for i, k in enumerate(header) if k}
+        rec = {k: _clean(r[i]) if i < len(r) else "" for i, k in enumerate(header) if k}
         key = rec.pop("file", "").lower()
         if not key:
             continue
+        rec["_key"] = key  # исходный ID из таблицы — сохраняется в сведениях текста
         out[PurePath(key).name] = rec
         out.setdefault(PurePath(key).stem, rec)
+        if _num(PurePath(key).stem):
+            out.setdefault(_num(PurePath(key).stem), rec)
     return out
 
 
@@ -98,3 +117,21 @@ def lookup(meta: dict[str, dict], filename: str) -> dict:
         if k in meta:
             return meta[k]
     return {}
+
+
+def unmatched_rows(meta: dict[str, dict], used: set[int]) -> list[str]:
+    """ID строк таблицы, для которых не нашлось файла (used — id() использованных записей)."""
+    seen, out = set(), []
+    for rec in meta.values():
+        if id(rec) in seen:
+            continue
+        seen.add(id(rec))
+        if id(rec) not in used:
+            out.append(rec.get("_key", "?"))
+    return out
+
+
+def split_corpora(value: str) -> list[str]:
+    """Колонка «корпус»: несколько корпусов через «;» или «|» (запятая — допустима внутри названия)."""
+    parts = re.split(r"[;|]", value or "")
+    return [p.strip() for p in parts if p.strip() and p.strip().lower() not in EMPTY_VALUES]

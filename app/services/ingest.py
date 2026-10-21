@@ -43,6 +43,7 @@ def create_text(
     generator: str | None = None,
     corpus_ids: list[int] | None = None,
     enqueue_job: bool = True,
+    extra_meta: dict | None = None,
 ) -> TextDoc:
     raw = extract_text(filename, data)
     doc = TextDoc(
@@ -57,7 +58,7 @@ def create_text(
         raw_text=raw,
         norm_text=normalize_text(raw),
         status="queued",
-        meta={},
+        meta=dict(extra_meta or {}),
     )
     if corpus_ids:
         doc.corpora = list(session.scalars(select(Corpus).where(Corpus.id.in_(corpus_ids))))
@@ -98,9 +99,15 @@ def mark_interrupted(text_id: int, message: str) -> None:
 
 def pipeline_label() -> str:
     """Описание конвейера для texts.pipeline_version (от него зависит кэш статистического портрета)."""
+    def version(backend: str | None = None) -> str:
+        try:
+            return get_parser(backend).version
+        except RuntimeError:  # основной парсер ещё не готов (модели Stanza скачиваются)
+            return backend or settings.nlp_backend
+
     if settings.two_stage:
-        return f"{get_parser(settings.fast_parser).version} → {get_parser().version} (двухступенчатый); syntax {SYNTAX_VERSION}"
-    return f"{get_parser().version}; syntax {SYNTAX_VERSION}"
+        return f"{version(settings.fast_parser)} → {version()} (двухступенчатый); syntax {SYNTAX_VERSION}"
+    return f"{version()}; syntax {SYNTAX_VERSION}"
 
 
 def run_ingest(job_id: int | None, text_id: int) -> None:
