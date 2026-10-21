@@ -99,9 +99,15 @@ def mark_interrupted(text_id: int, message: str) -> None:
 
 def pipeline_label() -> str:
     """Описание конвейера для texts.pipeline_version (от него зависит кэш статистического портрета)."""
+    def version(backend: str | None = None) -> str:
+        try:
+            return get_parser(backend).version
+        except RuntimeError:  # основной парсер ещё не готов (модели Stanza скачиваются)
+            return backend or settings.nlp_backend
+
     if settings.two_stage:
-        return f"{get_parser(settings.fast_parser).version} → {get_parser().version} (двухступенчатый); syntax {SYNTAX_VERSION}"
-    return f"{get_parser().version}; syntax {SYNTAX_VERSION}"
+        return f"{version(settings.fast_parser)} → {version()} (двухступенчатый); syntax {SYNTAX_VERSION}"
+    return f"{version()}; syntax {SYNTAX_VERSION}"
 
 
 def run_ingest(job_id: int | None, text_id: int) -> None:

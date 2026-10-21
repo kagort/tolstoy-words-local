@@ -273,3 +273,45 @@ def test_ai_check_calibrated_flow():
         hu = C.report(s, C.parse_raw("\n".join(" ".join(rnd.choice(human_bits) for _ in range(4)) for _ in range(60))))
         assert ai["enough"] and ai["prob"] > hu["prob"] and ai["level"] in ("много", "заметно")
         assert any(r["key"] == "markers" and r["position"] > 0.5 for r in ai["rows"])
+
+
+def test_stanza_models_job(tmp_path):
+    """Без моделей Stanza обработчик ставит задачу загрузки; упавшие из-за моделей задачи потом возвращаются в очередь."""
+    import os
+
+    from app.config import settings
+    from app.db import SessionLocal
+    from app.models import Job
+    from app.services import models as M
+    from app.services.jobs import claim_next, enqueue
+
+    old = settings.nlp_backend, settings.stanza_dir
+    settings.nlp_backend, settings.stanza_dir = "stanza", str(tmp_path)
+    try:
+        with SessionLocal() as s:
+            s.query(Job).delete()
+            s.commit()
+            other = enqueue(s, "match", {"dictionary_id": 999}, "раньше в очереди")
+            s.commit()
+        assert not M.stanza_ready() and M.needs_models()
+        jid = M.ensure_download_job()
+        assert jid and M.ensure_download_job() == jid  # вторая задача не ставится
+        with SessionLocal() as s:
+            assert claim_next(s).id == jid  # загрузка моделей — вне очереди
+            from app.nlp.parsers import get_parser
+            try:
+                get_parser("stanza")
+                raise AssertionError("должно быть исключение")
+            except RuntimeError as exc:
+                assert M.MISSING_MARK in str(exc)
+            job = s.get(Job, other.id)
+            job.status, job.error = "error", f"{M.MISSING_MARK}: дождитесь…"
+            s.commit()
+        os.makedirs(tmp_path / "ru" / "depparse")
+        (tmp_path / "resources.json").write_text("{}")
+        assert M.stanza_ready() and not M.needs_models() and M.ensure_download_job() is None
+        assert M.requeue_waiting() == 1
+        with SessionLocal() as s:
+            assert s.query(Job).filter_by(kind="match", status="queued").count() == 1
+    finally:
+        settings.nlp_backend, settings.stanza_dir = old
