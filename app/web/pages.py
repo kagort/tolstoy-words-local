@@ -7,7 +7,7 @@ import json
 import re
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
@@ -229,11 +229,13 @@ def text_stats(request: Request, text_id: int, refresh: int = 0, stop: str = "",
 @router.post("/texts/{text_id}/edit")
 def text_edit(request: Request, text_id: int, title: str = Form(...), author: str = Form(""), years: str = Form(""),
               genre: str = Form(""), source_type: str = Form("natural"), generator: str = Form(""),
-              corpus_ids: list[str] = Form([]), db: Session = Depends(get_session)):
+              short_title: str = Form(""), corpus_ids: list[str] = Form([]), db: Session = Depends(get_session)):
     doc = db.get(TextDoc, text_id)
     if doc is None:
         raise HTTPException(404)
     doc.title, doc.author, doc.genre = title.strip(), author.strip() or None, genre.strip() or None
+    meta = {k: v for k, v in (doc.meta or {}).items() if k != "short_title"}
+    doc.meta = {**meta, "short_title": short_title.strip()[:60]} if short_title.strip() else meta
     doc.year_from, doc.year_to = parse_years(years)
     doc.source_type, doc.generator = source_type, generator.strip() or None
     ids = [int(c) for c in corpus_ids if c.isdigit()]
@@ -580,8 +582,10 @@ def _analysis_context(db: Session, request: Request) -> dict:
     word_counts = {}
     if dict_id:
         word_counts = {r["entry_id"]: r["count"] for r in A.frequency(db, dict_id, sel.ids)["rows"]}
+    # в выпадающих списках и внутри категорий — сначала частые слова выборки, слова без вхождений — в конце
+    entries.sort(key=lambda e: (-word_counts.get(e.id, 0), e.surface.lower()))
     categories: dict[str, list] = {}
-    for e in entries:
+    for e in sorted(entries, key=lambda e: e.category or ""):
         categories.setdefault(e.category or "", []).append(e)
     return dict(dictionaries=dictionaries, corpora=corpora, dict_id=dict_id, corpus_id=sel.corpus_id, entries=entries,
                 corpus_name=sel.corpus_name, tab=qp.get("tab", "overview"), sel=sel, sel_texts=corpus_texts(db, sel),
@@ -778,7 +782,7 @@ def _stylo_context(db: Session, request: Request, sel) -> dict:
     chunk = chunk if chunk in (2000, 5000, 10000, 20000) else 5000
     target = _int(qp.get("target"))
     res = ST.analyze(db, sel.ids, mfw=_int(qp.get("mfw")) or 100, kind=qp.get("kind") or "cosine", unit=unit, chunk=chunk,
-                     target=target if target in sel.ids else None)
+                     target=target if target in sel.ids else None, exclude=sel.names)
     texts = list(db.execute(select(TextDoc.id, TextDoc.title, TextDoc.author).where(TextDoc.id.in_(sel.ids or [-1]))
                             .order_by(TextDoc.author, TextDoc.title)))
     return {"sty": res, "sty_texts": texts, "sty_target": target, "MFW_CHOICES": ST.MFW_CHOICES, "DISTANCES": ST.DISTANCES,
@@ -827,6 +831,22 @@ def entity_override(request: Request, norm: str = Form(...), etype: str = Form("
     return redirect(back if back.startswith("/") else "/analysis?tab=entities")
 
 
+@router.post("/places")
+def place_edit(request: Request, name: str = Form(...), action: str = Form("coords"), coords: str = Form(""),
+               option: str = Form(""), back: str = Form("/analysis?tab=geo"), db: Session = Depends(get_session)):
+    """Ручная правка места на карте: координаты, вариант из справочника, «не на карте», сброс."""
+    from app.services.geo import set_place
+
+    try:
+        msg = set_place(db, name, action, coords, _int(option))
+        db.commit()
+        flash(request, msg, "success")
+    except ValueError as exc:
+        db.rollback()
+        flash(request, str(exc), "error")
+    return redirect(back if back.startswith("/") else "/analysis?tab=geo")
+
+
 @router.post("/entities/extract")
 def entities_extract(request: Request, text_ids: list[str] = Form([]), back: str = Form("/analysis?tab=entities"),
                      db: Session = Depends(get_session)):
@@ -865,6 +885,10 @@ def analysis(request: Request, db: Session = Depends(get_session)):
         ctx.update(_map_context(db, request, dict_id, sel))
     elif tab == "entities":
         ctx.update(_entities_context(db, request, dict_id, sel))
+    elif tab == "geo":
+        from app.services.geo import KIND_LABELS, place_map
+
+        ctx.update({"geo": place_map(db, sel.ids), "GEO_KINDS": KIND_LABELS})
     elif tab == "semantic":
         ctx.update(_semantic_context(db, request, dict_id, sel, entry_id))
     elif tab == "topics":
@@ -879,11 +903,14 @@ def analysis(request: Request, db: Session = Depends(get_session)):
         ctx["freq"] = A.only_words(A.frequency(db, dict_id, text_ids), words)
         ctx["heat"] = A.frequency_by_text(db, dict_id, text_ids, entry_ids=words)
         ctx["freq_filtered"] = bool(words)
+        ctx["cats"] = A.category_frequency(db, dict_id, text_ids, entry_ids=words, dim=qp.get("cat_dim") or "author")
+        ctx["DIMENSIONS"] = A.DIMENSIONS
     elif tab == "conc":
         ctx["conc"] = A.concordance(
             db, dict_id, text_ids, entry_id=entry_id, entry_ids=sel.words, role=qp.get("role") or None,
             rel_type=qp.get("rel_type") or None, related_lemma=qp.get("related") or None,
             near=qp.get("near") or None, window=_int(qp.get("window")) or 3,
+            phrase=qp.get("phrase") or None, phrase_any_order=bool(qp.get("phrase_any")),
             include_invalid=bool(qp.get("invalid")), page=_int(qp.get("page")) or 1,
         )
     elif tab == "profile":
@@ -1127,3 +1154,44 @@ def jobs_clear(request: Request, what: str = Form("finished"), db: Session = Dep
 
 
 __all__ = ["router", "TokenRow", "TokenRelation"]
+
+
+# ------------------------------------------------------------------ база знаний
+
+
+@router.get("/help")
+def help_index(request: Request, q: str = ""):
+    from app.services import help as H
+
+    return render(request, "help.html", articles=list(H.articles().values()), terms=H.glossary(), q=q.strip(),
+                  results=H.search(q) if q.strip() else None)
+
+
+@router.get("/help/term/{tid}.json")
+def help_term(tid: str):
+    from app.services import help as H
+
+    t = H.glossary().get(tid)
+    if t is None:
+        raise HTTPException(404)
+    return JSONResponse(t)
+
+
+@router.get("/help/files/{name}")
+def help_file(name: str):
+    from app.services import help as H
+
+    p = H.FILES_DIR / name
+    if "/" in name or "\\" in name or name.startswith(".") or not p.is_file():
+        raise HTTPException(404)
+    return FileResponse(p, filename=name)
+
+
+@router.get("/help/{slug}")
+def help_article(request: Request, slug: str):
+    from app.services import help as H
+
+    art = H.articles().get(slug)
+    if art is None:
+        raise HTTPException(404)
+    return render(request, "help_article.html", art=art, articles=list(H.articles().values()))

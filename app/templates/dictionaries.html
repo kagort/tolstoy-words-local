@@ -23,7 +23,9 @@
       <label>Описание</label><input type="text" name="description">
       <label>Файл (CSV, TXT или XLSX)</label><input type="file" name="file" accept=".csv,.txt,.tsv,.xlsx">
       <p class="help">CSV: колонки <code>слово;категория;часть речи;комментарий</code> (обязательна только первая).
-        Часть речи — в обозначениях UD: NOUN, VERB, ADJ, ADV… TXT: по слову в строке или через запятую.</p>
+        Часть речи — в обозначениях UD: NOUN, VERB, ADJ, ADV… TXT: по слову в строке или через запятую.
+        Словосочетание — несколько слов через пробел: <code>здравый смысл</code>, <code>закон и порядок</code>,
+        <code>закон * порядок</code> (* — любое одно слово); вхождение засчитывается главному слову (первому существительному).</p>
       <label>…или впишите слова</label>
       <textarea name="words" placeholder="запах, аромат, вонь, пахнуть"></textarea>
       <label class="check"><input type="checkbox" name="include_participles"> учитывать причастия как формы глагола</label>

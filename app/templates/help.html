@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Справка{% endblock %}
+{% block content %}
+<h1>Справка</h1>
+<form method="get" action="/help" class="panel row" style="align-items:flex-end">
+  <div><label>Поиск по базе знаний</label><input type="search" name="q" value="{{ q }}" placeholder="например: logDice, стоп-слова, как загрузить таблицу метаданных" autofocus></div>
+  <div class="shrink"><button type="submit">Найти</button></div>
+</form>
+{% if results is not none %}
+<div class="panel">
+  <h2 style="margin-top:0">Найдено: {{ results|length }}</h2>
+  {% for r in results %}
+  <div class="help-result"><a href="/help/{{ r.article }}{{ '#' ~ r.anchor if r.anchor }}"><strong>{{ r.title }}</strong></a>
+    <span class="muted small">— {{ r.article_title }}</span><div class="small">{{ r.snippet }}</div></div>
+  {% else %}<p class="muted">Ничего не нашлось. Попробуйте другое слово или посмотрите глоссарий ниже.</p>{% endfor %}
+</div>
+{% endif %}
+<div class="grid2">
+  <div class="panel">
+    <h2 style="margin-top:0">Статьи</h2>
+    <ul>{% for a in articles %}<li><a href="/help/{{ a.slug }}">{{ a.title }}</a></li>{% endfor %}</ul>
+    <p class="help">Значок <span class="term-q" style="cursor:default">?</span> рядом с показателем на любой странице — краткое определение
+      при наведении; щелчок открывает статью глоссария.</p>
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0">Глоссарий</h2>
+    <div class="term-list">{% for tid, t in terms.items() %}<a href="{{ t.url }}" title="{{ t.short }}">{{ t.title }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</div>
+  </div>
+</div>
+{% endblock %}

@@ -18,7 +18,50 @@ function drawChart(id, data, layout) {
   const el = document.getElementById(id);
   if (!el || typeof Plotly === 'undefined') return;
   Plotly.newPlot(el, data, plotLayout(layout), { responsive: true, displaylogo: false, locale: 'ru',
-    toImageButtonOptions: { format: 'png', filename: id, scale: 2 } });
+    toImageButtonOptions: { format: 'png', filename: id, scale: 2 },
+    topojsonURL: '/static/topojson/' });  // контуры карты мира лежат локально: интернет не нужен
+}
+
+// Столбцы «группа × слово» для обзора и отчёта. Подписи групп — короткие (g.label), полные — в подсказке (g.full).
+// Группировка «Текст» и больше 6 групп — горизонтальные столбцы: длинные подписи читаются без наклона.
+function drawGroups(id, ov, metric, ytitle, extra) {
+  const labels = ov.groups.map(g => g.label), full = ov.groups.map(g => g.full || g.label);
+  const isPeriod = ov.dim === 'period';
+  const horizontal = !isPeriod && (ov.dim === 'text' || labels.length > 6);
+  const traces = ov.words.map(w => isPeriod
+    ? { type: 'scatter', mode: 'lines+markers', name: w.word, x: labels, y: w[metric], customdata: full,
+        hovertemplate: '%{customdata}<br>' + w.word + ': %{y}<extra></extra>' }
+    : horizontal
+      ? { type: 'bar', orientation: 'h', name: w.word, y: labels, x: w[metric], customdata: full,
+          hovertemplate: '%{customdata}<br>' + w.word + ': %{x}<extra></extra>' }
+      : { type: 'bar', name: w.word, x: labels, y: w[metric], customdata: full,
+          hovertemplate: '%{customdata}<br>' + w.word + ': %{y}<extra></extra>' });
+  const layout = horizontal
+    ? { barmode: 'group', xaxis: { title: ytitle }, yaxis: { automargin: true, autorange: 'reversed' },
+        height: Math.max(320, 120 + labels.length * Math.max(22, 12 * ov.words.length)), margin: { l: 20, r: 20, t: 50, b: 50 } }
+    : { barmode: 'group', yaxis: { title: ytitle }, xaxis: { automargin: true, tickangle: labels.length > 4 ? -30 : 0 },
+        margin: { l: 60, r: 20, t: 50, b: 40 } };
+  const el = document.getElementById(id);
+  if (el && layout.height) el.style.minHeight = layout.height + 'px';  // контейнер по высоте графика, без пустого места
+  drawChart(id, traces, Object.assign(layout, extra || {}));
+}
+
+// Тепловая карта «слово × группа»: при длинных подписях групп (тексты, много групп) группы идут по вертикали.
+function drawGroupHeat(id, ov, metric) {
+  const labels = ov.groups.map(g => g.label), full = ov.groups.map(g => g.full || g.label), words = ov.words.map(w => w.word);
+  const vertical = ov.dim === 'text' || labels.length > 6;
+  const el = document.getElementById(id);
+  const trace = vertical
+    ? { type: 'heatmap', z: labels.map((_, i) => ov.words.map(w => w[metric][i])), x: words, y: labels,
+        customdata: labels.map((_, i) => words.map(() => full[i])), hovertemplate: '%{customdata} — %{x}: %{z}<extra></extra>' }
+    : { type: 'heatmap', z: ov.words.map(w => w[metric]), x: labels, y: words,
+        customdata: words.map(() => full), hovertemplate: '%{y} — %{customdata}: %{z}<extra></extra>' };
+  Object.assign(trace, { colorscale: 'Blues', reversescale: true });
+  const height = vertical ? 90 + 30 * labels.length : 140 + 28 * words.length;
+  if (el) el.style.minHeight = height + 'px';
+  drawChart(id, [trace], vertical
+    ? { height, xaxis: { side: 'top', automargin: true }, yaxis: { automargin: true, autorange: 'reversed' }, margin: { l: 20, r: 20, t: 40, b: 10 } }
+    : { height, xaxis: { automargin: true, tickangle: labels.length > 4 ? -30 : 0 }, yaxis: { automargin: true }, margin: { l: 20, r: 20, t: 10, b: 40 } });
 }
 
 async function setValid(hitId, value, btn) {
@@ -267,3 +310,41 @@ async function showMarked(url, title) {
   wrap.style.display = '';
   wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+
+// Подсказки к метрикам: значок «?» (data-term) показывает краткое определение из глоссария (/help/term/<id>.json).
+(function () {
+  const cache = {};
+  let pop = null, timer = null;
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  function hide() { if (pop) { pop.remove(); pop = null; } }
+  async function show(el) {
+    const id = el.dataset.term;
+    if (!cache[id]) {
+      const res = await fetch(`/help/term/${encodeURIComponent(id)}.json`);
+      if (!res.ok) return;
+      cache[id] = await res.json();
+    }
+    const t = cache[id];
+    hide();
+    pop = document.createElement('div');
+    pop.className = 'term-pop';
+    pop.innerHTML = `<strong>${esc(t.title)}</strong>${esc(t.short)}<br><a href="${t.url}">Подробнее в справке →</a>`;
+    document.body.appendChild(pop);
+    const r = el.getBoundingClientRect();
+    const left = Math.min(window.scrollX + r.left, window.scrollX + document.documentElement.clientWidth - pop.offsetWidth - 10);
+    pop.style.left = Math.max(10, left) + 'px';
+    pop.style.top = (window.scrollY + r.bottom + 6) + 'px';
+    pop.addEventListener('mouseenter', () => clearTimeout(timer));
+    pop.addEventListener('mouseleave', () => { timer = setTimeout(hide, 250); });
+  }
+  document.addEventListener('mouseover', e => {
+    const el = e.target.closest && e.target.closest('[data-term]');
+    if (el) { clearTimeout(timer); show(el); }
+  });
+  document.addEventListener('mouseout', e => {
+    const el = e.target.closest && e.target.closest('[data-term]');
+    if (el) timer = setTimeout(hide, 250);
+  });
+  document.addEventListener('focusin', e => { if (e.target.dataset && e.target.dataset.term) show(e.target); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
+})();

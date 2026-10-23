@@ -21,6 +21,7 @@
       <a href="/analysis" class="{{ 'active' if p.startswith('/analysis') or p.startswith('/sentences') }}">Анализ</a>
       <a href="/check" class="{{ 'active' if p.startswith('/check') }}">Проверка текста</a>
       <a href="/jobs" class="{{ 'active' if p.startswith('/jobs') }}">Задачи</a>
+      <a href="/help" class="{{ 'active' if p.startswith('/help') }}">Справка</a>
     </nav>
     <div class="spacer"></div>
     <form class="inline" method="post" action="/logout"><button class="secondary small" type="submit">Выйти ({{ user }})</button></form>

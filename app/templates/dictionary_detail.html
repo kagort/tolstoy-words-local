@@ -14,7 +14,7 @@
     <tr><th>Слово</th><th>Разбор (лемма · часть речи)</th><th>Режим</th><th>Категория</th><th class="num">Вхождений</th><th></th></tr>
     {% for e in d.entries %}
     <tr id="e{{ e.id }}" class="{{ 'ambiguous' if e.ambiguous and not e.verified }}">
-      <td><form id="f{{ e.id }}" method="post" action="/dictionaries/{{ d.id }}/entries/{{ e.id }}"></form><strong>{{ e.surface }}</strong>{% if e.verified %} <span class="badge ready" title="проверено">✓</span>{% elif e.ambiguous %} <span class="badge warn">проверить</span>{% endif %}</td>
+      <td><form id="f{{ e.id }}" method="post" action="/dictionaries/{{ d.id }}/entries/{{ e.id }}"></form><strong>{{ e.surface }}</strong>{% if e.phrase %} <span class="badge" title="словосочетание: ищется по главному слову «{{ e.lemma }}», остальные слова проверяются рядом">словосочетание</span>{% endif %}{% if e.verified %} <span class="badge ready" title="проверено">✓</span>{% elif e.ambiguous %} <span class="badge warn">проверить</span>{% endif %}</td>
       <td>
         <select name="option" form="f{{ e.id }}">
           {% set cur = e.lemma ~ '|' ~ (e.upos or '') %}

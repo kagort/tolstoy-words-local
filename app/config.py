@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     admin_password: str = ""
     upload_max_mb: int = 50
     site_title: str = "Quotverba"
+    # часовой пояс для дат на страницах и в выгрузках (база хранит время с поясом, показывается в этом)
+    timezone: str = "Europe/Moscow"
 
     # NLP
     nlp_backend: str = "stanza"  # stanza | natasha

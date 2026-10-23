@@ -115,9 +115,16 @@ def export_frequency(fmt: str, request: Request, db: Session = Depends(get_sessi
         "word": "Слово", "lemma": "Лемма", "upos": "Часть речи", "category": "Категория", "count": "Вхождений",
         "ipm": "ipm", "sentences": "Предложений", "texts": "Текстов", "dp": "DP (неравномерность)"}).drop(columns=["entry_id"], errors="ignore")
     heat = A.frequency_by_text(db, dict_id, ids, top=200, entry_ids=words)
-    df_heat = pd.DataFrame(heat["z"], index=heat["words"], columns=heat["texts"]).reset_index().rename(columns={"index": "Слово (ipm по текстам)"}) if heat["words"] else pd.DataFrame()
-    params = _params(db, request) | {"Слов в корпусе": f["corpus_words"], "Текстов": f["n_texts"]}
-    return _send({"Частоты": df, "По текстам (ipm)": df_heat}, fmt, "frequency", params)
+    df_heat = pd.DataFrame(heat["z"], index=heat["words"], columns=heat["texts_full"]).reset_index().rename(columns={"index": "Слово (ipm по текстам)"}) if heat["words"] else pd.DataFrame()
+    frames = {"Частоты": df, "По текстам (ipm)": df_heat}
+    cats = A.category_frequency(db, dict_id, ids, entry_ids=words, dim=request.query_params.get("cat_dim") or "author")
+    if cats["has_categories"]:
+        frames["По категориям"] = pd.DataFrame([
+            {"Категория": r["category"], "Слов в категории": r["entries"], "Вхождений": r["count"], "ipm": r["ipm"], "Доля, %": r["share"],
+             **{f"ipm: {g['full']}": v for g, v in zip(cats["groups"], r["groups_ipm"])}} for r in cats["rows"]])
+    params = _params(db, request) | {"Слов в корпусе": f["corpus_words"], "Текстов": f["n_texts"],
+                                     "Категории по группировке": cats["dim_label"]}
+    return _send(frames, fmt, "frequency", params)
 
 
 @router.get("/concordance.{fmt}")
@@ -129,11 +136,12 @@ def export_concordance(fmt: str, request: Request, db: Session = Depends(get_ses
     c = A.concordance(db, dict_id, ids, entry_id=_int(qp.get("entry_id")), entry_ids=_words(db, request), role=qp.get("role") or None,
                       rel_type=qp.get("rel_type") or None, related_lemma=qp.get("related") or None,
                       near=qp.get("near") or None, window=_int(qp.get("window")) or 3,
+            phrase=qp.get("phrase") or None, phrase_any_order=bool(qp.get("phrase_any")),
                       include_invalid=bool(qp.get("invalid")), page=1, per_page=100_000, context_chars=10_000)
     df = pd.DataFrame([{
         "Слово словаря": i["word"], "Левый контекст": i["left"], "Словоформа": i["kw"], "Правый контекст": i["right"],
         "Роль": i["role_label"], "Связь UD": i["deprel"], "Часть речи UD": i["upos"], "Подтип роли": i["role_subtype"], "Источник": i["source"], "№ предложения": i["sentence_no"],
-        "ID предложения": i["sentence_id"], "Проверено": {None: "", True: "верно", False: "ложное"}[i["is_valid"]],
+        "ID предложения": i["sentence_id"], "Словосочетание": " | ".join(i["phrase"]), "Проверено": {None: "", True: "верно", False: "ложное"}[i["is_valid"]],
     } for i in c["items"]])
     return _send({"Конкорданс": df}, fmt, "concordance", _params(db, request) | {"Строк": c["total"]})
 
@@ -190,7 +198,7 @@ def export_overview(fmt: str, request: Request, db: Session = Depends(get_sessio
 
     dict_id, ids = _ctx(db, request)
     ov = _overview_context(db, request, dict_id, ids)["ov"]
-    head = {ov["dim_label"]: [g["label"] for g in ov["groups"]], "Слов в группе": [g["n_words"] for g in ov["groups"]],
+    head = {ov["dim_label"]: [g.get("full", g["label"]) for g in ov["groups"]], "Слов в группе": [g["n_words"] for g in ov["groups"]],
             "Текстов в группе": [g["n_texts"] for g in ov["groups"]]}
     frames = {}
     for metric, title in (("ipm", "ipm"), ("count", "Вхождения"), ("share", "Доля текстов, %")):
@@ -234,7 +242,7 @@ def export_report(fmt: str, request: Request, db: Session = Depends(get_session)
         "Предложений": c["sentences"], "Текстов": c["texts"], "DP": c["dp"], "Главная роль": c["top_role"],
         "Доля главной роли, %": c["top_role_pct"]} for c in rep["cards"]])}
     for dim, ov in rep["overviews"].items():
-        data = {ov["dim_label"]: [g["label"] for g in ov["groups"]], "Слов в группе": [g["n_words"] for g in ov["groups"]],
+        data = {ov["dim_label"]: [g.get("full", g["label"]) for g in ov["groups"]], "Слов в группе": [g["n_words"] for g in ov["groups"]],
                 "Текстов в группе": [g["n_texts"] for g in ov["groups"]]}
         for w in ov["words"] + [ov["total"]]:
             data[f"{w['word']} (ipm)"] = w["ipm"]
@@ -516,3 +524,17 @@ def export_dictionary(dict_id: int, db: Session = Depends(get_session)):
                         "комментарий": e.comment or "", "лемма": e.lemma, "режим": e.match_mode} for e in entries])
     return Response(df.to_csv(index=False, sep=";").encode("utf-8-sig"), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="dictionary-{dict_id}.csv"'})
+
+
+@router.get("/geo.{fmt}")
+def export_geo(fmt: str, request: Request, db: Session = Depends(get_session)):
+    if fmt not in FORMATS:
+        raise HTTPException(400)
+    from app.services.geo import place_map
+
+    g = place_map(db, _selection(db, request).ids, top=10_000)
+    src = {"auto": "справочник", "manual": "вручную", "none": "не на карте", "missing": "не найдено"}
+    df = pd.DataFrame([{"Место": p["name"], "Упоминаний": p["count"], "Текстов": p["texts"], "Широта": p["lat"], "Долгота": p["lon"],
+                        "Что нашлось": p["label"], "Источник координат": src.get(p["source"], p["source"])}
+                       for p in g["points"] + g["unresolved"]])
+    return _send({"Места": df}, fmt, "geo", _params(db, request) | {"Мест на карте": len(g["points"])})

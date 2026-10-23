@@ -12,6 +12,7 @@ from app.nlp.normalize import decode_bytes
 ALIASES = {
     "file": ("файл", "file", "filename", "имя файла", "textid", "id"),
     "title": ("название", "заглавие", "title", "texttitle"),
+    "short_title": ("короткое", "короткое название", "краткое название", "сокращение", "short", "short_title", "shorttitle"),
     "author": ("автор", "author", "text_author"),
     "years": ("год", "годы", "year", "years", "text_year_creation", "дата"),
     "genre": ("жанр", "genre", "text_genre"),

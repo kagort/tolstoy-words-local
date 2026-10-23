@@ -3,8 +3,8 @@
 <div class="panel row">
   <div class="shrink"><label>Единицы</label><select name="unit" form="sel-form"><option value="text" {{ 'selected' if sty.unit == 'text' }}>целые тексты</option><option value="chunk" {{ 'selected' if sty.unit == 'chunk' }}>фрагменты текстов</option></select></div>
   <div class="shrink"><label>Размер фрагмента, слов</label><select name="chunk" form="sel-form">{% for c in [2000, 5000, 10000, 20000] %}<option {{ 'selected' if sty.chunk == c }}>{{ c }}</option>{% endfor %}</select></div>
-  <div class="shrink"><label>Самых частых слов (MFW)</label><select name="mfw" form="sel-form">{% for n in MFW_CHOICES %}<option {{ 'selected' if sty.mfw == n }}>{{ n }}</option>{% endfor %}</select></div>
-  <div><label>Расстояние</label><select name="kind" form="sel-form">{% for k, v in DISTANCES.items() %}<option value="{{ k }}" {{ 'selected' if sty.kind == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div class="shrink"><label>Самых частых слов (MFW){{ term('mfw') }}</label><select name="mfw" form="sel-form">{% for n in MFW_CHOICES %}<option {{ 'selected' if sty.mfw == n }}>{{ n }}</option>{% endfor %}</select></div>
+  <div><label>Расстояние{{ term('cosine_delta') }}</label><select name="kind" form="sel-form">{% for k, v in DISTANCES.items() %}<option value="{{ k }}" {{ 'selected' if sty.kind == k }}>{{ v }}</option>{% endfor %}</select></div>
   <div><label>Кто автор? — спорный текст</label><select name="target" form="sel-form"><option value="">— не выбран —</option>{% for t in sty_texts %}<option value="{{ t.id }}" {{ 'selected' if t.id == sty_target }}>{% if t.author %}{{ t.author }}, {% endif %}«{{ t.title }}»</option>{% endfor %}</select></div>
   <div class="shrink"><button type="submit" form="sel-form">Показать</button></div>
   {% if sty.matrix %}<div class="shrink">Скачать: <a href="/export/stylometry.xlsx{{ qs(request) }}">XLSX</a></div>{% endif %}
@@ -28,9 +28,9 @@
     Если отрыв мал (меньше ~0,05 для Cosine Delta), атрибуция ненадёжна. Метод выбирает только среди авторов, чьи тексты есть в выборке.</p></div>
 {% endif %}
 <div class="grid cols-2">
-  <div class="panel"><h3 style="margin-top:0">Дендрограмма (кластеры по стилю)</h3><div id="chart-dendro" class="chart" style="min-height:{{ 140 + 22 * sty.units|length }}px"></div>
+  <div class="panel"><h3 style="margin-top:0">Дендрограмма (кластеры по стилю){{ term('upgma') }}</h3><div id="chart-dendro" class="chart" style="min-height:{{ 140 + 22 * sty.units|length }}px"></div>
     <p class="help">Чем раньше (левее) соединяются ветви, тем ближе стиль. Цвет подписи — автор.</p></div>
-  <div class="panel"><h3 style="margin-top:0">Карта текстов</h3><div id="chart-mds" class="chart" style="min-height:440px"></div>
+  <div class="panel"><h3 style="margin-top:0">Карта текстов{{ term('mds') }}</h3><div id="chart-mds" class="chart" style="min-height:440px"></div>
     <p class="help">Расстояния между точками приближённо отражают стилистические расстояния (многомерное шкалирование). Цвет — автор.</p></div>
 </div>
 {% if sty.units|length <= 60 %}<div class="panel"><h3 style="margin-top:0">Матрица расстояний</h3><div id="chart-dist" class="chart" style="min-height:{{ 160 + 20 * sty.units|length }}px"></div></div>{% endif %}
@@ -93,7 +93,7 @@ document.addEventListener('DOMContentLoaded', function () {
 <div class="grid cols-2">
   <div class="panel"><h3 style="margin-top:0">Пересечение частотной лексики (Жаккар)</h3><div id="chart-jac" class="chart" style="min-height:{{ 160 + 40 * tc.texts|length }}px"></div>
     <p class="help">Доля общих слов среди 300 частотных знаменательных лемм двух текстов (1 — одинаковые).</p></div>
-  {% if tc.delta %}<div class="panel"><h3 style="margin-top:0">Стилометрическое расстояние (Cosine Delta)</h3><div id="chart-delta" class="chart" style="min-height:{{ 160 + 40 * tc.texts|length }}px"></div>
+  {% if tc.delta %}<div class="panel"><h3 style="margin-top:0">Стилометрическое расстояние (Cosine Delta){{ term('cosine_delta') }}</h3><div id="chart-delta" class="chart" style="min-height:{{ 160 + 40 * tc.texts|length }}px"></div>
     <p class="help">По 100 самым частым словам (см. вкладку «Авторство»): чем меньше, тем ближе стиль.</p></div>{% endif %}
 </div>
 <script>

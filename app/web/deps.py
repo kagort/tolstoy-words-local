@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup
 
 from app import __version__
 from app.config import settings
@@ -59,7 +60,14 @@ templates.env.globals.update(
     pos_label=pos_label,
     role_label=role_label_ud,
     rel_label=rel_label_ud,
+    term=lambda tid: Markup(_term_html(tid)),
 )
+
+
+def _term_html(tid: str) -> str:
+    from app.services.help import term_html
+
+    return term_html(tid)
 
 
 def flash(request: Request, message: str, kind: str = "info") -> None:

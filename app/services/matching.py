@@ -101,7 +101,7 @@ def run_match(job_id: int | None, dictionary_id: int, entry_ids: list[int] | Non
             job.params = {**(job.params or {}), "manual": manual}
         s.execute(q)
         s.commit()
-        entry_data = [(e.id, e.surface, entry_token_filter(e, settings)) for e in entries]
+        entry_data = [(e.id, e.surface, entry_token_filter(e, settings), e.phrase) for e in entries]
         # двухступенчатая обработка: слова словаря ищутся с запасом в предварительном разборе
         cand_forms, cand_lemmas = set(), set()
         for e in entries:
@@ -140,7 +140,9 @@ def _match_entries(job_id: int | None, dictionary_id: int, entry_data: list, rea
     total_hits = 0
     span = 1.0 - progress_from
     precise = select(SentenceRow.id).where(SentenceRow.text_id.in_(ready_texts or [-1]), SentenceRow.parse_level == PARSE_PRECISE)
-    for n, (entry_id, surface, cond) in enumerate(entry_data, start=1):
+    from app.services.phrases import contains_head
+
+    for n, (entry_id, surface, cond, phrase) in enumerate(entry_data, start=1):
         if not ready_texts:
             break
         with SessionLocal() as s:
@@ -158,6 +160,9 @@ def _match_entries(job_id: int | None, dictionary_id: int, entry_data: list, rea
                 for hid, r in zip(hit_ids, chunk):
                     sent = sents.get(r.sentence_id)
                     if sent is None:
+                        continue
+                    # словосочетание: главное слово засчитывается, только если рядом есть остальные слова
+                    if phrase and not contains_head(sent.tokens, phrase["slots"], phrase["head"], r.idx):
                         continue
                     an = analyses.get(r.sentence_id) or analyses.setdefault(r.sentence_id, SentenceAnalysis(sent))
                     role = an.role(r.idx)

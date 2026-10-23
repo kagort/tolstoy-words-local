@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}{{ art.title }} — справка{% endblock %}
+{% block content %}
+<div class="help-layout">
+  <aside class="help-toc">
+    <form method="get" action="/help"><input type="search" name="q" placeholder="Поиск по справке"></form>
+    <div class="small" style="margin:8px 0"><a href="/help">← Все статьи</a></div>
+    {% for a in articles %}<div class="small {{ 'strong' if a.slug == art.slug }}"><a href="/help/{{ a.slug }}">{{ a.title }}</a></div>{% endfor %}
+    {% if art.toc %}<hr><div class="toc">{% for level, anchor, title in art.toc if level <= 3 %}
+      <div class="small toc-l{{ level }}"><a href="#{{ anchor }}">{{ title }}</a></div>{% endfor %}</div>{% endif %}
+  </aside>
+  <article class="panel help-article">{{ art.html|safe }}</article>
+</div>
+{% endblock %}

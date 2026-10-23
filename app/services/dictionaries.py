@@ -71,14 +71,24 @@ def _rows_to_entries(rows: list[list[str]]) -> list[dict]:
 
 
 def make_entry(item: dict) -> DictionaryEntry:
+    from app.services import phrases as P
+
     surface = item["surface"]
-    opts = parse_options(surface.split()[0] if surface else surface)
+    phrase = None
+    head_word = surface.split()[0] if surface else surface
+    if P.is_phrase(surface):
+        # словосочетание: ищется по главному слову, остальные слова проверяются при сопоставлении
+        slots = P.parse(surface)
+        head = P.head_slot(slots)
+        phrase = {"slots": slots, "head": head}
+        head_word = [w for w in P.split_words(surface) if w != P.GAP][sum(1 for x in slots[:head] if "gap" not in x)]
+    opts = parse_options(head_word)
     wanted_upos = item.get("upos")
     best = None
     if wanted_upos:
         best = next((o for o in opts if o.upos == wanted_upos), None)
     best = best or (opts[0] if opts else None)
-    lemma = best.lemma if best else surface.lower()
+    lemma = best.lemma if best else head_word.lower()
     upos = best.upos if best else wanted_upos
     lemmas = {o.lemma for o in opts if o.score >= 0.05}
     pos_set = {o.upos for o in opts if o.score >= 0.05}
@@ -93,6 +103,7 @@ def make_entry(item: dict) -> DictionaryEntry:
         verified=bool(wanted_upos),
         ambiguous=len(lemmas) > 1 or len(pos_set) > 1,
         options=[{"lemma": o.lemma, "upos": o.upos, "tag": o.tag, "score": round(o.score, 3)} for o in opts[:6]],
+        phrase=phrase,
     )
 
 

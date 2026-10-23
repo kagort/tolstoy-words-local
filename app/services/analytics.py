@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-from sqlalchemy import Integer, func, or_, select
+from sqlalchemy import Integer, func, or_, select, tuple_
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -109,7 +109,10 @@ def only_words(freq: dict, entry_ids: list[int] | None) -> dict:
 def frequency_by_text(session: Session, dictionary_id: int, text_ids: list[int], top: int = 15,
                       entry_ids: list[int] | None = None) -> dict:
     """Матрица ipm «слово × текст» для тепловой карты (entry_ids — только выбранные слова)."""
-    texts = list(session.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.n_words).where(TextDoc.id.in_(text_ids or [-1])).order_by(TextDoc.id)))
+    from app.services.labels import text_labels, unique
+
+    texts = list(session.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.n_words, TextDoc.meta)
+                                 .where(TextDoc.id.in_(text_ids or [-1])).order_by(TextDoc.id)))
     freq = only_words(frequency(session, dictionary_id, text_ids), entry_ids)["rows"][:top]
     ids = [r["entry_id"] for r in freq]
     counts = defaultdict(dict)
@@ -122,7 +125,8 @@ def frequency_by_text(session: Session, dictionary_id: int, text_ids: list[int],
             counts[entry_id][text_id] = cnt
     return {
         "words": [r["word"] for r in freq],
-        "texts": [f"{t.title}" + (f" ({t.author})" if t.author else "") for t in texts],
+        "texts": unique([text_labels(t.title, t.author, None, t.meta)[0] for t in texts]),
+        "texts_full": [text_labels(t.title, t.author, None, t.meta)[1] for t in texts],
         "z": [[round(ipm(counts[e].get(t.id, 0), t.n_words), 1) for t in texts] for e in ids],
     }
 
@@ -172,6 +176,8 @@ def concordance(
     related_lemma: str | None = None,
     near: str | None = None,
     window: int = 3,
+    phrase: str | None = None,
+    phrase_any_order: bool = False,
     include_invalid: bool = False,
     page: int = 1,
     per_page: int = 50,
@@ -181,7 +187,7 @@ def concordance(
         select(Hit.id, Hit.sentence_id, Hit.role, Hit.role_subtype, Hit.is_valid, Hit.form,
                TokenRow.start_char, TokenRow.end_char, TokenRow.deprel, TokenRow.upos, SentenceRow.text, SentenceRow.idx,
                TextDoc.id.label("text_id"), TextDoc.title, TextDoc.author, TextDoc.year_from,
-               DictionaryEntry.surface)
+               DictionaryEntry.surface, Hit.entry_id)
         .join(TokenRow, TokenRow.id == Hit.token_id)
         .join(SentenceRow, SentenceRow.id == Hit.sentence_id)
         .join(TextDoc, TextDoc.id == Hit.text_id)
@@ -205,6 +211,28 @@ def concordance(
         q = q.where(Hit.id.in_(sub))
     if near:
         q = q.where(near_condition(near, window))
+    phrase_hits: dict[int, list[str]] = {}
+    if phrase and phrase.strip():
+        from app.services import phrases as P
+
+        slots = P.parse(phrase)
+        pre = P.sql_prefilter(slots, Hit.sentence_id)
+        cand = []
+        if pre is not None:
+            sub = q.where(pre).subquery()
+            cand = list(session.scalars(select(sub.c.sentence_id).distinct()))
+        positions: dict[int, set[int]] = {}
+        phrase_hits = P.match_sentences(session, cand, slots, phrase_any_order, positions)
+        q = q.where(Hit.sentence_id.in_(list(phrase_hits) or [-1]))
+        # показываем только вхождения, которые входят в словосочетание; если в предложении таких нет
+        # (слова словосочетания не из словаря) — все вхождения предложения
+        if not entry_id and phrase_hits:
+            inside = [(sid, i) for sid, idxs in positions.items() for i in idxs]
+            have = {sid for sid, i in session.execute(
+                select(Hit.sentence_id, Hit.token_idx).where(Hit.dictionary_id == dictionary_id, Hit.sentence_id.in_(list(positions)))).all()
+                if i in positions.get(sid, ())}
+            q = q.where(or_(tuple_(Hit.sentence_id, Hit.token_idx).in_(inside),
+                            Hit.sentence_id.in_([sid for sid in phrase_hits if sid not in have] or [-1])))
     total = session.scalar(select(func.count()).select_from(q.subquery())) or 0
     rows = session.execute(q.order_by(TextDoc.id, SentenceRow.idx, Hit.token_idx).offset((page - 1) * per_page).limit(per_page)).all()
     items = []
@@ -231,8 +259,21 @@ def concordance(
             "text_id": r.text_id,
             "source": f"{r.author + ', ' if r.author else ''}«{r.title}»{', ' + str(r.year_from) if r.year_from else ''}",
             "sentence_no": r.idx,
+            "phrase": phrase_hits.get(r.sentence_id, []),
         })
-    return {"items": items, "total": total, "page": page, "per_page": per_page, "pages": max(1, -(-total // per_page))}
+    # записи словаря-словосочетания: показываем найденный отрывок («здравого смысла»), а не только главное слово
+    phr_entries = {e.id: e.phrase for e in session.scalars(select(DictionaryEntry).where(
+        DictionaryEntry.id.in_({r.entry_id for r in rows} or {-1}), DictionaryEntry.phrase.is_not(None))) if e.phrase}
+    if phr_entries:
+        from app.services import phrases as P
+
+        for eid, ph in phr_entries.items():
+            sids = [it["sentence_id"] for it, r in zip(items, rows) if r.entry_id == eid]
+            found = P.match_sentences(session, sids, ph["slots"])
+            for it, r in zip(items, rows):
+                if r.entry_id == eid and not it["phrase"]:
+                    it["phrase"] = found.get(r.sentence_id, [])
+    return {"items": items, "total": total, "phrase_sentences": len(phrase_hits) if phrase else None, "page": page, "per_page": per_page, "pages": max(1, -(-total // per_page))}
 
 
 # ------------------------------------------------------------------ профиль слова
@@ -459,14 +500,11 @@ def _period_label(start: int, step: int) -> str:
     return str(start) if step == 1 else f"{start}–{start + step - 1}"
 
 
-def overview(session: Session, dictionary_id: int, text_ids: list[int], entry_ids: list[int],
-             dim: str = "author", step: int = 10) -> dict:
-    """Матрица «группа × слово»: вхождения, ipm, доля текстов группы со словом; плюс сумма по выбранным словам."""
+def group_sizes(session: Session, ids: list[int], dim: str, step: int = 10):
+    """Группы выборки (автор, текст, жанр, тип, период): ключ группировки SQL и [{key, label, full, n_words, n_texts}]."""
+    from app.services.labels import TITLE_MAX, clip, short_author, text_labels, unique
     from app.web.deps import SOURCE_TYPES  # подписи типов текста
 
-    dim = dim if dim in DIMENSIONS else "author"
-    step = step if step in PERIOD_STEPS else 10
-    ids = text_ids or [-1]
     key = _group_expr(dim, step).label("g")
     sizes = session.execute(
         select(key, func.coalesce(func.sum(TextDoc.n_words), 0), func.count(TextDoc.id)).where(TextDoc.id.in_(ids)).group_by(key)
@@ -474,23 +512,40 @@ def overview(session: Session, dictionary_id: int, text_ids: list[int], entry_id
     groups = []
     titles = {}
     if dim == "text":
-        titles = {t.id: (f"{t.author}, " if t.author else "") + f"«{t.title}»" + (f" ({t.year_from})" if t.year_from else "")
-                  for t in session.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.year_from).where(TextDoc.id.in_(ids)))}
+        titles = {t.id: text_labels(t.title, t.author, t.year_from, t.meta)
+                  for t in session.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.year_from, TextDoc.meta)
+                                           .where(TextDoc.id.in_(ids)))}
     for g, n_words, n_texts in sizes:
         g = int(g) if dim in ("text", "period") and g is not None else g
         if dim == "text":
-            label = titles.get(g, str(g))
+            label, full = titles.get(g, (str(g), str(g)))
         elif dim == "period":
-            label = _period_label(g, step)
+            label = full = _period_label(g, step)
         elif dim == "source_type":
-            label = SOURCE_TYPES.get(g, g)
+            label = full = SOURCE_TYPES.get(g, g)
+        elif dim == "author":
+            label, full = (short_author(g) or g), g
         else:
-            label = g
-        groups.append({"key": g, "label": label, "n_words": int(n_words or 0), "n_texts": n_texts})
+            label, full = clip(g, TITLE_MAX), g
+        # label — короткая подпись для графика, full — полная (подсказка, таблица, выгрузка)
+        groups.append({"key": g, "label": label, "full": full, "n_words": int(n_words or 0), "n_texts": n_texts})
     if dim == "period":
         groups.sort(key=lambda x: (x["key"] == NO_DATE, x["key"]))
     else:
         groups.sort(key=lambda x: -x["n_words"])
+    for gr, lab in zip(groups, unique([gr["label"] for gr in groups])):
+        gr["label"] = lab
+
+    return key, groups
+
+
+def overview(session: Session, dictionary_id: int, text_ids: list[int], entry_ids: list[int],
+             dim: str = "author", step: int = 10) -> dict:
+    """Матрица «группа × слово»: вхождения, ipm, доля текстов группы со словом; плюс сумма по выбранным словам."""
+    dim = dim if dim in DIMENSIONS else "author"
+    step = step if step in PERIOD_STEPS else 10
+    ids = text_ids or [-1]
+    key, groups = group_sizes(session, ids, dim, step)
 
     entries = list(session.scalars(select(DictionaryEntry).where(DictionaryEntry.id.in_(entry_ids or [-1]))))
     order = {eid: k for k, eid in enumerate(entry_ids)}
@@ -523,3 +578,47 @@ def overview(session: Session, dictionary_id: int, text_ids: list[int], entry_id
     total = {"word": "все выбранные слова", **row(total_counts, total_texts)}
     return {"dim": dim, "dim_label": DIMENSIONS[dim], "step": step, "groups": groups, "words": words, "total": total,
             "corpus_words": sum(g["n_words"] for g in groups), "n_texts": sum(g["n_texts"] for g in groups)}
+
+
+# ------------------------------------------------------------------ частоты по категориям словаря
+
+NO_CATEGORY = "без категории"
+
+
+def category_frequency(session: Session, dictionary_id: int, text_ids: list[int], entry_ids: list[int] | None = None,
+                       dim: str = "author", step: int = 10) -> dict:
+    """Сумма вхождений слов каждой категории словаря: всего и по группам выборки (ipm — на миллион слов группы).
+
+    entry_ids — только выбранные слова (если заданы). Доля — какую часть вхождений всех категорий составляет категория.
+    """
+    dim = dim if dim in DIMENSIONS else "author"
+    ids = text_ids or [-1]
+    key, groups = group_sizes(session, ids, dim, step)
+    cat = func.coalesce(func.nullif(DictionaryEntry.category, ""), NO_CATEGORY)
+    q = (select(cat, key, func.count()).select_from(Hit)
+         .join(DictionaryEntry, DictionaryEntry.id == Hit.entry_id).join(TextDoc, TextDoc.id == Hit.text_id)
+         .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), VALID))
+    if entry_ids:
+        q = q.where(Hit.entry_id.in_(entry_ids))
+    counts: dict[str, dict] = defaultdict(dict)
+    for c, g, n in session.execute(q.group_by(cat, key)):
+        g = int(g) if dim in ("text", "period") and g is not None else g
+        counts[c][g] = n
+    n_entries = Counter(dict(session.execute(
+        select(cat, func.count()).where(DictionaryEntry.dictionary_id == dictionary_id,
+                                        *([DictionaryEntry.id.in_(entry_ids)] if entry_ids else [])).group_by(cat)).all()))
+    total_words = sum(g["n_words"] for g in groups)
+    grand = sum(sum(v.values()) for v in counts.values())
+    rows = []
+    for c in sorted(set(n_entries) | set(counts), key=lambda c: -sum(counts.get(c, {}).values())):
+        by = counts.get(c, {})
+        total = sum(by.values())
+        rows.append({
+            "category": c, "entries": n_entries.get(c, 0), "count": total,
+            "ipm": round(ipm(total, total_words), 1),
+            "share": round(100 * total / grand, 1) if grand else 0.0,
+            "groups_ipm": [round(ipm(by.get(g["key"], 0), g["n_words"]), 1) for g in groups],
+            "groups_count": [by.get(g["key"], 0) for g in groups],
+        })
+    return {"dim": dim, "dim_label": DIMENSIONS[dim], "groups": groups, "rows": rows, "corpus_words": total_words,
+            "has_categories": any(r["category"] != NO_CATEGORY for r in rows)}
