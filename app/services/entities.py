@@ -370,3 +370,29 @@ def cooccurrence_examples(session: Session, text_ids: list[int], name: str, entr
         if _unit(r[1], r[2], r[3], unit) in both:
             marks[r[0]].append((r[6], r[7]))
     return _sentences(session, sorted(marks)[:limit], marks)
+
+
+def name_lemmas(session: Session, text_ids: list[int], min_share: float = 0.5) -> frozenset[str]:
+    """Леммы имён собственных выборки — для параметра «без имён собственных» (TF-IDF, темы, коллокации, стилометрия).
+
+    Имя — токен с частью речи PROPN или внутри найденного имени (вкладка «Имена»). Лемма исключается, только если
+    она чаще бывает именем, чем обычным словом: «Надежда» (имя) не убирает слово «надежда» из текстов, где оно
+    встречается в основном как существительное.
+    """
+    from sqlalchemy import and_, exists, or_
+
+    if not text_ids:
+        return frozenset()
+    in_entity = exists(select(Entity.id).where(
+        Entity.sentence_id == TokenRow.sentence_id, TokenRow.start_char >= Entity.start_char, TokenRow.end_char <= Entity.end_char))
+    named = dict(session.execute(
+        select(TokenRow.lemma_norm, func.count())
+        .where(TokenRow.text_id.in_(text_ids), TokenRow.upos != "PUNCT", or_(TokenRow.upos == "PROPN", in_entity))
+        .group_by(TokenRow.lemma_norm)).all())
+    if not named:
+        return frozenset()
+    totals = dict(session.execute(
+        select(TokenRow.lemma_norm, func.count())
+        .where(and_(TokenRow.text_id.in_(text_ids), TokenRow.lemma_norm.in_(list(named))))
+        .group_by(TokenRow.lemma_norm)).all())
+    return frozenset(lem for lem, n in named.items() if lem and n >= min_share * totals.get(lem, n))

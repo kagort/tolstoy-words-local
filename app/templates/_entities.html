@@ -2,7 +2,7 @@
 {% if tab == 'entities' and ents %}
 {% set selq = sel.query(False) %}
 <div class="panel row">
-  <div><label>Класс</label><select name="etype" form="sel-form"><option value="">все</option>{% for k, v in ETYPES.items() %}<option value="{{ k }}" {{ 'selected' if ent_etype == k }}>{{ v }} ({{ ents.by_type.get(k, 0) }})</option>{% endfor %}</select></div>
+  <div><label>Класс{{ term('ner') }}</label><select name="etype" form="sel-form"><option value="">все</option>{% for k, v in ETYPES.items() %}<option value="{{ k }}" {{ 'selected' if ent_etype == k }}>{{ v }} ({{ ents.by_type.get(k, 0) }})</option>{% endfor %}</select></div>
   <div><label>Поиск имени</label><input type="search" name="q" form="sel-form" value="{{ request.query_params.get('q', '') }}" placeholder="например: Пьер"></div>
   <div><label>Связь — встречаются</label><select name="unit" form="sel-form">{% for k, v in UNITS.items() %}<option value="{{ k }}" {{ 'selected' if ent_unit == k }}>{{ v }}</option>{% endfor %}</select></div>
   <div><label>Сопоставить со словарём</label><select name="cross" form="sel-form">{% for k, v in ETYPES.items() %}<option value="{{ k }}" {{ 'selected' if ent_cross == k }}>{{ v }} × слова словаря</option>{% endfor %}</select></div>

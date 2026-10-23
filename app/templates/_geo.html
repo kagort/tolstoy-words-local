@@ -1,0 +1,93 @@
+{# ============================================================== ГЕОГРАФИЯ #}
+{% if tab == 'geo' and geo %}
+{% set back = request.url.path ~ '?' ~ request.url.query %}
+{% if geo.missing %}
+<div class="flash info">Для {{ geo.missing|length }} текстов выборки имена собственные ещё не извлечены — места из них на карте не появятся.
+  <form class="inline" method="post" action="/entities/extract">{% for t in geo.missing %}<input type="hidden" name="text_ids" value="{{ t }}">{% endfor %}
+    <input type="hidden" name="back" value="{{ back }}"><button class="small" type="submit">Извлечь имена</button></form></div>
+{% endif %}
+<div class="stat-tiles" style="margin-bottom:12px">
+  <div class="tile"><div class="tile-num">{{ geo.points|length }}</div><div class="tile-label">мест на карте</div></div>
+  <div class="tile"><div class="tile-num">{{ geo.to_check }}</div><div class="tile-label">стоит проверить</div></div>
+  <div class="tile"><div class="tile-num">{{ geo.unresolved|length }}</div><div class="tile-label">без координат</div></div>
+  <div class="tile"><div class="tile-num">{{ geo.n_mentions }}</div><div class="tile-label">упоминаний мест на карте</div></div>
+</div>
+<div class="row" style="margin-bottom:8px"><div class="spacer"></div><div class="shrink">Скачать: <a href="/export/geo.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/geo.csv{{ qs(request) }}">CSV</a></div></div>
+<div class="panel">
+  <div class="row" style="align-items:flex-end">
+    <div><h3 style="margin-top:0">Места на карте{{ term('geomap') }}</h3>
+      <div class="help">Размер точки — число упоминаний. {% if geo.single_text %}Линия соединяет места в порядке первого упоминания в тексте (включается щелчком по легенде «маршрут»).{% else %}Выберите один текст, чтобы увидеть маршрут — места в порядке появления.{% endif %}
+        Щелчок по точке — упоминания в тексте.</div></div>
+    <div class="shrink"><label>Область</label><select id="geo-scope">
+      {% for k, v in [('world', 'весь мир'), ('europe', 'Европа'), ('asia', 'Азия'), ('africa', 'Африка'), ('north america', 'Северная Америка'), ('south america', 'Южная Америка')] %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
+  </div>
+  {% if geo.points %}<div id="chart-geo" class="chart" style="min-height:560px"></div>
+  {% else %}<p class="muted">В выборке нет мест с координатами.</p>{% endif %}
+</div>
+<div class="panel" id="marked-box" style="display:none"><h3 style="margin-top:0" id="marked-title"></h3><div id="marked"></div></div>
+
+{% macro place_form(p) %}
+<details><summary class="small">править</summary>
+  <form method="post" action="/places" class="small" style="margin-top:4px">
+    <input type="hidden" name="name" value="{{ p.name }}"><input type="hidden" name="back" value="{{ back }}">
+    {% if p.options|length > 1 or (p.options and p.source != 'auto') %}<label>Другое место из справочника</label>
+      <select name="option">{% for o in p.options %}<option value="{{ o.index }}">{{ o.label }} ({{ '%.2f'|format(o.lat) }}, {{ '%.2f'|format(o.lon) }})</option>{% endfor %}</select>
+      <button class="small" type="submit" name="action" value="option">Выбрать</button>{% endif %}
+    <label>Координаты (широта, долгота — можно скопировать из Яндекс или Google Карт)</label>
+    <input type="text" name="coords" placeholder="55.75, 37.62" style="width:160px">
+    <button class="small" type="submit" name="action" value="coords">Поставить</button>
+    <div style="margin-top:4px"><button class="small secondary" type="submit" name="action" value="none" title="выдуманное место или ошибка распознавания">Не на карте</button>
+      {% if p.source in ('manual', 'none') %}<button class="small secondary" type="submit" name="action" value="reset">Сбросить правку</button>{% endif %}</div>
+  </form></details>
+{% endmacro %}
+
+<div class="grid cols-2">
+  <div class="panel table-scroll"><h3 style="margin-top:0">Места на карте</h3>
+    <table><tr><th>Место</th><th class="num">Упоминаний</th><th>Что нашлось</th><th></th></tr>
+      {% for p in geo.points %}<tr><td><strong>{{ p.name }}</strong></td><td class="num">{{ p.count }}</td>
+        <td class="small">{{ p.label }}{% if p.source == 'manual' %} <span class="badge" title="поставлено вручную">✎</span>{% elif p.ambiguous %} <span class="badge warn" title="в справочнике несколько мест с таким названием — проверьте">?</span>{% elif p.doubtful %} <span class="badge warn" title="совпало с небольшим населённым пунктом — возможно, это выдуманное место или не место вовсе">проверить</span>{% endif %}</td>
+        <td>{{ place_form(p) }}</td></tr>{% endfor %}
+    </table></div>
+  <div class="panel table-scroll"><h3 style="margin-top:0">Без координат</h3>
+    {% if geo.unresolved %}<table><tr><th>Место</th><th class="num">Упоминаний</th><th>Почему</th><th></th></tr>
+      {% for p in geo.unresolved %}<tr><td><strong>{{ p.name }}</strong></td><td class="num">{{ p.count }}</td><td class="small muted">{{ p.label }}</td>
+        <td>{{ place_form(p) }}</td></tr>{% endfor %}
+    </table>
+    <p class="help">Чаще всего это выдуманные места, ошибки распознавания (фамилия вместо города) или редкие названия. Ошибочные имена
+      удобнее скрыть или переклассифицировать на вкладке «Имена» — тогда они исчезнут и отсюда.</p>
+    {% else %}<p class="muted">Все места выборки нашлись в справочнике.</p>{% endif %}
+  </div>
+</div>
+<p class="help">Справочник мест: GeoNames (CC BY 4.0, geonames.org) — города больше 1000 жителей и страны с русскими названиями; реки, горы, моря,
+  регионы и исторические названия — в файле <code>app/data/places_extra_ru.tsv</code> (его можно дополнять). Интернет не нужен.</p>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  {% if geo.points %}
+  const geo = {{ geo|tojson }}, selq = {{ sel.query(False)|tojson }};
+  const maxC = Math.max(...geo.points.map(p => p.count));
+  const traces = [];
+  if (geo.route.length > 1) {
+    traces.push({ type: 'scattergeo', mode: 'lines', lat: geo.route.map(p => p.lat), lon: geo.route.map(p => p.lon),
+      line: { width: 1.5, color: cssVar('--muted') }, opacity: 0.6, hoverinfo: 'skip', name: 'маршрут (порядок упоминаний)',
+      visible: geo.route.length > 12 ? 'legendonly' : true });  // на длинном тексте линии путаются — включаются щелчком по легенде
+  }
+  traces.push({ type: 'scattergeo', mode: 'markers+text', lat: geo.points.map(p => p.lat), lon: geo.points.map(p => p.lon),
+    text: geo.points.map((p, i) => i < 25 ? p.name : ''), textposition: 'top center', textfont: { size: 11 },
+    customdata: geo.points.map(p => [p.name, p.count, p.label]),
+    marker: { size: geo.points.map(p => 6 + 28 * Math.sqrt(p.count / maxC)), color: cssVar('--accent'), opacity: 0.75,
+      line: { width: 1, color: cssVar('--panel') } },
+    hovertemplate: '<b>%{customdata[0]}</b><br>упоминаний: %{customdata[1]}<br>%{customdata[2]}<extra></extra>', showlegend: false });
+  const geoLayout = scope => ({ geo: { scope, resolution: 110, showcountries: true, countrycolor: cssVar('--border'), showland: true,
+    landcolor: cssVar('--accent-soft'), showocean: true, oceancolor: cssVar('--panel'), showlakes: false, coastlinecolor: cssVar('--border'),
+    projection: { type: scope === 'world' ? 'natural earth' : 'mercator' }, bgcolor: 'rgba(0,0,0,0)' },
+    margin: { l: 0, r: 0, t: 0, b: 0 }, height: 560, legend: { orientation: 'h', x: 0, y: 1.02 } });
+  drawChart('chart-geo', traces, geoLayout('world'));
+  const el = document.getElementById('chart-geo');
+  document.getElementById('geo-scope').addEventListener('change', e => Plotly.relayout(el, { 'geo.scope': e.target.value,
+    'geo.projection.type': e.target.value === 'world' ? 'natural earth' : 'mercator' }));
+  if (el && el.on) el.on('plotly_click', ev => { const d = ev.points[0].customdata; if (d) showMarked(`/api/entities/mentions?${selq}&name=${encodeURIComponent(d[0])}`, 'Упоминания: ' + d[0]); });
+  {% endif %}
+});
+</script>
+{% endif %}

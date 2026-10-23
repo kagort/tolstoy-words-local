@@ -8,6 +8,7 @@ services:
       POSTGRES_USER: ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?Задайте DB_PASSWORD в файле .env}
       POSTGRES_DB: ${DB_NAME:-tolstoy}
+      TZ: ${TIMEZONE:-Europe/Moscow}
     volumes:
       - pgdata:/var/lib/postgresql/data
     # порт открыт только на этом компьютере (для DBeaver/pgAdmin); из интернета недоступен

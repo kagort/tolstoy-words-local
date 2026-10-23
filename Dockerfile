@@ -31,6 +31,7 @@ RUN if [ "$NLP_BACKEND" = "stanza" ]; then \
 COPY alembic.ini ./
 COPY migrations ./migrations
 COPY app ./app
+COPY docs ./docs
 COPY deploy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh && useradd --create-home --uid 1000 tw && mkdir -p /models/stanza && chown -R tw /app /models
 USER tw

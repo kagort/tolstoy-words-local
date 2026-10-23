@@ -113,3 +113,18 @@ def test_batch_upload_zip_with_meta_inside(client):
         corp = {c.name: {t.source_filename for t in c.texts} for c in s.query(Corpus).all()}
         assert corp["XX век"] == {"10.txt", "11.txt"} and corp["Эпопеи"] == {"10.txt"}
         assert s.query(TextDoc).filter(TextDoc.source_filename.like("%._10%")).count() == 0
+
+
+def test_short_labels():
+    from app.services.labels import short_author, text_labels, unique
+
+    assert short_author("Лев Николаевич Толстой") == "Толстой Л. Н."
+    assert short_author("Шмелев И.") == "Шмелев И."
+    assert short_author("Максим Горький") == "Горький М."
+    assert short_author("Qwen") == "Qwen"
+    assert short_author("Илья Ильф, Евгений Петров") == "Ильф И., Петров Е."
+    short, full = text_labels("Повесть о том, как поссорился Иван Иванович с Иваном Никифоровичем", "Николай Васильевич Гоголь", 1834)
+    assert short.startswith("Гоголь Н. В. · Повесть о том") and short.endswith("…") and len(short) < 50
+    assert full == "Николай Васильевич Гоголь, «Повесть о том, как поссорился Иван Иванович с Иваном Никифоровичем» (1834)"
+    assert text_labels("Война и мир", None, None, {"short_title": "ВиМ"})[0] == "ВиМ"
+    assert unique(["А", "Б", "А"]) == ["А", "Б", "А (2)"]

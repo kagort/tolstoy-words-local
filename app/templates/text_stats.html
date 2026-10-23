@@ -42,7 +42,7 @@
     <table>
       <tr><td><span class="term" title="Type-Token Ratio: разных словоформ / всех словоупотреблений. Сильно зависит от длины текста — сравнивайте только тексты близкого объёма">TTR словоформ</span></td><td class="num">{{ lx.ttr_forms }}</td></tr>
       <tr><td><span class="term" title="То же для лемм">TTR лемм</span></td><td class="num">{{ lx.ttr_lemmas }}</td></tr>
-      <tr><td><span class="term" title="Moving-Average TTR (окно 500 лемм): средняя доля разных лемм в окне. Пригоден для сравнения текстов разной длины">MATTR</span></td><td class="num">{{ lx.mattr }}</td></tr>
+      <tr><td><span class="term" title="Moving-Average TTR (окно 500 лемм): средняя доля разных лемм в окне. Пригоден для сравнения текстов разной длины">MATTR</span>{{ term('ttr') }}</td><td class="num">{{ lx.mattr }}</td></tr>
       <tr><td><span class="term" title="Леммы, встретившиеся ровно один раз">Hapax legomena</span></td><td class="num">{{ lx.hapax }} ({{ lx.hapax_pct }}% лемм)</td></tr>
       <tr><td><span class="term" title="Леммы, встретившиеся ровно два раза">Dis legomena</span></td><td class="num">{{ lx.dis }}</td></tr>
       <tr><td><span class="term" title="Мера повторяемости лексики; чем больше, тем чаще повторяются одни и те же слова. Мало зависит от длины текста">K Юла</span></td><td class="num">{{ lx.yule_k }}</td></tr>

@@ -149,3 +149,33 @@ td.sorted { font-weight: 700; }
 .kw-cloud span { display: inline-block; margin: 0 8px 2px 0; color: var(--accent); }
 mark { background: #ffe58a; color: inherit; padding: 0 2px; border-radius: 3px; }
 .badge.deleting { background: var(--err-soft); color: var(--err); }
+option.muted { color: var(--muted); }
+
+/* база знаний и подсказки к метрикам */
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.term-q { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin-left: 3px;
+  border-radius: 50%; border: 1px solid var(--muted); color: var(--muted); font-size: 10px; font-weight: 700; line-height: 1;
+  vertical-align: middle; cursor: help; text-decoration: none; }
+.term-q:hover, .term-q:focus { border-color: var(--accent); color: var(--accent); text-decoration: none; outline: none; }
+.term-pop { position: absolute; z-index: 50; max-width: 340px; padding: 10px 12px; background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.15); font-size: 13px; font-weight: normal;
+  line-height: 1.45; text-align: left; white-space: normal; }
+.term-pop strong { display: block; margin-bottom: 4px; }
+.term-pop a { display: inline-block; margin-top: 6px; }
+.term-list { line-height: 1.9; }
+.help-result { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.help-layout { display: grid; grid-template-columns: 260px 1fr; gap: 20px; align-items: start; }
+.help-toc { position: sticky; top: 70px; max-height: calc(100vh - 90px); overflow: auto; }
+.help-toc .strong a { font-weight: 700; color: var(--text); }
+.help-toc .toc-l3 { padding-left: 12px; }
+.help-toc hr { border: 0; border-top: 1px solid var(--border); }
+.help-article { max-width: 860px; }
+.help-article h3 { scroll-margin-top: 70px; }
+.help-article h2 { scroll-margin-top: 70px; }
+.help-article table { border-collapse: collapse; margin: 10px 0; }
+.help-article th, .help-article td { border: 1px solid var(--border); padding: 4px 8px; font-size: 14px; }
+.help-article code { font-family: var(--mono); font-size: 13px; background: var(--accent-soft); padding: 0 4px; border-radius: 4px; }
+.help-article pre { background: var(--accent-soft); padding: 10px; overflow: auto; border-radius: 6px; }
+.help-article pre code { background: none; padding: 0; }
+.help-article :target { background: var(--kw); }
+@media (max-width: 800px) { .help-layout { grid-template-columns: 1fr; } .help-toc { position: static; max-height: none; } }

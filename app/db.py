@@ -15,7 +15,15 @@ class Base(DeclarativeBase):
     pass
 
 
-engine = create_engine(settings.sqlalchemy_url, pool_pre_ping=True, future=True)
+def _connect_args() -> dict:
+    """Даты из базы приходят в часовом поясе TIMEZONE (по умолчанию в контейнере PostgreSQL — UTC)."""
+    tz = (settings.timezone or "").strip()
+    if not tz or not all(c.isalnum() or c in "/_+-" for c in tz):
+        return {}
+    return {"options": f"-c timezone={tz}"}
+
+
+engine = create_engine(settings.sqlalchemy_url, pool_pre_ping=True, future=True, connect_args=_connect_args())
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
 
 

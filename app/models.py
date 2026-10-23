@@ -156,6 +156,8 @@ class DictionaryEntry(Base):
     verified: Mapped[bool] = mapped_column(Boolean, default=False)
     ambiguous: Mapped[bool] = mapped_column(Boolean, default=False)
     options: Mapped[list] = mapped_column(JSONB, default=list)
+    # словосочетание: {"slots": [...], "head": k} (см. app/services/phrases.py); None — одно слово
+    phrase: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
 
     dictionary: Mapped[Dictionary] = relationship(back_populates="entries")
 
@@ -241,6 +243,20 @@ class EntityOverride(Base):
     etype: Mapped[str | None] = mapped_column(String(8))
     canonical: Mapped[str | None] = mapped_column(Text)
     hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
+
+class Place(Base):
+    """Координаты места для географической карты (ключ — начальная форма имени, как в entities.norm)."""
+
+    __tablename__ = "places"
+
+    norm: Mapped[str] = mapped_column(Text, primary_key=True)
+    lat: Mapped[float | None] = mapped_column(Float)
+    lon: Mapped[float | None] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(16), default="auto", server_default="auto")  # auto | manual | none
+    label: Mapped[str | None] = mapped_column(Text)  # что нашлось в справочнике: «Москва, Россия»
+    country: Mapped[str | None] = mapped_column(String(8))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class StopList(Base):
