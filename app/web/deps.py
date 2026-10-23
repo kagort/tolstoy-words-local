@@ -25,12 +25,9 @@ SCOPE_LABELS = {"direct": "прямая связь", "shared": "общий чл�
 
 
 def _qs(request: Request, **changes) -> str:
-    params = dict(request.query_params)
-    for k, v in changes.items():
-        if v is None or v == "":
-            params.pop(k, None)
-        else:
-            params[k] = v
+    # повторяющиеся параметры (authors=…&authors=…, texts, words) сохраняются все — dict() оставил бы последний
+    params = [(k, v) for k, v in request.query_params.multi_items() if k not in changes]
+    params += [(k, v) for k, v in changes.items() if v is not None and v != ""]
     return "?" + urlencode(params)
 
 

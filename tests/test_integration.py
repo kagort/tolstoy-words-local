@@ -198,6 +198,13 @@ def test_selection_report_stopwords(client):
     for tab in ("overview", "report", "freq", "conc", "profile", "compare", "structure"):
         r = client.get(f"/analysis?tab={tab}&{base}{words}&texts={texts['Сирень']}&texts={texts['Дым']}&stop=ru")
         assert r.status_code == 200, tab
+    # ссылки «Скачать» сохраняют все повторяющиеся параметры выборки (раньше оставался последний автор/текст/слово)
+    r = client.get(f"/analysis?tab=overview&{base}{words}&texts={texts['Сирень']}&texts={texts['Дым']}"
+                   "&authors=Автор+Сирени&authors=Другой")
+    link = r.text.split('href="/export/overview.xlsx', 1)[1].split('"', 1)[0].replace("&amp;", "&")
+    for p in (f"words={e_zapah.id}", f"words={e_dym.id}", f"texts={texts['Сирень']}", f"texts={texts['Дым']}",
+              "authors=%D0%94%D1%80%D1%83%D0%B3%D0%BE%D0%B9", "authors=%D0%90%D0%B2%D1%82%D0%BE%D1%80"):
+        assert p in link, p
     r = client.get(f"/analysis?tab=report&{base}{words}&report_b=")
     assert r.status_code == 200 and "Сводный отчёт" in r.text and "rep-freq" in r.text and "Сравнение с корпусом" in r.text
     # отчёт без выбранных слов берёт самые частые
