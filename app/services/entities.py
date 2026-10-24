@@ -149,6 +149,9 @@ def run_ner(job_id: int | None, text_id: int) -> int:
 
         s.execute(sql("UPDATE texts SET meta = coalesce(meta, '{}'::jsonb) || jsonb_build_object('ner', jsonb_build_object('count', :n)) "
                       "WHERE id = :id"), {"n": total, "id": text_id})
+        from app.services.matching import flag_name_hits
+
+        flag_name_hits(s, text_ids=[text_id])  # слова словаря внутри найденных имён перестают считаться
         s.commit()
     log.info("Текст %s: имён собственных %s", text_id, total)
     return total

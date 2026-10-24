@@ -15,7 +15,8 @@ from app.nlp.normalize import decode_bytes
 from app.nlp.tree import norm
 from app.services.jobs import enqueue
 
-DEFAULT_SETTINGS = {"include_participles": False, "include_gerunds": False, "merge_propn": True}
+# count_names — считать слова словаря и внутри имён собственных («любовь» в «Любовь Андреевна»); по умолчанию нет
+DEFAULT_SETTINGS = {"include_participles": False, "include_gerunds": False, "merge_propn": True, "count_names": False}
 
 HEADER_WORDS = {"слово", "word", "лемма", "lemma", "токен", "token"}
 

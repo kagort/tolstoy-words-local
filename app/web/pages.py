@@ -13,11 +13,12 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import get_session
-from app.models import Corpus, Dictionary, DictionaryEntry, Hit, Job, SentenceRow, TextDoc, TokenRelation, TokenRow
+from app.models import Corpus, Dictionary, DictionaryEntry, Entity, Hit, Job, SentenceRow, TextDoc, TokenRelation, TokenRow
 from app.nlp.normalize import normalize_text
 from app.nlp.syntax import SentenceAnalysis
 from app.services import analytics as A
 from app.services.dictionaries import (
+    DEFAULT_SETTINGS,
     add_entries,
     create_dictionary,
     option_counts,
@@ -390,10 +391,14 @@ def dictionary_detail(request: Request, dict_id: int, db: Session = Depends(get_
     d = db.get(Dictionary, dict_id)
     if d is None:
         raise HTTPException(404)
-    hits = dict(db.execute(select(Hit.entry_id, func.count()).where(Hit.dictionary_id == dict_id).group_by(Hit.entry_id)).all())
+    hits = dict(db.execute(select(Hit.entry_id, func.count()).where(Hit.dictionary_id == dict_id, A.VALID).group_by(Hit.entry_id)).all())
+    # вхождения внутри имён собственных (не считаются): «любовь» в «Любовь Андреевна»
+    in_names = dict(db.execute(select(Hit.entry_id, func.count()).where(Hit.dictionary_id == dict_id, Hit.in_name,
+                                                                         Hit.is_valid.is_(None)).group_by(Hit.entry_id)).all())
     opt_counts = {e.id: option_counts(db, e) for e in d.entries if e.ambiguous or not e.verified}
     pending = db.scalar(select(func.count()).select_from(Job).where(Job.status.in_(["queued", "running"]), Job.kind == "match")) or 0
-    return render(request, "dictionary_detail.html", d=d, hits=hits, opt_counts=opt_counts, pending=pending)
+    return render(request, "dictionary_detail.html", d=d, hits=hits, in_names=in_names, opt_counts=opt_counts, pending=pending,
+                  names_ok=set((d.settings or {}).get("names_ok_entries", [])))
 
 
 @router.post("/dictionaries/{dict_id}/entries/{entry_id}")
@@ -440,17 +445,49 @@ async def dictionary_add(request: Request, dict_id: int, words: str = Form(""), 
 @router.post("/dictionaries/{dict_id}/settings")
 def dictionary_settings(request: Request, dict_id: int, name: str = Form(...), description: str = Form(""),
                         include_participles: str | None = Form(None), include_gerunds: str | None = Form(None),
-                        merge_propn: str | None = Form(None), db: Session = Depends(get_session)):
+                        merge_propn: str | None = Form(None), count_names: str | None = Form(None),
+                        db: Session = Depends(get_session)):
+    from app.services.matching import flag_name_hits
+
     d = db.get(Dictionary, dict_id)
     if d is None:
         raise HTTPException(404)
     d.name, d.description = name.strip(), description.strip() or None
-    d.settings = {"include_participles": bool(include_participles), "include_gerunds": bool(include_gerunds),
-                  "merge_propn": bool(merge_propn)}
-    enqueue(db, "match", {"dictionary_id": d.id}, title=f"Пересчёт словаря «{d.name}»")
+    old = dict(d.settings or {})
+    new = {**old, "include_participles": bool(include_participles), "include_gerunds": bool(include_gerunds),
+           "merge_propn": bool(merge_propn), "count_names": bool(count_names)}
+    d.settings = new
+    match_keys = ("include_participles", "include_gerunds", "merge_propn")
+    if any(old.get(k, DEFAULT_SETTINGS.get(k)) != new[k] for k in match_keys):
+        enqueue(db, "match", {"dictionary_id": d.id}, title=f"Пересчёт словаря «{d.name}»")
+        msg = "Настройки сохранены, словарь пересчитывается"
+    else:  # «считать слова в составе имён» меняет только пометки — без пересчёта
+        db.flush()
+        flag_name_hits(db, [d.id])
+        msg = "Настройки сохранены"
     db.commit()
-    flash(request, "Настройки сохранены, словарь пересчитывается", "success")
+    flash(request, msg, "success")
     return redirect(f"/dictionaries/{dict_id}")
+
+
+@router.post("/dictionaries/{dict_id}/entries/{entry_id}/names")
+def entry_names_toggle(request: Request, dict_id: int, entry_id: int, db: Session = Depends(get_session)):
+    """Слово-исключение: считать его вхождения и внутри имён собственных (например, «Бог»)."""
+    from app.services.matching import flag_name_hits
+
+    d = db.get(Dictionary, dict_id)
+    e = db.get(DictionaryEntry, entry_id)
+    if d is None or e is None or e.dictionary_id != dict_id:
+        raise HTTPException(404)
+    ok = set((d.settings or {}).get("names_ok_entries", []))
+    ok ^= {entry_id}
+    d.settings = {**(d.settings or {}), "names_ok_entries": sorted(ok)}
+    db.flush()
+    flag_name_hits(db, [d.id])
+    db.commit()
+    flash(request, f"«{e.surface}»: " + ("вхождения внутри имён тоже считаются" if entry_id in ok else "вхождения внутри имён не считаются"),
+          "success")
+    return redirect(f"/dictionaries/{dict_id}#e{entry_id}")
 
 
 @router.post("/dictionaries/{dict_id}/rematch")
@@ -603,13 +640,15 @@ def _overview_params(request: Request) -> dict:
     }
 
 
-def _overview_context(db: Session, request: Request, dict_id: int, text_ids: list[int]) -> dict:
-    """text_ids — уже отфильтрованная выборка (панель «Выборка»)."""
+def _overview_context(db: Session, request: Request, dict_id: int, text_ids: list[int], all_groups: bool = False) -> dict:
+    """text_ids — уже отфильтрованная выборка (панель «Выборка»); all_groups — без сворачивания в «остальные» (выгрузка)."""
     p = _overview_params(request)
     entry_ids = p["entry_ids"]
-    if not entry_ids:  # по умолчанию — пять самых частых слов
+    by = "cat" if request.query_params.get("unit") == "cat" else "word"
+    if not entry_ids and by == "word":  # по умолчанию — пять самых частых слов (категории — самые частые категории)
         entry_ids = [r["entry_id"] for r in A.frequency(db, dict_id, text_ids)["rows"] if r["count"]][:5]
-    ov = A.overview(db, dict_id, text_ids, entry_ids, p["dim"], p["step"])
+    top = None if all_groups or request.query_params.get("gtop") == "all" else (_int(request.query_params.get("gtop")) or A.GROUPS_TOP)
+    ov = A.overview(db, dict_id, text_ids, entry_ids, p["dim"], p["step"], by=by, groups_top=top)
     return {"ov": ov, "ov_params": p, "ov_entry_ids": entry_ids, "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
 
 
@@ -689,7 +728,7 @@ def _map_context(db: Session, request: Request, dict_id: int, sel) -> dict:
     if text_id not in {t.id for t in texts}:
         text_id = texts[0].id if texts else None
     segments = _int(qp.get("segments")) or 50
-    tm = text_map(db, text_id, dict_id, sel.words, segments) if text_id else None
+    tm = text_map(db, text_id, dict_id, sel.words, segments, by="cat" if sel.unit == "cat" else "word") if text_id else None
     return {"tm": tm, "map_texts": texts, "map_text_id": text_id, "SEGMENT_CHOICES": SEGMENT_CHOICES}
 
 
@@ -826,6 +865,13 @@ def entity_override(request: Request, norm: str = Form(...), etype: str = Form("
     from app.services.entities import set_override
 
     set_override(db, norm.strip(), etype or None, canonical, bool(hidden))
+    db.flush()
+    from app.services.matching import flag_name_hits
+
+    # «это не имя» возвращает в частоты слова словаря внутри этого «имени»
+    tids = list(db.scalars(select(func.distinct(Entity.text_id)).where(Entity.norm == norm.strip())))
+    if tids:
+        flag_name_hits(db, text_ids=tids)
     db.commit()
     flash(request, f"Правка для «{norm}» сохранена" + (f": объединено с «{canonical.strip()}»" if canonical.strip() else ""), "success")
     return redirect(back if back.startswith("/") else "/analysis?tab=entities")
@@ -901,7 +947,7 @@ def analysis(request: Request, db: Session = Depends(get_session)):
         # отмеченные слова — только они (переключатель all_words показывает весь словарь)
         words = None if qp.get("all_words") else (sel.words or None)
         ctx["freq"] = A.only_words(A.frequency(db, dict_id, text_ids), words)
-        ctx["heat"] = A.frequency_by_text(db, dict_id, text_ids, entry_ids=words)
+        ctx["heat"] = A.frequency_by_text(db, dict_id, text_ids, entry_ids=words, by="cat" if sel.unit == "cat" else "word")
         ctx["freq_filtered"] = bool(words)
         ctx["cats"] = A.category_frequency(db, dict_id, text_ids, entry_ids=words, dim=qp.get("cat_dim") or "author")
         ctx["DIMENSIONS"] = A.DIMENSIONS
@@ -911,6 +957,7 @@ def analysis(request: Request, db: Session = Depends(get_session)):
             rel_type=qp.get("rel_type") or None, related_lemma=qp.get("related") or None,
             near=qp.get("near") or None, window=_int(qp.get("window")) or 3,
             phrase=qp.get("phrase") or None, phrase_any_order=bool(qp.get("phrase_any")),
+            names_only=bool(qp.get("names")),
             include_invalid=bool(qp.get("invalid")), page=_int(qp.get("page")) or 1,
         )
     elif tab == "profile":
@@ -1085,15 +1132,24 @@ async def check_submit(request: Request, text: str = Form(""), file: UploadFile 
 
 @router.get("/jobs")
 def jobs_page(request: Request, db: Session = Depends(get_session)):
+    from app.services.jobs import eta_seconds, human_duration, queue_estimate
+
     jobs = list(db.scalars(select(Job).order_by(Job.id.desc()).limit(100)))
     active = any(j.status in ("queued", "running") for j in jobs)
-    return render(request, "jobs.html", jobs=jobs, active=active)
+    q = queue_estimate(db) if active else {"n": 0, "seconds": None}
+    return render(request, "jobs.html", jobs=jobs, active=active, etas={j.id: human_duration(eta_seconds(j)) for j in jobs},
+                  queue_eta=human_duration(q["seconds"]), queue_n=q["n"], queue_unknown=q.get("unknown", 0))
 
 
 @router.get("/api/jobs")
 def jobs_api(db: Session = Depends(get_session)):
+    from app.services.jobs import eta_seconds, human_duration, queue_estimate
+
     jobs = list(db.scalars(select(Job).where(Job.status.in_(["queued", "running"])).order_by(Job.id)))
-    return {"active": [{"id": j.id, "title": j.title, "status": j.status, "progress": j.progress, "message": j.message} for j in jobs]}
+    q = queue_estimate(db)
+    return {"active": [{"id": j.id, "title": j.title, "status": j.status, "progress": j.progress, "message": j.message,
+                        "eta": human_duration(eta_seconds(j))} for j in jobs],
+            "queue": {"n": q["n"], "eta": human_duration(q["seconds"]), "unknown": q.get("unknown", 0)}}
 
 
 @router.post("/jobs/{job_id}/retry")

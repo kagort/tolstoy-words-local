@@ -114,7 +114,7 @@ def export_frequency(fmt: str, request: Request, db: Session = Depends(get_sessi
     df = pd.DataFrame(f["rows"]).rename(columns={"share": "Доля среди слов таблицы, %",
         "word": "Слово", "lemma": "Лемма", "upos": "Часть речи", "category": "Категория", "count": "Вхождений",
         "ipm": "ipm", "sentences": "Предложений", "texts": "Текстов", "dp": "DP (неравномерность)"}).drop(columns=["entry_id"], errors="ignore")
-    heat = A.frequency_by_text(db, dict_id, ids, top=200, entry_ids=words)
+    heat = A.frequency_by_text(db, dict_id, ids, top=200, entry_ids=words, by=_selection(db, request).unit or "word")
     df_heat = pd.DataFrame(heat["z"], index=heat["words"], columns=heat["texts_full"]).reset_index().rename(columns={"index": "Слово (ipm по текстам)"}) if heat["words"] else pd.DataFrame()
     frames = {"Частоты": df, "По текстам (ipm)": df_heat}
     cats = A.category_frequency(db, dict_id, ids, entry_ids=words, dim=request.query_params.get("cat_dim") or "author")
@@ -137,11 +137,12 @@ def export_concordance(fmt: str, request: Request, db: Session = Depends(get_ses
                       rel_type=qp.get("rel_type") or None, related_lemma=qp.get("related") or None,
                       near=qp.get("near") or None, window=_int(qp.get("window")) or 3,
             phrase=qp.get("phrase") or None, phrase_any_order=bool(qp.get("phrase_any")),
+            names_only=bool(qp.get("names")),
                       include_invalid=bool(qp.get("invalid")), page=1, per_page=100_000, context_chars=10_000)
     df = pd.DataFrame([{
         "Слово словаря": i["word"], "Левый контекст": i["left"], "Словоформа": i["kw"], "Правый контекст": i["right"],
         "Роль": i["role_label"], "Связь UD": i["deprel"], "Часть речи UD": i["upos"], "Подтип роли": i["role_subtype"], "Источник": i["source"], "№ предложения": i["sentence_no"],
-        "ID предложения": i["sentence_id"], "Словосочетание": " | ".join(i["phrase"]), "Проверено": {None: "", True: "верно", False: "ложное"}[i["is_valid"]],
+        "ID предложения": i["sentence_id"], "Словосочетание": " | ".join(i["phrase"]), "В имени": "да" if i["in_name"] else "", "Проверено": {None: "", True: "верно", False: "ложное"}[i["is_valid"]],
     } for i in c["items"]])
     return _send({"Конкорданс": df}, fmt, "concordance", _params(db, request) | {"Строк": c["total"]})
 
@@ -197,7 +198,7 @@ def export_overview(fmt: str, request: Request, db: Session = Depends(get_sessio
     from app.web.pages import _overview_context
 
     dict_id, ids = _ctx(db, request)
-    ov = _overview_context(db, request, dict_id, ids)["ov"]
+    ov = _overview_context(db, request, dict_id, ids, all_groups=True)["ov"]
     head = {ov["dim_label"]: [g.get("full", g["label"]) for g in ov["groups"]], "Слов в группе": [g["n_words"] for g in ov["groups"]],
             "Текстов в группе": [g["n_texts"] for g in ov["groups"]]}
     frames = {}

@@ -186,6 +186,8 @@ class Hit(Base):
     role_detail: Mapped[str | None] = mapped_column(String(64))
     in_coord_group: Mapped[bool] = mapped_column(Boolean, default=False)
     is_valid: Mapped[bool | None] = mapped_column(Boolean)
+    # слово внутри имени собственного («Любовь Андреевна» для слова «любовь»): не считается, пока не отмечено ✓
+    in_name: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     syntax_version: Mapped[str] = mapped_column(String(16))
 
 
@@ -245,6 +247,18 @@ class EntityOverride(Base):
     hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
 
+class EntityAlias(Base):
+    """Вариант имени персонажа → каноническое имя; text_id — только в этом тексте (иначе во всех)."""
+
+    __tablename__ = "entity_aliases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    norm: Mapped[str] = mapped_column(Text, index=True)
+    canonical: Mapped[str] = mapped_column(Text)
+    text_id: Mapped[int | None] = mapped_column(ForeignKey("texts.id", ondelete="CASCADE"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Place(Base):
     """Координаты места для географической карты (ключ — начальная форма имени, как в entities.norm)."""
 
@@ -256,6 +270,7 @@ class Place(Base):
     source: Mapped[str] = mapped_column(String(16), default="auto", server_default="auto")  # auto | manual | none
     label: Mapped[str | None] = mapped_column(Text)  # что нашлось в справочнике: «Москва, Россия»
     country: Mapped[str | None] = mapped_column(String(8))
+    kind: Mapped[str | None] = mapped_column(String(16))  # вид, заданный пользователем (гора, река, вымышленное…)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
@@ -289,3 +304,5 @@ class Job(Base):
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # скорость выполнения для оценки оставшегося времени: {"t", "p", "rate"} (см. services/jobs.set_progress)
+    eta: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)

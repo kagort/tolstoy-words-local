@@ -43,17 +43,84 @@ def enqueue(session: Session, kind: str, params: dict, title: str = "") -> Job:
     return job
 
 
+ETA_MIN_PROGRESS = 0.05  # раньше оценка ненадёжна (загрузка моделей, подготовка)
+ETA_SMOOTH = 120.0  # секунд: скорость сглаживается примерно по последним двум минутам
+
+
+def _next_eta(eta: dict | None, progress: float, t: float) -> dict:
+    """Сглаженная скорость (доля в секунду): новые замеры весят тем больше, чем больше прошло времени."""
+    if not eta or progress < eta.get("p", 0):
+        return {"t": t, "p": progress, "rate": None}
+    dt, dp = t - eta["t"], progress - eta["p"]
+    if dt < 2:  # слишком частые замеры — ждём
+        return eta
+    inst = max(dp, 0.0) / dt
+    w = min(1.0, dt / ETA_SMOOTH)
+    rate = inst if eta.get("rate") is None else (1 - w) * eta["rate"] + w * inst
+    return {"t": t, "p": progress, "rate": rate}
+
+
+def eta_seconds(job: Job) -> float | None:
+    """Сколько секунд осталось, или None, если оценивать рано."""
+    e = job.eta or {}
+    if job.status != "running" or not e.get("rate") or (job.progress or 0) < ETA_MIN_PROGRESS:
+        return None
+    left = (1.0 - (job.progress or 0)) / e["rate"]
+    return left - max(0.0, time.time() - e["t"])  # с последнего замера тоже прошло время
+
+
+def human_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return ""
+    s = max(0, int(seconds))
+    if s < 60:
+        return "меньше минуты"
+    if s < 3600:
+        return f"{round(s / 60)} мин"
+    return f"{s // 3600} ч {round(s % 3600 / 60)} мин"
+
+
 def set_progress(job_id: int, progress: float, message: str | None = None) -> None:
-    """Пишет прогресс и пульс отдельной транзакцией (видно в интерфейсе сразу); проверяет запрос отмены."""
+    """Пишет прогресс, скорость и пульс отдельной транзакцией (видно в интерфейсе сразу); проверяет запрос отмены."""
+    progress = min(max(progress, 0.0), 1.0)
     with SessionLocal() as s:
+        eta = s.scalar(select(Job.eta).where(Job.id == job_id))
         cancel = s.execute(
             update(Job).where(Job.id == job_id)
-            .values(progress=min(max(progress, 0.0), 1.0), message=message, heartbeat_at=now())
+            .values(progress=progress, message=message, heartbeat_at=now(), eta=_next_eta(eta, progress, time.time()))
             .returning(Job.cancel_requested)
         ).scalar()
         s.commit()
     if cancel:
         raise JobCancelled()
+
+
+def queue_estimate(session: Session) -> dict:
+    """Оценка всей очереди: по средней длительности выполненных задач того же вида (последние 20)."""
+    active = list(session.scalars(select(Job).where(Job.status.in_(ACTIVE))))
+    if not active:
+        return {"n": 0, "seconds": None}
+    kinds = {j.kind for j in active}
+    avg = {}
+    for kind in kinds:
+        durs = [(f - st).total_seconds() for st, f in session.execute(
+            select(Job.started_at, Job.finished_at).where(Job.kind == kind, Job.status == "done",
+                                                          Job.started_at.is_not(None), Job.finished_at.is_not(None))
+            .order_by(Job.id.desc()).limit(20))]
+        avg[kind] = sum(durs) / len(durs) if durs else None
+    total, unknown = 0.0, 0
+    for j in active:
+        if j.status == "running":
+            left = eta_seconds(j)
+            if left is None and avg.get(j.kind) is not None and j.started_at:
+                left = max(0.0, avg[j.kind] - (now() - j.started_at).total_seconds())
+        else:
+            left = avg.get(j.kind)
+        if left is None:
+            unknown += 1
+        else:
+            total += left
+    return {"n": len(active), "seconds": total if total else None, "unknown": unknown}
 
 
 def claim_next(session: Session) -> Job | None:
@@ -70,6 +137,7 @@ def claim_next(session: Session) -> Job | None:
     job.status = "running"
     job.started_at = job.heartbeat_at = now()
     job.progress = 0.0
+    job.eta = None
     job.attempts = (job.attempts or 0) + 1
     session.commit()
     return job
