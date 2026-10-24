@@ -17,9 +17,10 @@ ROOT = Path(__file__).resolve().parents[2]
 HELP_DIR = ROOT / "app" / "help"
 DOCS_DIR = ROOT / "docs"
 # статьи из docs/ (копируются в образ Docker, см. .dockerignore); остальные документы — для разработчиков
-DOC_ARTICLES = {"guide": "USER_GUIDE.md", "political-discourse": "POLITICAL_DISCOURSE.md"}
+DOC_ARTICLES = {"guide": "USER_GUIDE.md", "political-discourse": "POLITICAL_DISCOURSE.md",
+                "historical-sources": "HISTORICAL_SOURCES.md"}
 FILES_DIR = DOCS_DIR / "dictionaries"  # файлы, на которые ссылаются статьи (словари, таблицы метаданных)
-ORDER = ["guide", "glossary", "political-discourse"]
+ORDER = ["guide", "glossary", "political-discourse", "historical-sources"]
 
 
 @dataclass
