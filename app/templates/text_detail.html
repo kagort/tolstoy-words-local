@@ -43,7 +43,8 @@
       <tr><td>Загружен</td><td class="num">{{ doc.created_at.strftime('%d.%m.%Y %H:%M') if doc.created_at }}</td></tr>
     </table>
     <p class="row">
-      {% if doc.status == 'ready' %}<a class="btn" href="/texts/{{ doc.id }}/stats">📊 Статистический портрет</a>{% endif %}
+      {% if doc.status == 'ready' %}<a class="btn" href="/texts/{{ doc.id }}/stats">📊 Статистический портрет</a>
+        <a class="btn secondary" href="/dashboard?texts={{ doc.id }}" title="обзор текста на одной странице: словарь, ключевые слова, персонажи, места">Дашборд</a>{% endif %}
       <a class="btn secondary" href="/export/text/{{ doc.id }}.conllu">Скачать разметку (CoNLL-U)</a>
       {% if levels and levels.fast and doc.status == 'ready' %}
       <form class="inline shrink" method="post" action="/texts/{{ doc.id }}/precise" title="разобрать основным парсером все предложения — точнее портрет и структура, но долго">

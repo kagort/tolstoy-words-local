@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 from datetime import datetime
 from urllib.parse import quote
 
@@ -531,11 +532,41 @@ def export_dictionary(dict_id: int, db: Session = Depends(get_session)):
 def export_geo(fmt: str, request: Request, db: Session = Depends(get_session)):
     if fmt not in FORMATS:
         raise HTTPException(400)
-    from app.services.geo import place_map
+    from app.services.geo import KIND_LABELS, country_names, place_map
 
     g = place_map(db, _selection(db, request).ids, top=10_000)
     src = {"auto": "справочник", "manual": "вручную", "none": "не на карте", "missing": "не найдено"}
     df = pd.DataFrame([{"Место": p["name"], "Упоминаний": p["count"], "Текстов": p["texts"], "Широта": p["lat"], "Долгота": p["lon"],
+                        "Вид": KIND_LABELS.get(p.get("kind") or "", p.get("kind") or ""),
+                        "Страна": country_names().get(p.get("cc") or "", ""),
                         "Что нашлось": p["label"], "Источник координат": src.get(p["source"], p["source"])}
                        for p in g["points"] + g["unresolved"]])
-    return _send({"Места": df}, fmt, "geo", _params(db, request) | {"Мест на карте": len(g["points"])})
+    df_c = pd.DataFrame([{"Страна": c["name"], "Всего упоминаний": c["total"], "Сама страна": c["self"],
+                          "Места": ", ".join(f"{pl['name']} ({pl['count']})" for pl in c["places"])} for c in g["countries"]])
+    return _send({"Места": df, "Страны": df_c}, fmt, "geo", _params(db, request) | {"Мест на карте": len(g["points"])})
+
+
+@router.get("/dashboard.html")
+def export_dashboard(request: Request, db: Session = Depends(get_session)):
+    """Дашборд одним HTML-файлом: стили, скрипты, библиотека графиков и контуры карты внутри — открывается без интернета.
+    cdn=1 — облегчённый файл, библиотека графиков загружается из интернета."""
+    from pathlib import Path
+
+    import plotly
+
+    from app.web.deps import templates
+    from app.web.pages import _dashboard_data
+
+    dash, sel, dict_id, _ = _dashboard_data(db, request)
+    static = Path(__file__).resolve().parent.parent / "static"
+    cdn = bool(request.query_params.get("cdn"))
+    plotly_js = "" if cdn else (Path(plotly.__file__).parent / "package_data" / "plotly.min.js").read_text(encoding="utf-8")
+    version = (Path(plotly.__file__).parent / "package_data" / "plotly.min.js").open(encoding="utf-8").read(200)
+    m = re.search(r"plotly\.js v([\d.]+)", version)
+    html = templates.get_template("dashboard_standalone.html").render(
+        dash=dash, css=(static / "app.css").read_text(encoding="utf-8"), appjs=(static / "app.js").read_text(encoding="utf-8"),
+        topojson=(static / "topojson" / "world_110m.json").read_text(encoding="utf-8"), plotly=plotly_js, cdn=cdn,
+        plotly_version=m.group(1) if m else "", app_version=__version__)
+    name = re.sub(r"[^\w\-]+", "_", dash["title"]).strip("_")[:60] or "dashboard"
+    return Response(html, media_type="text/html; charset=utf-8", headers={"Content-Disposition": _disposition(f"dashboard_{name}.html")})
+

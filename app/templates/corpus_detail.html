@@ -3,6 +3,7 @@
 {% block content %}
 <p><a href="/corpora">← Все корпуса</a></p>
 <h1>Корпус «{{ corpus.name }}»</h1>
+<p><a class="btn secondary" href="/dashboard?corpus_id={{ corpus.id }}">📊 Дашборд корпуса</a> <a class="btn secondary" href="/analysis?corpus_id={{ corpus.id }}">Анализ</a></p>
 <form method="post" action="/corpora/{{ corpus.id }}">
   <div class="panel">
     <div class="row">

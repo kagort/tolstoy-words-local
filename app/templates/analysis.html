@@ -11,6 +11,12 @@
 <select name="corpus_id" form="sel-form" onchange="selCorpusChanged(this)"><option value="">Все тексты</option>{% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if c.id == corpus_id }}>{{ c.name }}</option>{% endfor %}</select>
 {% endmacro %}
 
+{% if scope_out %}
+<div class="flash info">Словарь сопоставляется только с выбранными корпусами: {{ scope_out }} текстов выборки с ним не сопоставлены, их частоты — нули.
+  {% if corpus_id %}<form class="inline" method="post" action="/dictionaries/{{ dict_id }}/scope/add"><input type="hidden" name="corpus_id" value="{{ corpus_id }}">
+    <input type="hidden" name="back" value="{{ request.url.path }}?{{ request.url.query }}"><button class="small" type="submit">Сопоставить с этим корпусом</button></form>{% endif %}
+  <a href="/dictionaries/{{ dict_id }}">Настройки словаря</a></div>
+{% endif %}
 <form method="get" action="/analysis" id="sel-form" class="panel sel-panel">
   <input type="hidden" name="tab" value="{{ tab }}">
   <div class="row">
@@ -25,6 +31,7 @@
       <label class="check" title="убирает имена людей, мест и организаций из ключевых слов, TF-IDF, тем, семантики, коллокаций и стилометрии (данные не удаляются){{ '; сейчас исключено лемм: ' ~ sel.names|length if sel.noprop }}"><input type="checkbox" name="noprop" value="1" {{ 'checked' if sel.noprop }}> не учитывать</label></div>
     <div class="shrink"><button type="submit">Применить</button></div>
     <div class="shrink"><button type="submit" class="secondary" onclick="this.form.tab.value='report'" title="сводная страница по выбранным словам и выборке текстов">📋 Построить отчёт</button></div>
+    <div class="shrink"><button type="submit" class="secondary" formaction="/dashboard" title="обзор выборки на одной странице; можно скачать одним HTML-файлом">📊 Дашборд</button></div>
   </div>
 
   <details class="sel-block" id="sel-texts" {{ 'open' if sel.filtered and tab != 'report' }}>

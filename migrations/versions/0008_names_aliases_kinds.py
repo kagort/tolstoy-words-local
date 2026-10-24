@@ -18,15 +18,18 @@ depends_on = None
 def upgrade() -> None:
     # слово словаря внутри имени собственного («Любовь Андреевна» для слова «любовь») — по умолчанию не считается
     op.add_column('dictionary_hits', sa.Column('in_name', sa.Boolean, nullable=False, server_default=sa.false()))
-    # уже найденные вхождения: помечаем стоящие внутри извлечённых имён (как matching.flag_name_hits)
+    # уже найденные вхождения: помечаем стоящие внутри извлечённых имён персон (как matching.flag_name_hits)
     op.execute("""
         UPDATE dictionary_hits h SET in_name = true
         WHERE EXISTS (
             SELECT 1 FROM entities e
             JOIN tokens t ON t.id = h.token_id
+            JOIN dictionary_entries de ON de.id = h.entry_id
             LEFT JOIN entity_overrides o ON o.norm = e.norm
             WHERE e.sentence_id = h.sentence_id AND t.start_char >= e.start_char AND t.end_char <= e.end_char
-              AND coalesce(o.hidden, false) = false)""")
+              AND coalesce(o.hidden, false) = false
+              AND coalesce(o.etype, e.etype) = 'PER'
+              AND coalesce(de.upos, '') <> 'PROPN')""")
     # варианты имени одного персонажа; text_id — слияние только в этом тексте (одноимённые герои разных романов)
     op.create_table(
         'entity_aliases',

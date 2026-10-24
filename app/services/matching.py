@@ -78,6 +78,11 @@ def run_match(job_id: int | None, dictionary_id: int, entry_ids: list[int] | Non
         ready_texts = list(s.scalars(select(TextDoc.id).where(TextDoc.status == "ready")))
         if text_ids:
             ready_texts = [t for t in ready_texts if t in set(text_ids)]
+        from app.services.dictionaries import scope_text_ids
+
+        scope = scope_text_ids(s, d)  # словарь только для выбранных корпусов
+        if scope is not None:
+            ready_texts = [t for t in ready_texts if t in scope]
         # удаляем старые результаты для пересчитываемой области
         q = delete(Hit).where(Hit.dictionary_id == dictionary_id)
         if entry_ids:
@@ -188,9 +193,11 @@ def _match_entries(job_id: int | None, dictionary_id: int, entry_data: list, rea
 
 
 def flag_name_hits(session: Session, dictionary_ids: list[int] | None = None, text_ids: list[int] | None = None) -> int:
-    """Помечает вхождения слов словаря, стоящие внутри имени собственного (вкладка «Имена»): «Любовь» в «Любовь
-    Андреевна» для слова «любовь», «Надежда» как имя. Такие вхождения не считаются (analytics.VALID), пока их не
-    отметят ✓ вручную. Настройки словаря: count_names — считать и внутри имён; names_ok_entries — слова-исключения.
+    """Помечает вхождения слов словаря, стоящие внутри имени персоны (вкладка «Имена»): «Любовь» в «Любовь
+    Андреевна» для слова «любовь», «Вера» (Вера Ростова) для слова «вера». Такие вхождения не считаются
+    (analytics.VALID), пока их не отметят ✓ вручную. Места и организации («Америка», «НАТО») и записи словаря с частью
+    речи PROPN не помечаются — их в словарь добавляют намеренно. Настройки словаря: count_names — считать и внутри
+    имён; names_ok_entries — слова-исключения.
 
     Вызывается после сопоставления, после извлечения имён и после правки имён. Возвращает число помеченных вхождений.
     """
@@ -211,9 +218,12 @@ def flag_name_hits(session: Session, dictionary_ids: list[int] | None = None, te
             UPDATE dictionary_hits h SET in_name = (h.entry_id <> ALL(:ok) AND EXISTS (
                 SELECT 1 FROM entities e
                 JOIN tokens t ON t.id = h.token_id
+                JOIN dictionary_entries de ON de.id = h.entry_id
                 LEFT JOIN entity_overrides o ON o.norm = e.norm
                 WHERE e.sentence_id = h.sentence_id AND t.start_char >= e.start_char AND t.end_char <= e.end_char
-                  AND coalesce(o.hidden, false) = false))
+                  AND coalesce(o.hidden, false) = false
+                  AND coalesce(o.etype, e.etype) = 'PER'
+                  AND coalesce(de.upos, '') <> 'PROPN'))
             WHERE {scope}"""), params)
         flagged += session.scalar(sql(f"SELECT count(*) FROM dictionary_hits h WHERE {scope} AND h.in_name"), params) or 0
     return flagged

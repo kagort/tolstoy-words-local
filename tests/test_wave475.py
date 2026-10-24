@@ -164,3 +164,116 @@ def test_unit_categories_and_rest_groups(client, data):
     r = client.get(f"/analysis?tab=overview&dictionary_id={data['dict_id']}&dim=text&gtop=1&words={data['entries']['любовь']}")
     assert "Показать все группы" in r.text
     assert client.get(f"/export/overview.xlsx?{base}").status_code == 200
+
+
+def test_merge_characters(client, data):
+    from app.db import SessionLocal
+    from app.services.entities import entity_index, merge_suggestions
+
+    tid = data["text_id"]
+    with SessionLocal() as s:
+        names = {it["name"] for it in entity_index(s, [tid], "PER")["items"]}
+    assert {"Любовь Андреевна", "Раневская"} <= names
+    base = f"/analysis?tab=entities&dictionary_id={data['dict_id']}&corpus_id={data['corpus_id']}"
+    r = client.post("/entities/merge", data={"names": ["Любовь Андреевна", "Раневская"], "canonical": "Раневская Любовь Андреевна",
+                                             "scope": str(tid), "back": base})
+    assert "Объединено в «Раневская Любовь Андреевна»" in r.text
+    with SessionLocal() as s:
+        items = {it["name"]: it for it in entity_index(s, [tid], "PER")["items"]}
+    assert "Раневская Любовь Андреевна" in items and "Раневская" not in items
+    assert items["Раневская Любовь Андреевна"]["count"] == 3
+    assert set(items["Раневская Любовь Андреевна"]["variants"]) == {"Любовь Андреевна", "Раневская"}
+    # слияние только в этом тексте: в другом тексте «Раневская» осталась бы собой (проверяем через resolve)
+    from app.services.entities import overrides, resolve
+
+    with SessionLocal() as s:
+        ovr = overrides(s)
+    assert resolve("Раневская", "PER", ovr, tid)[0] == "Раневская Любовь Андреевна"
+    assert resolve("Раневская", "PER", ovr, tid + 999)[0] == "Раневская"
+    # отделить вариант
+    client.post("/entities/split", data={"variant": "Раневская", "text_ids": [str(tid)], "back": base})
+    with SessionLocal() as s:
+        items = {it["name"]: it for it in entity_index(s, [tid], "PER")["items"]}
+    assert "Раневская" in items and items["Раневская Любовь Андреевна"]["count"] == 2
+    # подсказки: общее слово
+    hints = merge_suggestions([{"name": "Андрей", "etype": "PER", "count": 5}, {"name": "князь Андрей", "etype": "PER", "count": 3},
+                               {"name": "Пьер", "etype": "PER", "count": 9}])
+    assert hints == [["Андрей", "князь Андрей"]]
+    assert "Объединить отмеченные" in client.get(base).text
+
+
+def test_geo_kind_and_countries(client, data):
+    from app.db import SessionLocal
+    from app.services import geo as G
+
+    assert G.nearest_country(55.7, 37.6) == "RU" and G.nearest_country(48.85, 2.35) == "FR"
+    assert G.country_names()["RU"] == "Россия" and G.countries()["RU"][0] == "RUS"
+    assert G.candidates("Монблан")[0].kind == "mountain"
+    tid = data["text_id"]
+    base = f"/analysis?tab=geo&dictionary_id={data['dict_id']}&corpus_id={data['corpus_id']}"
+    with SessionLocal() as s:
+        m = G.place_map(s, [tid])
+        paris = {p["name"]: p for p in m["points"]}["Париж"]
+        assert paris["kind"] == "city" and paris["cc"] == "FR"
+        fr = next(c for c in m["countries"] if c["cc"] == "FR")
+        assert fr["total"] == 1 and fr["iso3"] == "FRA" and fr["places"][0]["name"] == "Париж"
+    # вид «гора»: у Парижа нет варианта-горы → без координат; «вымышленное» → не на карте; сброс
+    client.post("/places", data={"name": "Париж", "action": "kind", "kind": "mountain", "back": base})
+    with SessionLocal() as s:
+        m = G.place_map(s, [tid])
+        p = {x["name"]: x for x in m["unresolved"]}["Париж"]
+        assert "как «горы»" in p["label"] and p["kind_manual"] == "mountain"
+    client.post("/places", data={"name": "Париж", "action": "kind", "kind": "fictional", "back": base})
+    with SessionLocal() as s:
+        assert {x["name"]: x for x in G.place_map(s, [tid])["unresolved"]}["Париж"]["label"] == "вымышленное место"
+    client.post("/places", data={"name": "Париж", "action": "reset", "back": base})
+    r = client.get(base + "&geo_mode=countries")
+    assert r.status_code == 200 and "choropleth" in r.text and "Франция" in r.text
+    assert client.get(f"/export/geo.xlsx?dictionary_id={data['dict_id']}&corpus_id={data['corpus_id']}").status_code == 200
+
+
+def test_dictionary_scope(client, data):
+    from app.db import SessionLocal
+    from app.models import Hit, TextDoc
+    from app.services.jobs import run_pending
+
+    dict_id, cid, other = data["dict_id"], data["corpus_id"], data["other_corpus"]
+    with SessionLocal() as s:
+        other_tid = s.query(TextDoc).filter_by(title="Другое").one().id
+        assert s.query(Hit).filter_by(dictionary_id=dict_id, text_id=other_tid).count() > 0
+    form = {"name": "Чувства", "description": "", "merge_propn": "1", "scope_corpus_ids": [str(cid)]}
+    client.post(f"/dictionaries/{dict_id}/settings", data=form)
+    run_pending()
+    with SessionLocal() as s:
+        assert s.query(Hit).filter_by(dictionary_id=dict_id, text_id=other_tid).count() == 0  # вне области
+        assert s.query(Hit).filter_by(dictionary_id=dict_id, text_id=data["text_id"]).count() > 0
+    page = client.get(f"/analysis?tab=freq&dictionary_id={dict_id}&corpus_id={other}").text
+    assert "не сопоставлены" in page and "Сопоставить с этим корпусом" in page
+    client.post(f"/dictionaries/{dict_id}/scope/add", data={"corpus_id": str(other), "back": "/texts"})
+    run_pending()
+    with SessionLocal() as s:
+        assert s.query(Hit).filter_by(dictionary_id=dict_id, text_id=other_tid).count() > 0
+    # текст убрали из корпуса области — вхождения словаря для него удаляются
+    client.post(f"/corpora/{other}", data={"name": "Прочее", "description": "", "text_ids": []})
+    with SessionLocal() as s:
+        assert s.query(Hit).filter_by(dictionary_id=dict_id, text_id=other_tid).count() == 0
+    # вернуть область «все тексты»
+    form.pop("scope_corpus_ids")
+    client.post(f"/dictionaries/{dict_id}/settings", data=form)
+    run_pending()
+    with SessionLocal() as s:
+        assert s.query(Hit).filter_by(dictionary_id=dict_id, text_id=other_tid).count() > 0
+
+
+def test_dashboard(client, data):
+    r = client.get(f"/dashboard?corpus_id={data['corpus_id']}&dictionary_id={data['dict_id']}")
+    assert r.status_code == 200 and "Частые слова словаря" in r.text and "Персонажи" in r.text
+    r = client.get(f"/dashboard?texts={data['text_id']}")
+    assert r.status_code == 200 and "Вишнёвый сад" in r.text and "Где в тексте" in r.text
+    r = client.get(f"/export/dashboard.html?corpus_id={data['corpus_id']}&dictionary_id={data['dict_id']}")
+    assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
+    html = r.text
+    assert "PlotlyGeoAssets" in html and "plotly.js v" in html and len(html) > 3_000_000  # всё внутри
+    assert "/static/" not in html.split("<body>", 1)[1]  # никаких внешних файлов приложения
+    small = client.get(f"/export/dashboard.html?corpus_id={data['corpus_id']}&cdn=1").text
+    assert len(small) < 600_000 and "cdn.jsdelivr.net/npm/plotly.js-dist-min@" in small

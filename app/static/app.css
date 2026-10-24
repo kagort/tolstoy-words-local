@@ -181,3 +181,5 @@ option.muted { color: var(--muted); }
 @media (max-width: 800px) { .help-layout { grid-template-columns: 1fr; } .help-toc { position: static; max-height: none; } }
 /* колонка параметров выборки: флажки по высоте полей, ширина не зависит от текста */
 .sel-opts .check { display: flex; align-items: center; gap: 6px; min-height: 38px; margin: 0; white-space: nowrap; }
+button.link { background: none; border: 0; padding: 0 2px; color: var(--muted); cursor: pointer; font-size: 11px; box-shadow: none; }
+button.link:hover { color: var(--err); }

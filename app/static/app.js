@@ -49,6 +49,11 @@ function drawGroups(id, ov, metric, ytitle, extra, opts) {
         height: Math.max(320, 120 + labels.length * Math.max(22, 12 * words.length)), margin: { l: 20, r: 20, t: 50, b: 50 } }
     : { barmode: 'group', yaxis: Object.assign({ title: ytitle }, scale), xaxis: { automargin: true, tickangle: labels.length > 4 ? -30 : 0, tickfont: { size: 11 } },
         margin: { l: 60, r: 20, t: 50, b: 40 } };
+  if (words.length > 4) {  // много рядов — легенда под графиком, чтобы не закрывала заголовок
+    layout.legend = { orientation: 'h', x: 0, y: horizontal ? -0.08 : -0.22, yanchor: 'top' };
+    layout.margin = Object.assign({}, layout.margin, { b: horizontal ? 60 + 22 * Math.ceil(words.length / 4) : 110 + 22 * Math.ceil(words.length / 4) });
+    if (layout.height) layout.height += 22 * Math.ceil(words.length / 4);
+  }
   if (ov.words.length > MAX_SERIES) {
     layout.annotations = [{ text: `на графике ${MAX_SERIES} самых частых из ${ov.words.length}; все — в тепловой карте и таблице`,
       xref: 'paper', yref: 'paper', x: 0, y: 1.08, showarrow: false, font: { size: 11, color: cssVar('--muted') }, xanchor: 'left' }];
@@ -394,3 +399,11 @@ async function showMarked(url, title) {
   document.addEventListener('focusin', e => { if (e.target.dataset && e.target.dataset.term) show(e.target); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
 })();
+
+// «Вероятно, один персонаж»: отмечает имена группы в указателе и вписывает самое полное имя
+function prefillMerge(names) {
+  document.querySelectorAll('.merge-check').forEach(c => { c.checked = names.includes(c.value); });
+  const longest = names.reduce((a, b) => (b.length > a.length ? b : a), '');
+  const inp = document.getElementById('merge-canonical');
+  if (inp) { inp.value = longest; inp.scrollIntoView({ behavior: 'smooth', block: 'center' }); inp.focus(); }
+}

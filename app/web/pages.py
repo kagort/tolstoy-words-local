@@ -20,6 +20,8 @@ from app.services import analytics as A
 from app.services.dictionaries import (
     DEFAULT_SETTINGS,
     add_entries,
+    scope_corpora,
+    sync_scope,
     create_dictionary,
     option_counts,
     parse_dictionary_file,
@@ -241,6 +243,8 @@ def text_edit(request: Request, text_id: int, title: str = Form(...), author: st
     doc.source_type, doc.generator = source_type, generator.strip() or None
     ids = [int(c) for c in corpus_ids if c.isdigit()]
     doc.corpora = list(db.scalars(select(Corpus).where(Corpus.id.in_(ids)))) if ids else []
+    db.flush()
+    sync_scope(db, [text_id])  # словари для выбранных корпусов: текст вошёл в область — сопоставить, вышел — убрать вхождения
     db.commit()
     flash(request, "Сведения о тексте сохранены", "success")
     return redirect(f"/texts/{text_id}")
@@ -330,7 +334,10 @@ def corpus_update(request: Request, corpus_id: int, name: str = Form(...), descr
         raise HTTPException(404)
     c.name, c.description = name.strip(), description.strip() or None
     ids = [int(t) for t in text_ids if t.isdigit()]
+    before = {t.id for t in c.texts}
     c.texts = list(db.scalars(select(TextDoc).where(TextDoc.id.in_(ids)))) if ids else []
+    db.flush()
+    sync_scope(db, sorted(before ^ set(ids)))
     db.commit()
     flash(request, "Корпус сохранён", "success")
     return redirect(f"/corpora/{corpus_id}")
@@ -398,6 +405,7 @@ def dictionary_detail(request: Request, dict_id: int, db: Session = Depends(get_
     opt_counts = {e.id: option_counts(db, e) for e in d.entries if e.ambiguous or not e.verified}
     pending = db.scalar(select(func.count()).select_from(Job).where(Job.status.in_(["queued", "running"]), Job.kind == "match")) or 0
     return render(request, "dictionary_detail.html", d=d, hits=hits, in_names=in_names, opt_counts=opt_counts, pending=pending,
+                  all_corpora=list(db.scalars(select(Corpus).order_by(Corpus.name))), scope=set(scope_corpora(d)),
                   names_ok=set((d.settings or {}).get("names_ok_entries", [])))
 
 
@@ -446,7 +454,7 @@ async def dictionary_add(request: Request, dict_id: int, words: str = Form(""), 
 def dictionary_settings(request: Request, dict_id: int, name: str = Form(...), description: str = Form(""),
                         include_participles: str | None = Form(None), include_gerunds: str | None = Form(None),
                         merge_propn: str | None = Form(None), count_names: str | None = Form(None),
-                        db: Session = Depends(get_session)):
+                        scope_corpus_ids: list[str] = Form([]), db: Session = Depends(get_session)):
     from app.services.matching import flag_name_hits
 
     d = db.get(Dictionary, dict_id)
@@ -455,10 +463,11 @@ def dictionary_settings(request: Request, dict_id: int, name: str = Form(...), d
     d.name, d.description = name.strip(), description.strip() or None
     old = dict(d.settings or {})
     new = {**old, "include_participles": bool(include_participles), "include_gerunds": bool(include_gerunds),
-           "merge_propn": bool(merge_propn), "count_names": bool(count_names)}
+           "merge_propn": bool(merge_propn), "count_names": bool(count_names),
+           "corpus_ids": sorted({int(c) for c in scope_corpus_ids if c.isdigit()})}
     d.settings = new
-    match_keys = ("include_participles", "include_gerunds", "merge_propn")
-    if any(old.get(k, DEFAULT_SETTINGS.get(k)) != new[k] for k in match_keys):
+    match_keys = ("include_participles", "include_gerunds", "merge_propn", "corpus_ids")
+    if any(old.get(k, DEFAULT_SETTINGS.get(k, [])) != new[k] for k in match_keys):
         enqueue(db, "match", {"dictionary_id": d.id}, title=f"Пересчёт словаря «{d.name}»")
         msg = "Настройки сохранены, словарь пересчитывается"
     else:  # «считать слова в составе имён» меняет только пометки — без пересчёта
@@ -488,6 +497,24 @@ def entry_names_toggle(request: Request, dict_id: int, entry_id: int, db: Sessio
     flash(request, f"«{e.surface}»: " + ("вхождения внутри имён тоже считаются" if entry_id in ok else "вхождения внутри имён не считаются"),
           "success")
     return redirect(f"/dictionaries/{dict_id}#e{entry_id}")
+
+
+@router.post("/dictionaries/{dict_id}/scope/add")
+def dictionary_scope_add(request: Request, dict_id: int, corpus_id: str = Form(""), back: str = Form("/analysis"),
+                         db: Session = Depends(get_session)):
+    """Добавить корпус в область словаря и сопоставить его тексты (кнопка в «Анализе»)."""
+    d = db.get(Dictionary, dict_id)
+    if d is None:
+        raise HTTPException(404)
+    cid = _int(corpus_id)
+    if cid and scope_corpora(d):
+        d.settings = {**(d.settings or {}), "corpus_ids": sorted(set(scope_corpora(d)) | {cid})}
+        db.flush()
+        c = db.get(Corpus, cid)
+        n = sync_scope(db, [t.id for t in c.texts] if c else [])
+        db.commit()
+        flash(request, f"Корпус добавлен к словарю «{d.name}»" + ("; сопоставление поставлено в очередь" if n else ""), "success")
+    return redirect(back if back.startswith("/") else "/analysis")
 
 
 @router.post("/dictionaries/{dict_id}/rematch")
@@ -624,7 +651,17 @@ def _analysis_context(db: Session, request: Request) -> dict:
     categories: dict[str, list] = {}
     for e in sorted(entries, key=lambda e: e.category or ""):
         categories.setdefault(e.category or "", []).append(e)
+    # словарь только для выбранных корпусов, а в выборке есть другие тексты — предупреждаем
+    scope_out = 0
+    cur = next((d for d in dictionaries if d.id == dict_id), None)
+    if cur is not None:
+        from app.services.dictionaries import scope_text_ids
+
+        scope = scope_text_ids(db, cur)
+        if scope is not None:
+            scope_out = sum(1 for t in sel.ids if t not in scope)
     return dict(dictionaries=dictionaries, corpora=corpora, dict_id=dict_id, corpus_id=sel.corpus_id, entries=entries,
+                scope_out=scope_out,
                 corpus_name=sel.corpus_name, tab=qp.get("tab", "overview"), sel=sel, sel_texts=corpus_texts(db, sel),
                 facets=A.facets(db, sel.corpus_ids), word_counts=word_counts, categories=categories,
                 n_texts=len(sel.ids), stop_options=stop_options(db))
@@ -755,7 +792,9 @@ def _entities_context(db: Session, request: Request, dict_id: int, sel) -> dict:
         ix["total"] = len(ix["items"]) if len(ix["items"]) < ix["total"] else ix["total"]
         ix["n_mentions"] = sum(x["count"] for x in ix["items"])
     cross = qp.get("cross") if qp.get("cross") in ("LOC", "PER", "ORG") else "LOC"
+    sel_texts = list(db.execute(select(TextDoc.id, TextDoc.title).where(TextDoc.id.in_(sel.ids or [-1])).order_by(TextDoc.title)))
     return {"ents": ix, "ent_etype": etype, "ent_unit": unit, "ent_cross": cross,
+            "merge_hints": E.merge_suggestions(ix["items"]), "ent_texts": sel_texts,
             "network": E.persons_network(db, sel.ids, unit) if ix["n_mentions"] else None,
             "ent_dict": E.entity_dictionary(db, sel.ids, dict_id, sel.words, cross, unit) if ix["n_mentions"] else None,
             "ETYPES": E.ETYPES, "ETYPE_ONE": E.ETYPE_ONE, "UNITS": E.UNITS}
@@ -877,14 +916,44 @@ def entity_override(request: Request, norm: str = Form(...), etype: str = Form("
     return redirect(back if back.startswith("/") else "/analysis?tab=entities")
 
 
+@router.post("/entities/merge")
+def entities_merge(request: Request, names: list[str] = Form([]), canonical: str = Form(""), scope: str = Form("all"),
+                   back: str = Form("/analysis?tab=entities"), db: Session = Depends(get_session)):
+    """Объединить отмеченные имена в одного персонажа — во всех текстах или только в одном."""
+    from app.services.entities import merge_names
+
+    target = canonical.strip() or (max(names, key=len) if names else "")
+    if len(set(names) | {target}) < 2 or not target:
+        flash(request, "Отметьте хотя бы два имени (или одно и впишите имя персонажа)", "error")
+    else:
+        text_id = _int(scope) if scope != "all" else None
+        n = merge_names(db, names, target, text_id)
+        db.commit()
+        where = f"в тексте «{db.get(TextDoc, text_id).title}»" if text_id and db.get(TextDoc, text_id) else "во всех текстах"
+        flash(request, f"Объединено в «{target}» {where}: вариантов {n}", "success")
+    return redirect(back if back.startswith("/") else "/analysis?tab=entities")
+
+
+@router.post("/entities/split")
+def entities_split(request: Request, variant: str = Form(...), text_ids: list[str] = Form([]),
+                   back: str = Form("/analysis?tab=entities"), db: Session = Depends(get_session)):
+    from app.services.entities import split_name
+
+    split_name(db, variant.strip(), [int(t) for t in text_ids if t.isdigit()])
+    db.commit()
+    flash(request, f"«{variant}» отделено от персонажа", "success")
+    return redirect(back if back.startswith("/") else "/analysis?tab=entities")
+
+
 @router.post("/places")
 def place_edit(request: Request, name: str = Form(...), action: str = Form("coords"), coords: str = Form(""),
-               option: str = Form(""), back: str = Form("/analysis?tab=geo"), db: Session = Depends(get_session)):
+               option: str = Form(""), kind: str = Form(""), back: str = Form("/analysis?tab=geo"),
+               db: Session = Depends(get_session)):
     """Ручная правка места на карте: координаты, вариант из справочника, «не на карте», сброс."""
     from app.services.geo import set_place
 
     try:
-        msg = set_place(db, name, action, coords, _int(option))
+        msg = set_place(db, name, action, coords, _int(option), kind)
         db.commit()
         flash(request, msg, "success")
     except ValueError as exc:
@@ -932,9 +1001,10 @@ def analysis(request: Request, db: Session = Depends(get_session)):
     elif tab == "entities":
         ctx.update(_entities_context(db, request, dict_id, sel))
     elif tab == "geo":
-        from app.services.geo import KIND_LABELS, place_map
+        from app.services.geo import EDIT_KINDS, KIND_LABELS, place_map
 
-        ctx.update({"geo": place_map(db, sel.ids), "GEO_KINDS": KIND_LABELS})
+        ctx.update({"geo": place_map(db, sel.ids), "GEO_KINDS": KIND_LABELS, "EDIT_KINDS": EDIT_KINDS,
+                    "geo_mode": "countries" if qp.get("geo_mode") == "countries" else "places"})
     elif tab == "semantic":
         ctx.update(_semantic_context(db, request, dict_id, sel, entry_id))
     elif tab == "topics":
@@ -1251,3 +1321,25 @@ def help_article(request: Request, slug: str):
     if art is None:
         raise HTTPException(404)
     return render(request, "help_article.html", art=art, articles=list(H.articles().values()))
+
+
+# ------------------------------------------------------------------ дашборд
+
+
+def _dashboard_data(db: Session, request: Request) -> tuple[dict, object, int | None, list]:
+    from app.services.dashboard import build
+    from app.services.selection import from_params
+
+    sel = from_params(db, request.query_params)
+    dictionaries = list(db.scalars(select(Dictionary).order_by(Dictionary.id)))
+    dict_id = _int(request.query_params.get("dictionary_id")) or (dictionaries[0].id if dictionaries else None)
+    return build(db, sel, dict_id), sel, dict_id, dictionaries
+
+
+@router.get("/dashboard")
+def dashboard_page(request: Request, db: Session = Depends(get_session)):
+    """Обзорный дашборд по выборке: корпус (corpus_id), отмеченные тексты (texts) или один текст."""
+    dash, sel, dict_id, dictionaries = _dashboard_data(db, request)
+    return render(request, "dashboard_view.html", dash=dash, selq=sel.query(False), sel_pairs=sel.pairs(False),
+                  dict_id=dict_id, dictionaries=dictionaries)
+

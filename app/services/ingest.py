@@ -170,7 +170,12 @@ def run_ingest(job_id: int | None, text_id: int) -> None:
         doc.pipeline_version = pipeline_label()
         # новые тексты сразу сопоставляем со всеми словарями (в двухступенчатом режиме здесь же
         # предложения со словами словарей получат точный разбор — ступень 2)
+        from app.services.dictionaries import scope_text_ids
+
         for d in s.scalars(select(Dictionary)):
+            scope = scope_text_ids(s, d)
+            if scope is not None and text_id not in scope:  # словарь сопоставляется только с выбранными корпусами
+                continue
             enqueue(s, "match", {"dictionary_id": d.id, "text_ids": [text_id]},
                     title=f"Словарь «{d.name}» × текст «{title}»")
         if settings.ner_on_ingest:
