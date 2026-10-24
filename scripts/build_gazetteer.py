@@ -25,6 +25,13 @@ from pathlib import Path
 OUT = Path(__file__).resolve().parents[1] / "app" / "data" / "gazetteer_ru.tsv.gz"
 COUNTRIES = OUT.parent / "countries_ru.tsv"
 MAX_PER_NAME = 5
+# ручные поправки кода страны (корпус — в основном классическая литература, где Крым и Одесса — в России);
+# применяются при каждой пересборке, чтобы правка справочника не терялась
+COUNTRY_OVERRIDES = {
+    ("UA", "севастополь"): "RU", ("UA", "севастопол"): "RU", ("UA", "севастопаль"): "RU",
+    ("UA", "симферополь"): "RU", ("UA", "симферопол"): "RU", ("UA", "симфереполь"): "RU",
+    ("UA", "ялта"): "RU", ("UA", "коктебель"): "RU", ("UA", "одесса"): "RU", ("UA", "одеса"): "RU",
+}
 RU_NAME = re.compile(r"^[а-яё][а-яё\- ]*[а-яё]$")  # только русский алфавит: украинские, казахские и др. варианты отбрасываются
 
 
@@ -66,6 +73,7 @@ def main() -> None:
         for cand in sorted(cands, key=lambda x: -x[2]):
             uniq.setdefault((cand[3], round(cand[0], 1), round(cand[1], 1)), cand)
         for lat, lon, pop, cc, kind in list(uniq.values())[:MAX_PER_NAME]:
+            cc = COUNTRY_OVERRIDES.get((cc, n), cc)
             rows.append(f"{n}\t{lat}\t{lon}\t{pop}\t{cc}\t{kind}")
     rows.sort()
     with gzip.open(OUT, "wt", encoding="utf-8", compresslevel=9) as f:
