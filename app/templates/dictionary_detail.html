@@ -3,6 +3,7 @@
 {% block content %}
 <p><a href="/dictionaries">← Все словари</a></p>
 <h1>Словарь «{{ d.name }}»</h1>
+{% if scope %}<p class="muted">Сопоставляется только с корпусами: {% for c in all_corpora if c.id in scope %}{{ c.name }}{% if not loop.last %}, {% endif %}{% endfor %} (настройки ниже).</p>{% endif %}
 {% if pending %}<div class="flash info">Идёт пересчёт вхождений (задач в очереди: {{ pending }}). Числа обновятся после завершения — см. <a href="/jobs">Задачи</a>.</div>{% endif %}
 
 <div class="panel table-scroll">
@@ -28,7 +29,11 @@
       </td>
       <td><select name="match_mode" form="f{{ e.id }}"><option value="lemma" {{ 'selected' if e.match_mode == 'lemma' }}>по лемме</option><option value="forms" {{ 'selected' if e.match_mode == 'forms' }}>по формам</option></select></td>
       <td><input form="f{{ e.id }}" type="text" name="category" value="{{ e.category or '' }}"></td>
-      <td class="num"><a href="/analysis?tab=conc&dictionary_id={{ d.id }}&entry_id={{ e.id }}">{{ hits.get(e.id, 0) }}</a></td>
+      <td class="num"><a href="/analysis?tab=conc&dictionary_id={{ d.id }}&entry_id={{ e.id }}">{{ hits.get(e.id, 0) }}</a>
+        {% if in_names.get(e.id) or e.id in names_ok %}<div class="small">
+          {% if e.id in names_ok %}<span class="muted" title="вхождения внутри имён собственных считаются">+ в именах</span>
+          {% else %}<a class="muted" href="/analysis?tab=conc&dictionary_id={{ d.id }}&entry_id={{ e.id }}&names=1" title="вхождения внутри имён персонажей (например, «Любовь Андреевна» для слова «любовь») не считаются">{{ in_names[e.id] }} в именах</a>{% endif %}
+          <form class="inline" method="post" action="/dictionaries/{{ d.id }}/entries/{{ e.id }}/names"><button class="small secondary" type="submit" title="{{ 'не считать вхождения внутри имён' if e.id in names_ok else 'считать и внутри имён (например, «Бог»)' }}">{{ '−' if e.id in names_ok else '+' }}</button></form></div>{% endif %}</td>
       <td class="num"><button form="f{{ e.id }}" class="small" type="submit">Сохранить</button></td>
     </tr>
     {% endfor %}
@@ -57,6 +62,9 @@
       <label class="check"><input type="checkbox" name="include_participles" {{ 'checked' if d.settings.get('include_participles') }}> причастия считать формами глагола</label>
       <label class="check"><input type="checkbox" name="include_gerunds" {{ 'checked' if d.settings.get('include_gerunds') }}> деепричастия считать формами глагола</label>
       <label class="check"><input type="checkbox" name="merge_propn" {{ 'checked' if d.settings.get('merge_propn', True) }}> существительные искать и среди имён собственных</label>
+      <label class="check"><input type="checkbox" name="count_names" {{ 'checked' if d.settings.get('count_names') }}> считать слова и внутри имён персонажей (иначе «Любовь Андреевна» не попадает в частоты слова «любовь»; места и организации — «Америка», «НАТО» — считаются всегда)</label>
+      <label>Сопоставлять с <span class="muted small">(ничего не отмечено — со всеми текстами; иначе только с текстами отмеченных корпусов — быстрее и не нужен точный разбор остальных текстов)</span></label>
+      <div class="word-grid" style="max-height:140px">{% for c in all_corpora %}<label class="check-item"><input type="checkbox" name="scope_corpus_ids" value="{{ c.id }}" {{ 'checked' if c.id in scope }}> {{ c.name }}</label>{% endfor %}</div>
       <p><button type="submit">Сохранить и пересчитать</button></p>
     </form>
     <p class="row">

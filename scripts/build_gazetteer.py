@@ -23,6 +23,7 @@ from collections import defaultdict
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parents[1] / "app" / "data" / "gazetteer_ru.tsv.gz"
+COUNTRIES = OUT.parent / "countries_ru.tsv"
 MAX_PER_NAME = 5
 RU_NAME = re.compile(r"^[а-яё][а-яё\- ]*[а-яё]$")  # только русский алфавит: украинские, казахские и др. варианты отбрасываются
 
@@ -71,6 +72,13 @@ def main() -> None:
         f.write("# GeoNames (CC BY 4.0, geonames.org) via geonamescache; страны — pycountry. Сборка: scripts/build_gazetteer.py\n")
         f.write("\n".join(rows) + "\n")
     print(f"{OUT}: {len(rows)} строк, {len(by_name)} названий, {OUT.stat().st_size // 1024} КБ")
+    # коды стран: двухбуквенный → трёхбуквенный (раскраска стран на карте Plotly) и короткое русское название
+    with open(COUNTRIES, "w", encoding="utf-8") as f:
+        f.write("# код\tкод ISO-3\tназвание (pycountry, ru)\n")
+        for country in sorted(pycountry.countries, key=lambda c: c.alpha_2):
+            ru = re.sub(r"\s*\(.*?\)", "", tr.gettext(getattr(country, "common_name", None) or country.name))
+            f.write(f"{country.alpha_2}\t{country.alpha_3}\t{ru}\n")
+    print(f"{COUNTRIES}: {len(pycountry.countries)} стран")
 
 
 if __name__ == "__main__":

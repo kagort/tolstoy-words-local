@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from collections import Counter, defaultdict
 from functools import lru_cache
 
@@ -149,6 +150,9 @@ def run_ner(job_id: int | None, text_id: int) -> int:
 
         s.execute(sql("UPDATE texts SET meta = coalesce(meta, '{}'::jsonb) || jsonb_build_object('ner', jsonb_build_object('count', :n)) "
                       "WHERE id = :id"), {"n": total, "id": text_id})
+        from app.services.matching import flag_name_hits
+
+        flag_name_hits(s, text_ids=[text_id])  # слова словаря внутри найденных имён перестают считаться
         s.commit()
     log.info("Текст %s: имён собственных %s", text_id, total)
     return total
@@ -164,44 +168,57 @@ def texts_without_entities(session: Session, text_ids: list[int]) -> list[int]:
 # ------------------------------------------------------------------ правки и указатель
 
 
-def overrides(session: Session) -> dict[str, EntityOverride]:
-    return {o.norm: o for o in session.scalars(select(EntityOverride))}
+def overrides(session: Session) -> dict:
+    """Правки имён: {"ovr": {норм.: EntityOverride}, "glob": {вариант: персонаж}, "text": {(текст, вариант): персонаж}}."""
+    from app.models import EntityAlias
+
+    glob, per_text = {}, {}
+    for a in session.scalars(select(EntityAlias)):
+        if a.text_id is None:
+            glob[a.norm] = a.canonical
+        else:
+            per_text[(a.text_id, a.norm)] = a.canonical
+    return {"ovr": {o.norm: o for o in session.scalars(select(EntityOverride))}, "glob": glob, "text": per_text}
 
 
-def resolve(norm_name: str, etype: str, ovr: dict) -> tuple[str, str, bool]:
-    """(каноническое имя, класс, скрыто) с учётом правок; слияния прослеживаются по цепочке."""
+def resolve(norm_name: str, etype: str, ovr: dict, text_id: int | None = None) -> tuple[str, str, bool]:
+    """(каноническое имя, класс, скрыто) с учётом правок. Слияния прослеживаются по цепочке; слияние «только в этом
+    тексте» (entity_aliases.text_id) важнее общего — одноимённые герои разных романов не сливаются."""
+    o_map, glob, per_text = ovr["ovr"], ovr["glob"], ovr["text"]
     seen = set()
     name, typ, hidden = norm_name, etype, False
-    while name in ovr and name not in seen:
+    while name not in seen:
         seen.add(name)
-        o = ovr[name]
-        hidden = hidden or o.hidden
-        typ = o.etype or typ
-        if o.canonical and o.canonical != name:
-            name = o.canonical
-        else:
+        o = o_map.get(name)
+        if o is not None:
+            hidden = hidden or o.hidden
+            typ = o.etype or typ
+        nxt = per_text.get((text_id, name)) or glob.get(name) or (o.canonical if o is not None else None)
+        if not nxt or nxt == name:
             break
+        name = nxt
     return name, typ, hidden
 
 
 def entity_index(session: Session, text_ids: list[int], etype: str | None = None, query: str = "", top: int = 300) -> dict:
     ovr = overrides(session)
     rows = session.execute(
-        select(Entity.norm, Entity.etype, func.count(), func.count(func.distinct(Entity.text_id)), func.min(Entity.sentence_id))
-        .where(Entity.text_id.in_(text_ids or [-1])).group_by(Entity.norm, Entity.etype)
+        select(Entity.norm, Entity.etype, Entity.text_id, func.count(), func.min(Entity.sentence_id))
+        .where(Entity.text_id.in_(text_ids or [-1])).group_by(Entity.norm, Entity.etype, Entity.text_id)
     ).all()
     agg: dict[str, dict] = {}
     by_type = Counter()
-    for norm_name, typ, c, n_texts, first in rows:
-        name, typ2, hidden = resolve(norm_name, typ, ovr)
+    for norm_name, typ, tid, c, first in rows:
+        name, typ2, hidden = resolve(norm_name, typ, ovr, tid)
         if hidden:
             continue
-        a = agg.setdefault(name, {"name": name, "types": Counter(), "count": 0, "texts": 0, "variants": Counter(), "first": first})
+        a = agg.setdefault(name, {"name": name, "types": Counter(), "count": 0, "tids": set(), "variants": Counter(), "first": first})
         a["types"][typ2] += c
         a["count"] += c
-        a["texts"] = max(a["texts"], n_texts)
+        a["tids"].add(tid)
         a["variants"][norm_name] += c
         a["first"] = min(a["first"], first)
+    edited = set(ovr["ovr"]) | set(ovr["glob"]) | {n for _, n in ovr["text"]}
     items = []
     for a in agg.values():
         typ = a["types"].most_common(1)[0][0]
@@ -210,9 +227,9 @@ def entity_index(session: Session, text_ids: list[int], etype: str | None = None
             continue
         if query and query.lower() not in a["name"].lower():
             continue
-        items.append({"name": a["name"], "etype": typ, "label": ETYPE_ONE.get(typ, typ), "count": a["count"], "texts": a["texts"],
-                      "variants": [v for v, _ in a["variants"].most_common(4) if v != a["name"]], "first": a["first"],
-                      "edited": a["name"] in ovr or any(v in ovr for v in a["variants"])})
+        items.append({"name": a["name"], "etype": typ, "label": ETYPE_ONE.get(typ, typ), "count": a["count"], "texts": len(a["tids"]),
+                      "variants": [v for v, _ in a["variants"].most_common(12) if v != a["name"]], "first": a["first"],
+                      "edited": a["name"] in edited or any(v in edited for v in a["variants"])})
     items.sort(key=lambda x: -x["count"])
     return {"items": items[:top], "total": len(items), "by_type": dict(by_type),
             "n_mentions": sum(x["count"] for x in items), "missing": texts_without_entities(session, text_ids)}
@@ -225,7 +242,7 @@ def _canonical_rows(session: Session, text_ids: list[int], etype: str | None = N
                 Entity.start_char, Entity.end_char)
          .join(SentenceRow, SentenceRow.id == Entity.sentence_id).where(Entity.text_id.in_(text_ids or [-1])))
     for sid, tid, par, idx, norm_name, typ, st, en in session.execute(q):
-        name, typ2, hidden = resolve(norm_name, typ, ovr)
+        name, typ2, hidden = resolve(norm_name, typ, ovr, tid)
         if hidden or (etype and typ2 != etype):
             continue
         yield sid, tid, par, idx, name, typ2, st, en
@@ -260,6 +277,70 @@ def set_override(session: Session, norm_name: str, etype: str | None = None, can
             session.delete(o)
         return
     session.add(o)
+
+
+def merge_names(session: Session, names: list[str], canonical: str, text_id: int | None = None) -> int:
+    """Объединяет имена в одного персонажа: «Люба», «Любовь Андреевна», «Раневская» → «Раневская Любовь Андреевна».
+
+    text_id — только в этом тексте (одноимённые герои разных произведений остаются разными). Возвращает число вариантов.
+    """
+    from app.models import EntityAlias
+
+    canonical = canonical.strip()
+    n = 0
+    for name in {x.strip() for x in names if x.strip()}:
+        if name == canonical:
+            continue
+        a = session.scalar(select(EntityAlias).where(EntityAlias.norm == name, EntityAlias.text_id.is_(None) if text_id is None
+                                                     else EntityAlias.text_id == text_id))
+        if a is None:
+            session.add(EntityAlias(norm=name, canonical=canonical, text_id=text_id))
+        else:
+            a.canonical = canonical
+        n += 1
+    # если сам персонаж раньше был вариантом другого имени в этой области — убираем цикл
+    for a in session.scalars(select(EntityAlias).where(EntityAlias.norm == canonical)):
+        if a.text_id == text_id:
+            session.delete(a)
+    return n
+
+
+def split_name(session: Session, variant: str, text_ids: list[int] | None = None) -> None:
+    """Отделяет вариант от персонажа: убирает его слияния (общие и для текстов выборки) и ручное «слить с»."""
+    from app.models import EntityAlias
+
+    q = select(EntityAlias).where(EntityAlias.norm == variant)
+    for a in session.scalars(q):
+        if a.text_id is None or not text_ids or a.text_id in text_ids:
+            session.delete(a)
+    o = session.get(EntityOverride, variant)
+    if o is not None and o.canonical:
+        o.canonical = None
+        if not (o.etype or o.hidden):
+            session.delete(o)
+
+
+def merge_suggestions(items: list[dict], limit: int = 8) -> list[list[str]]:
+    """Группы имён персон, вероятно обозначающих одного героя: общее слово-имя длиной от 4 букв («Андрей» —
+    «князь Андрей» — «Андрей Болконский»; «Любовь Андреевна» — «Любовь Андреевна Раневская»). Решает пользователь."""
+    per = [it for it in items if it["etype"] == "PER"][:150]
+    by_word: dict[str, set[str]] = defaultdict(set)
+    for it in per:
+        for w in re.findall(r"[А-ЯЁA-Z][а-яёa-z]{3,}", it["name"]):
+            by_word[w].add(it["name"])
+    groups, seen = [], set()
+    count = {it["name"]: it["count"] for it in per}
+    for w, names in sorted(by_word.items(), key=lambda kv: -sum(count[n] for n in kv[1])):
+        if len(names) < 2:
+            continue
+        key = frozenset(names)
+        if key in seen:
+            continue
+        seen.add(key)
+        groups.append(sorted(names, key=lambda n: -count[n]))
+        if len(groups) >= limit:
+            break
+    return groups
 
 
 # ------------------------------------------------------------------ сеть персонажей и места × словарь

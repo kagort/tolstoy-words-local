@@ -78,6 +78,11 @@ def run_match(job_id: int | None, dictionary_id: int, entry_ids: list[int] | Non
         ready_texts = list(s.scalars(select(TextDoc.id).where(TextDoc.status == "ready")))
         if text_ids:
             ready_texts = [t for t in ready_texts if t in set(text_ids)]
+        from app.services.dictionaries import scope_text_ids
+
+        scope = scope_text_ids(s, d)  # словарь только для выбранных корпусов
+        if scope is not None:
+            ready_texts = [t for t in ready_texts if t in scope]
         # удаляем старые результаты для пересчитываемой области
         q = delete(Hit).where(Hit.dictionary_id == dictionary_id)
         if entry_ids:
@@ -130,6 +135,7 @@ def run_match(job_id: int | None, dictionary_id: int, entry_ids: list[int] | Non
         d = s.get(Dictionary, dictionary_id)
         if d is not None:
             d.matched_at = datetime.now(timezone.utc)
+            flag_name_hits(s, [dictionary_id], text_ids)  # слова внутри имён собственных не считаются
             s.commit()
     log.info("Словарь %s: найдено вхождений %s", dictionary_id, total_hits)
 
@@ -184,3 +190,40 @@ def _match_entries(job_id: int | None, dictionary_id: int, entry_data: list, rea
         if job_id:
             set_progress(job_id, progress_from + span * n / max(len(entry_data), 1), f"Обработано слов: {n} из {len(entry_data)} («{surface}»)")
     return total_hits
+
+
+def flag_name_hits(session: Session, dictionary_ids: list[int] | None = None, text_ids: list[int] | None = None) -> int:
+    """Помечает вхождения слов словаря, стоящие внутри имени персоны (вкладка «Имена»): «Любовь» в «Любовь
+    Андреевна» для слова «любовь», «Вера» (Вера Ростова) для слова «вера». Такие вхождения не считаются
+    (analytics.VALID), пока их не отметят ✓ вручную. Места и организации («Америка», «НАТО») и записи словаря с частью
+    речи PROPN не помечаются — их в словарь добавляют намеренно. Настройки словаря: count_names — считать и внутри
+    имён; names_ok_entries — слова-исключения.
+
+    Вызывается после сопоставления, после извлечения имён и после правки имён. Возвращает число помеченных вхождений.
+    """
+    from sqlalchemy import text as sql
+
+    dicts = list(session.scalars(select(Dictionary).where(Dictionary.id.in_(dictionary_ids)) if dictionary_ids
+                                 else select(Dictionary)))
+    flagged = 0
+    for d in dicts:
+        st = d.settings or {}
+        params = {"d": d.id, "ok": [int(x) for x in st.get("names_ok_entries", [])] or [-1],
+                  "tids": text_ids or [-1], "all_texts": not text_ids}
+        scope = "h.dictionary_id = :d AND (:all_texts OR h.text_id = ANY(:tids))"
+        if st.get("count_names"):
+            session.execute(sql(f"UPDATE dictionary_hits h SET in_name = false WHERE {scope} AND h.in_name"), params)
+            continue
+        session.execute(sql(f"""
+            UPDATE dictionary_hits h SET in_name = (h.entry_id <> ALL(:ok) AND EXISTS (
+                SELECT 1 FROM entities e
+                JOIN tokens t ON t.id = h.token_id
+                JOIN dictionary_entries de ON de.id = h.entry_id
+                LEFT JOIN entity_overrides o ON o.norm = e.norm
+                WHERE e.sentence_id = h.sentence_id AND t.start_char >= e.start_char AND t.end_char <= e.end_char
+                  AND coalesce(o.hidden, false) = false
+                  AND coalesce(o.etype, e.etype) = 'PER'
+                  AND coalesce(de.upos, '') <> 'PROPN'))
+            WHERE {scope}"""), params)
+        flagged += session.scalar(sql(f"SELECT count(*) FROM dictionary_hits h WHERE {scope} AND h.in_name"), params) or 0
+    return flagged

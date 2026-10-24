@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-from sqlalchemy import Integer, func, or_, select, tuple_
+from sqlalchemy import Integer, and_, func, or_, select, tuple_
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -21,7 +21,8 @@ from app.nlp.syntax import ROLE_LABELS, SENT_TYPE_LABELS, rel_label_ud, role_lab
 from app.nlp.tree import norm, parse_feats
 from app.services.stats import SIGNIFICANCE_LL, gries_dp, ipm, log_dice, log_likelihood, log_ratio
 
-VALID = or_(Hit.is_valid.is_(None), Hit.is_valid.is_(True))
+# вхождение считается: отмечено ✓, или не проверялось и не стоит внутри имени собственного (см. matching.flag_name_hits)
+VALID = or_(Hit.is_valid.is_(True), and_(Hit.is_valid.is_(None), Hit.in_name.is_(False)))
 DEFAULT_SCOPES = ("direct", "shared")
 
 
@@ -107,12 +108,29 @@ def only_words(freq: dict, entry_ids: list[int] | None) -> dict:
 
 
 def frequency_by_text(session: Session, dictionary_id: int, text_ids: list[int], top: int = 15,
-                      entry_ids: list[int] | None = None) -> dict:
-    """Матрица ipm «слово × текст» для тепловой карты (entry_ids — только выбранные слова)."""
+                      entry_ids: list[int] | None = None, by: str = "word") -> dict:
+    """Матрица ipm «слово × текст» для тепловой карты (entry_ids — только выбранные слова).
+
+    by = "cat" — строки по категориям словаря (суммы слов категории).
+    """
     from app.services.labels import text_labels, unique
 
     texts = list(session.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.n_words, TextDoc.meta)
                                  .where(TextDoc.id.in_(text_ids or [-1])).order_by(TextDoc.id)))
+    labels = {"texts": unique([text_labels(t.title, t.author, None, t.meta)[0] for t in texts]),
+              "texts_full": [text_labels(t.title, t.author, None, t.meta)[1] for t in texts]}
+    if by == "cat":
+        cat = func.coalesce(func.nullif(DictionaryEntry.category, ""), NO_CATEGORY)
+        q = (select(cat, Hit.text_id, func.count()).select_from(Hit).join(DictionaryEntry, DictionaryEntry.id == Hit.entry_id)
+             .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(text_ids or [-1]), VALID))
+        if entry_ids:
+            q = q.where(Hit.entry_id.in_(entry_ids))
+        cc: dict[str, dict] = defaultdict(dict)
+        for c, tid, n in session.execute(q.group_by(cat, Hit.text_id)):
+            cc[c][tid] = n
+        cats = sorted(cc, key=lambda c: -sum(cc[c].values()))[: max(top, 30)]
+        return {"words": cats, **labels, "by": "cat",
+                "z": [[round(ipm(cc[c].get(t.id, 0), t.n_words), 1) for t in texts] for c in cats]}
     freq = only_words(frequency(session, dictionary_id, text_ids), entry_ids)["rows"][:top]
     ids = [r["entry_id"] for r in freq]
     counts = defaultdict(dict)
@@ -123,12 +141,8 @@ def frequency_by_text(session: Session, dictionary_id: int, text_ids: list[int],
             .group_by(Hit.entry_id, Hit.text_id)
         ):
             counts[entry_id][text_id] = cnt
-    return {
-        "words": [r["word"] for r in freq],
-        "texts": unique([text_labels(t.title, t.author, None, t.meta)[0] for t in texts]),
-        "texts_full": [text_labels(t.title, t.author, None, t.meta)[1] for t in texts],
-        "z": [[round(ipm(counts[e].get(t.id, 0), t.n_words), 1) for t in texts] for e in ids],
-    }
+    return {"words": [r["word"] for r in freq], **labels, "by": "word",
+            "z": [[round(ipm(counts[e].get(t.id, 0), t.n_words), 1) for t in texts] for e in ids]}
 
 
 def forms_distribution(session: Session, entry_id: int, text_ids: list[int]) -> dict:
@@ -178,6 +192,7 @@ def concordance(
     window: int = 3,
     phrase: str | None = None,
     phrase_any_order: bool = False,
+    names_only: bool = False,
     include_invalid: bool = False,
     page: int = 1,
     per_page: int = 50,
@@ -187,14 +202,16 @@ def concordance(
         select(Hit.id, Hit.sentence_id, Hit.role, Hit.role_subtype, Hit.is_valid, Hit.form,
                TokenRow.start_char, TokenRow.end_char, TokenRow.deprel, TokenRow.upos, SentenceRow.text, SentenceRow.idx,
                TextDoc.id.label("text_id"), TextDoc.title, TextDoc.author, TextDoc.year_from,
-               DictionaryEntry.surface, Hit.entry_id)
+               DictionaryEntry.surface, Hit.entry_id, Hit.in_name)
         .join(TokenRow, TokenRow.id == Hit.token_id)
         .join(SentenceRow, SentenceRow.id == Hit.sentence_id)
         .join(TextDoc, TextDoc.id == Hit.text_id)
         .join(DictionaryEntry, DictionaryEntry.id == Hit.entry_id)
         .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(text_ids or [-1]))
     )
-    if not include_invalid:
+    if names_only:  # вхождения внутри имён собственных, которые не считаются (для проверки)
+        q = q.where(Hit.in_name, Hit.is_valid.is_(None))
+    elif not include_invalid:
         q = q.where(VALID)
     if entry_id:
         q = q.where(Hit.entry_id == entry_id)
@@ -255,6 +272,7 @@ def concordance(
             "end": r.end_char,
             "role_subtype": r.role_subtype or "",
             "is_valid": r.is_valid,
+            "in_name": r.in_name,
             "word": r.surface,
             "text_id": r.text_id,
             "source": f"{r.author + ', ' if r.author else ''}«{r.title}»{', ' + str(r.year_from) if r.year_from else ''}",
@@ -539,33 +557,68 @@ def group_sizes(session: Session, ids: list[int], dim: str, step: int = 10):
     return key, groups
 
 
+GROUPS_TOP = 30  # больше групп — остальные сворачиваются в «остальные (k)» (кроме периодов)
+CATEGORIES_TOP = 12  # категорий в режиме «по категориям», если слова не выбраны
+REST = "__rest__"
+
+
 def overview(session: Session, dictionary_id: int, text_ids: list[int], entry_ids: list[int],
-             dim: str = "author", step: int = 10) -> dict:
-    """Матрица «группа × слово»: вхождения, ipm, доля текстов группы со словом; плюс сумма по выбранным словам."""
+             dim: str = "author", step: int = 10, by: str = "word", groups_top: int | None = GROUPS_TOP) -> dict:
+    """Матрица «группа × слово (или категория)»: вхождения, ipm, доля текстов группы со словом; плюс сумма.
+
+    by = "cat" — строки по категориям словаря (только выбранных слов, если они заданы; иначе самые частые категории).
+    groups_top — сколько групп показывать; остальные складываются в одну («остальные (k)»).
+    """
     dim = dim if dim in DIMENSIONS else "author"
     step = step if step in PERIOD_STEPS else 10
     ids = text_ids or [-1]
     key, groups = group_sizes(session, ids, dim, step)
+    base_where = [Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), VALID]
 
-    entries = list(session.scalars(select(DictionaryEntry).where(DictionaryEntry.id.in_(entry_ids or [-1]))))
-    order = {eid: k for k, eid in enumerate(entry_ids)}
-    entries.sort(key=lambda e: order.get(e.id, 0))
+    if by == "cat":
+        item = func.coalesce(func.nullif(DictionaryEntry.category, ""), NO_CATEGORY)
+        scope = [Hit.entry_id.in_(entry_ids)] if entry_ids else []
+        ranked = session.execute(select(item, func.count()).select_from(Hit)
+                                 .join(DictionaryEntry, DictionaryEntry.id == Hit.entry_id)
+                                 .where(*base_where, *scope).group_by(item).order_by(func.count().desc())).all()
+        chosen = [c for c, _ in ranked] if entry_ids else [c for c, _ in ranked][:CATEGORIES_TOP]
+        items = [(c, c) for c in chosen]
+        scope = scope + [item.in_(chosen or ["-"])]
+    else:
+        item = Hit.entry_id
+        entries = list(session.scalars(select(DictionaryEntry).where(DictionaryEntry.id.in_(entry_ids or [-1]))))
+        order = {eid: k for k, eid in enumerate(entry_ids)}
+        entries.sort(key=lambda e: order.get(e.id, 0))
+        items = [(e.id, e.surface) for e in entries]
+        scope = [Hit.entry_id.in_([e.id for e in entries] or [-1])]
+
     counts, texts_with = defaultdict(dict), defaultdict(dict)
     total_counts, total_texts = {}, {}
-    if entries:
-        base = (select(key, Hit.entry_id, func.count(), func.count(func.distinct(Hit.text_id)))
-                .join(TextDoc, TextDoc.id == Hit.text_id)
-                .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), Hit.entry_id.in_([e.id for e in entries]), VALID))
-        for g, eid, c, t in session.execute(base.group_by(key, Hit.entry_id)):
+    if items:
+        q = (select(key, item, func.count(), func.count(func.distinct(Hit.text_id))).select_from(Hit)
+             .join(TextDoc, TextDoc.id == Hit.text_id).join(DictionaryEntry, DictionaryEntry.id == Hit.entry_id)
+             .where(*base_where, *scope))
+        for g, it, c, t in session.execute(q.group_by(key, item)):
             g = int(g) if dim in ("text", "period") and g is not None else g
-            counts[eid][g], texts_with[eid][g] = c, t
-        tot = (select(key, func.count(), func.count(func.distinct(Hit.text_id)))
-               .join(TextDoc, TextDoc.id == Hit.text_id)
-               .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), Hit.entry_id.in_([e.id for e in entries]), VALID)
-               .group_by(key))
+            counts[it][g], texts_with[it][g] = c, t
+        tot = (select(key, func.count(), func.count(func.distinct(Hit.text_id))).select_from(Hit)
+               .join(TextDoc, TextDoc.id == Hit.text_id).join(DictionaryEntry, DictionaryEntry.id == Hit.entry_id)
+               .where(*base_where, *scope).group_by(key))
         for g, c, t in session.execute(tot):
             g = int(g) if dim in ("text", "period") and g is not None else g
             total_counts[g], total_texts[g] = c, t
+
+    hidden = 0
+    if groups_top and dim != "period" and len(groups) > groups_top:
+        # группы с наибольшим числом вхождений выбранных слов; остальные — одной строкой
+        groups.sort(key=lambda gr: (-total_counts.get(gr["key"], 0), -gr["n_words"]))
+        kept, rest = groups[:groups_top], groups[groups_top:]
+        hidden = len(rest)
+        rest_keys = [gr["key"] for gr in rest]
+        for mp in [*counts.values(), *texts_with.values(), total_counts, total_texts]:
+            mp[REST] = sum(mp.pop(k, 0) for k in rest_keys)
+        groups = kept + [{"key": REST, "label": f"остальные ({hidden})", "full": f"остальные группы: {hidden}",
+                          "n_words": sum(gr["n_words"] for gr in rest), "n_texts": sum(gr["n_texts"] for gr in rest)}]
 
     def row(cmap, tmap):
         return {
@@ -574,9 +627,10 @@ def overview(session: Session, dictionary_id: int, text_ids: list[int], entry_id
             "share": [round(100 * tmap.get(gr["key"], 0) / gr["n_texts"], 1) if gr["n_texts"] else 0 for gr in groups],
         }
 
-    words = [{"entry_id": e.id, "word": e.surface, **row(counts[e.id], texts_with[e.id])} for e in entries]
-    total = {"word": "все выбранные слова", **row(total_counts, total_texts)}
+    words = [{"entry_id": it if by != "cat" else None, "word": label, **row(counts[it], texts_with[it])} for it, label in items]
+    total = {"word": "все выбранные категории" if by == "cat" else "все выбранные слова", **row(total_counts, total_texts)}
     return {"dim": dim, "dim_label": DIMENSIONS[dim], "step": step, "groups": groups, "words": words, "total": total,
+            "by": by, "hidden_groups": hidden,
             "corpus_words": sum(g["n_words"] for g in groups), "n_texts": sum(g["n_texts"] for g in groups)}
 
 

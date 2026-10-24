@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 from datetime import datetime
 from urllib.parse import quote
 
@@ -114,7 +115,7 @@ def export_frequency(fmt: str, request: Request, db: Session = Depends(get_sessi
     df = pd.DataFrame(f["rows"]).rename(columns={"share": "Доля среди слов таблицы, %",
         "word": "Слово", "lemma": "Лемма", "upos": "Часть речи", "category": "Категория", "count": "Вхождений",
         "ipm": "ipm", "sentences": "Предложений", "texts": "Текстов", "dp": "DP (неравномерность)"}).drop(columns=["entry_id"], errors="ignore")
-    heat = A.frequency_by_text(db, dict_id, ids, top=200, entry_ids=words)
+    heat = A.frequency_by_text(db, dict_id, ids, top=200, entry_ids=words, by=_selection(db, request).unit or "word")
     df_heat = pd.DataFrame(heat["z"], index=heat["words"], columns=heat["texts_full"]).reset_index().rename(columns={"index": "Слово (ipm по текстам)"}) if heat["words"] else pd.DataFrame()
     frames = {"Частоты": df, "По текстам (ipm)": df_heat}
     cats = A.category_frequency(db, dict_id, ids, entry_ids=words, dim=request.query_params.get("cat_dim") or "author")
@@ -137,11 +138,12 @@ def export_concordance(fmt: str, request: Request, db: Session = Depends(get_ses
                       rel_type=qp.get("rel_type") or None, related_lemma=qp.get("related") or None,
                       near=qp.get("near") or None, window=_int(qp.get("window")) or 3,
             phrase=qp.get("phrase") or None, phrase_any_order=bool(qp.get("phrase_any")),
+            names_only=bool(qp.get("names")),
                       include_invalid=bool(qp.get("invalid")), page=1, per_page=100_000, context_chars=10_000)
     df = pd.DataFrame([{
         "Слово словаря": i["word"], "Левый контекст": i["left"], "Словоформа": i["kw"], "Правый контекст": i["right"],
         "Роль": i["role_label"], "Связь UD": i["deprel"], "Часть речи UD": i["upos"], "Подтип роли": i["role_subtype"], "Источник": i["source"], "№ предложения": i["sentence_no"],
-        "ID предложения": i["sentence_id"], "Словосочетание": " | ".join(i["phrase"]), "Проверено": {None: "", True: "верно", False: "ложное"}[i["is_valid"]],
+        "ID предложения": i["sentence_id"], "Словосочетание": " | ".join(i["phrase"]), "В имени": "да" if i["in_name"] else "", "Проверено": {None: "", True: "верно", False: "ложное"}[i["is_valid"]],
     } for i in c["items"]])
     return _send({"Конкорданс": df}, fmt, "concordance", _params(db, request) | {"Строк": c["total"]})
 
@@ -197,7 +199,7 @@ def export_overview(fmt: str, request: Request, db: Session = Depends(get_sessio
     from app.web.pages import _overview_context
 
     dict_id, ids = _ctx(db, request)
-    ov = _overview_context(db, request, dict_id, ids)["ov"]
+    ov = _overview_context(db, request, dict_id, ids, all_groups=True)["ov"]
     head = {ov["dim_label"]: [g.get("full", g["label"]) for g in ov["groups"]], "Слов в группе": [g["n_words"] for g in ov["groups"]],
             "Текстов в группе": [g["n_texts"] for g in ov["groups"]]}
     frames = {}
@@ -530,11 +532,41 @@ def export_dictionary(dict_id: int, db: Session = Depends(get_session)):
 def export_geo(fmt: str, request: Request, db: Session = Depends(get_session)):
     if fmt not in FORMATS:
         raise HTTPException(400)
-    from app.services.geo import place_map
+    from app.services.geo import KIND_LABELS, country_names, place_map
 
     g = place_map(db, _selection(db, request).ids, top=10_000)
     src = {"auto": "справочник", "manual": "вручную", "none": "не на карте", "missing": "не найдено"}
     df = pd.DataFrame([{"Место": p["name"], "Упоминаний": p["count"], "Текстов": p["texts"], "Широта": p["lat"], "Долгота": p["lon"],
+                        "Вид": KIND_LABELS.get(p.get("kind") or "", p.get("kind") or ""),
+                        "Страна": country_names().get(p.get("cc") or "", ""),
                         "Что нашлось": p["label"], "Источник координат": src.get(p["source"], p["source"])}
                        for p in g["points"] + g["unresolved"]])
-    return _send({"Места": df}, fmt, "geo", _params(db, request) | {"Мест на карте": len(g["points"])})
+    df_c = pd.DataFrame([{"Страна": c["name"], "Всего упоминаний": c["total"], "Сама страна": c["self"],
+                          "Места": ", ".join(f"{pl['name']} ({pl['count']})" for pl in c["places"])} for c in g["countries"]])
+    return _send({"Места": df, "Страны": df_c}, fmt, "geo", _params(db, request) | {"Мест на карте": len(g["points"])})
+
+
+@router.get("/dashboard.html")
+def export_dashboard(request: Request, db: Session = Depends(get_session)):
+    """Дашборд одним HTML-файлом: стили, скрипты, библиотека графиков и контуры карты внутри — открывается без интернета.
+    cdn=1 — облегчённый файл, библиотека графиков загружается из интернета."""
+    from pathlib import Path
+
+    import plotly
+
+    from app.web.deps import templates
+    from app.web.pages import _dashboard_data
+
+    dash, sel, dict_id, _ = _dashboard_data(db, request)
+    static = Path(__file__).resolve().parent.parent / "static"
+    cdn = bool(request.query_params.get("cdn"))
+    plotly_js = "" if cdn else (Path(plotly.__file__).parent / "package_data" / "plotly.min.js").read_text(encoding="utf-8")
+    version = (Path(plotly.__file__).parent / "package_data" / "plotly.min.js").open(encoding="utf-8").read(200)
+    m = re.search(r"plotly\.js v([\d.]+)", version)
+    html = templates.get_template("dashboard_standalone.html").render(
+        dash=dash, css=(static / "app.css").read_text(encoding="utf-8"), appjs=(static / "app.js").read_text(encoding="utf-8"),
+        topojson=(static / "topojson" / "world_110m.json").read_text(encoding="utf-8"), plotly=plotly_js, cdn=cdn,
+        plotly_version=m.group(1) if m else "", app_version=__version__)
+    name = re.sub(r"[^\w\-]+", "_", dash["title"]).strip("_")[:60] or "dashboard"
+    return Response(html, media_type="text/html; charset=utf-8", headers={"Content-Disposition": _disposition(f"dashboard_{name}.html")})
+

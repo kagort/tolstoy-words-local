@@ -22,13 +22,20 @@ function drawChart(id, data, layout) {
     topojsonURL: '/static/topojson/' });  // контуры карты мира лежат локально: интернет не нужен
 }
 
-// Столбцы «группа × слово» для обзора и отчёта. Подписи групп — короткие (g.label), полные — в подсказке (g.full).
+// Не больше MAX_SERIES рядов на одном графике: дальше цвета неразличимы (все ряды остаются в тепловой карте и таблице).
+const MAX_SERIES = 12;
+
+// Столбцы «группа × слово (категория)» для обзора и отчёта. Подписи групп — короткие (g.label), полные — в подсказке (g.full).
 // Группировка «Текст» и больше 6 групп — горизонтальные столбцы: длинные подписи читаются без наклона.
-function drawGroups(id, ov, metric, ytitle, extra) {
+// opts.log — логарифмическая шкала (одно частое слово не сплющивает остальные).
+function drawGroups(id, ov, metric, ytitle, extra, opts) {
+  opts = opts || {};
   const labels = ov.groups.map(g => g.label), full = ov.groups.map(g => g.full || g.label);
   const isPeriod = ov.dim === 'period';
   const horizontal = !isPeriod && (ov.dim === 'text' || labels.length > 6);
-  const traces = ov.words.map(w => isPeriod
+  const sum = w => w[metric].reduce((a, b) => a + b, 0);
+  const words = ov.words.length > MAX_SERIES ? [...ov.words].sort((a, b) => sum(b) - sum(a)).slice(0, MAX_SERIES) : ov.words;
+  const traces = words.map(w => isPeriod
     ? { type: 'scatter', mode: 'lines+markers', name: w.word, x: labels, y: w[metric], customdata: full,
         hovertemplate: '%{customdata}<br>' + w.word + ': %{y}<extra></extra>' }
     : horizontal
@@ -36,32 +43,72 @@ function drawGroups(id, ov, metric, ytitle, extra) {
           hovertemplate: '%{customdata}<br>' + w.word + ': %{x}<extra></extra>' }
       : { type: 'bar', name: w.word, x: labels, y: w[metric], customdata: full,
           hovertemplate: '%{customdata}<br>' + w.word + ': %{y}<extra></extra>' });
+  const scale = opts.log ? { type: 'log' } : {};
   const layout = horizontal
-    ? { barmode: 'group', xaxis: { title: ytitle }, yaxis: { automargin: true, autorange: 'reversed' },
-        height: Math.max(320, 120 + labels.length * Math.max(22, 12 * ov.words.length)), margin: { l: 20, r: 20, t: 50, b: 50 } }
-    : { barmode: 'group', yaxis: { title: ytitle }, xaxis: { automargin: true, tickangle: labels.length > 4 ? -30 : 0 },
+    ? { barmode: 'group', xaxis: Object.assign({ title: ytitle }, scale), yaxis: { automargin: true, autorange: 'reversed', tickfont: { size: 11 } },
+        height: Math.max(320, 120 + labels.length * Math.max(22, 12 * words.length)), margin: { l: 20, r: 20, t: 50, b: 50 } }
+    : { barmode: 'group', yaxis: Object.assign({ title: ytitle }, scale), xaxis: { automargin: true, tickangle: labels.length > 4 ? -30 : 0, tickfont: { size: 11 } },
         margin: { l: 60, r: 20, t: 50, b: 40 } };
+  if (words.length > 4) {  // много рядов — легенда под графиком, чтобы не закрывала заголовок
+    layout.legend = { orientation: 'h', x: 0, y: horizontal ? -0.08 : -0.22, yanchor: 'top' };
+    layout.margin = Object.assign({}, layout.margin, { b: horizontal ? 60 + 22 * Math.ceil(words.length / 4) : 110 + 22 * Math.ceil(words.length / 4) });
+    if (layout.height) layout.height += 22 * Math.ceil(words.length / 4);
+  }
+  if (ov.words.length > MAX_SERIES) {
+    layout.annotations = [{ text: `на графике ${MAX_SERIES} самых частых из ${ov.words.length}; все — в тепловой карте и таблице`,
+      xref: 'paper', yref: 'paper', x: 0, y: 1.08, showarrow: false, font: { size: 11, color: cssVar('--muted') }, xanchor: 'left' }];
+  }
   const el = document.getElementById(id);
   if (el && layout.height) el.style.minHeight = layout.height + 'px';  // контейнер по высоте графика, без пустого места
   drawChart(id, traces, Object.assign(layout, extra || {}));
 }
 
-// Тепловая карта «слово × группа»: при длинных подписях групп (тексты, много групп) группы идут по вертикали.
-function drawGroupHeat(id, ov, metric) {
-  const labels = ov.groups.map(g => g.label), full = ov.groups.map(g => g.full || g.label), words = ov.words.map(w => w.word);
-  const vertical = ov.dim === 'text' || labels.length > 6;
+// Порядок строк по сходству профилей (жадно: следующей идёт самая похожая на предыдущую строка) —
+// в тепловой карте похожие слова и тексты стоят рядом и видны блоками.
+function similarityOrder(rows) {
+  const n = rows.length;
+  if (n < 3) return [...Array(n).keys()];
+  const norm = rows.map(r => { const s = Math.sqrt(r.reduce((a, v) => a + v * v, 0)) || 1; return r.map(v => v / s); });
+  const sim = (a, b) => norm[a].reduce((acc, v, k) => acc + v * norm[b][k], 0);
+  const total = rows.map(r => r.reduce((a, v) => a + v, 0));
+  const order = [total.indexOf(Math.max(...total))];
+  const left = new Set([...Array(n).keys()].filter(i => i !== order[0]));
+  while (left.size) {
+    const last = order[order.length - 1];
+    let best = null, bestS = -Infinity;
+    left.forEach(i => { const v = sim(last, i); if (v > bestS) { bestS = v; best = i; } });
+    order.push(best); left.delete(best);
+  }
+  return order;
+}
+
+// Тепловая карта «строки × столбцы» с подписями любой длины: при длинных или многочисленных столбцах таблица
+// поворачивается (столбцы — по вертикали), высота — по числу строк, строки упорядочены по сходству.
+// rows, cols — короткие подписи; colsFull — полные (подсказка); z[row][col].
+function drawHeat(id, rows, cols, colsFull, z, opts) {
+  opts = opts || {};
+  const vertical = opts.vertical !== undefined ? opts.vertical : cols.length > 6 || cols.some(c => c.length > 18);
+  let R = rows, C = cols, CF = colsFull || cols, Z = z;
+  if (vertical) {  // транспонируем: столбцы становятся строками
+    R = cols; C = rows; Z = cols.map((_, j) => rows.map((__, i) => z[i][j]));
+  }
+  const ord = opts.sort === false ? [...R.keys()] : similarityOrder(Z);
+  const RF = vertical ? CF : R;
+  const zz = ord.map(i => Z[i]), rr = ord.map(i => R[i]), rf = ord.map(i => RF[i]);
+  const trace = { type: 'heatmap', z: zz, x: C, y: rr, colorscale: 'Blues', reversescale: true,
+    customdata: vertical ? rf.map(f => C.map(() => f)) : rr.map(() => CF),
+    hovertemplate: vertical ? '%{customdata} — %{x}: %{z}<extra></extra>' : '%{y} — %{customdata}: %{z}<extra></extra>' };
+  const height = Math.max(200, 90 + 24 * rr.length);
   const el = document.getElementById(id);
-  const trace = vertical
-    ? { type: 'heatmap', z: labels.map((_, i) => ov.words.map(w => w[metric][i])), x: words, y: labels,
-        customdata: labels.map((_, i) => words.map(() => full[i])), hovertemplate: '%{customdata} — %{x}: %{z}<extra></extra>' }
-    : { type: 'heatmap', z: ov.words.map(w => w[metric]), x: labels, y: words,
-        customdata: words.map(() => full), hovertemplate: '%{y} — %{customdata}: %{z}<extra></extra>' };
-  Object.assign(trace, { colorscale: 'Blues', reversescale: true });
-  const height = vertical ? 90 + 30 * labels.length : 140 + 28 * words.length;
   if (el) el.style.minHeight = height + 'px';
-  drawChart(id, [trace], vertical
-    ? { height, xaxis: { side: 'top', automargin: true }, yaxis: { automargin: true, autorange: 'reversed' }, margin: { l: 20, r: 20, t: 40, b: 10 } }
-    : { height, xaxis: { automargin: true, tickangle: labels.length > 4 ? -30 : 0 }, yaxis: { automargin: true }, margin: { l: 20, r: 20, t: 10, b: 40 } });
+  drawChart(id, [trace], { height, xaxis: { side: 'top', automargin: true, tickangle: C.length > 8 ? -40 : 0, tickfont: { size: 11 } },
+    yaxis: { automargin: true, autorange: 'reversed', tickfont: { size: 11 } }, margin: { l: 20, r: 20, t: 60, b: 10 } });
+}
+
+// Тепловая карта «слово × группа» обзора.
+function drawGroupHeat(id, ov, metric) {
+  drawHeat(id, ov.words.map(w => w.word), ov.groups.map(g => g.label), ov.groups.map(g => g.full || g.label),
+           ov.words.map(w => w[metric]), { vertical: ov.dim === 'text' || ov.groups.length > 6, sort: ov.dim !== 'period' });
 }
 
 async function setValid(hitId, value, btn) {
@@ -152,11 +199,15 @@ function watchJobs() {
     const now = new Set(data.active.map(j => j.id));
     // задача завершилась или появилась новая — перерисовываем страницу целиком
     if (!data.active.length || shown.some(id => !now.has(id))) { location.reload(); return; }
+    const q = document.getElementById('queue-eta');
+    if (q) q.textContent = `Активных задач: ${data.queue.n}` + (data.queue.eta ? ` · вся очередь ≈ ${data.queue.eta}` : '');
     data.active.forEach(j => {
       const row = document.querySelector(`[data-job="${j.id}"]`);
       if (!row) { location.reload(); return; }
       row.querySelector('.progress > div').style.width = Math.round(j.progress * 100) + '%';
       row.querySelector('.job-msg').textContent = j.message || '';
+      const eta = row.querySelector('.job-eta');
+      if (eta) eta.textContent = j.eta ? '≈ ещё ' + j.eta : '';
       row.querySelector('.badge').textContent = j.status === 'running' ? 'выполняется' : 'в очереди';
     });
   }, 2500);
@@ -348,3 +399,11 @@ async function showMarked(url, title) {
   document.addEventListener('focusin', e => { if (e.target.dataset && e.target.dataset.term) show(e.target); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
 })();
+
+// «Вероятно, один персонаж»: отмечает имена группы в указателе и вписывает самое полное имя
+function prefillMerge(names) {
+  document.querySelectorAll('.merge-check').forEach(c => { c.checked = names.includes(c.value); });
+  const longest = names.reduce((a, b) => (b.length > a.length ? b : a), '');
+  const inp = document.getElementById('merge-canonical');
+  if (inp) { inp.value = longest; inp.scrollIntoView({ behavior: 'smooth', block: 'center' }); inp.focus(); }
+}

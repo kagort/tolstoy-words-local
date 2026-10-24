@@ -15,7 +15,8 @@ from app.nlp.normalize import decode_bytes
 from app.nlp.tree import norm
 from app.services.jobs import enqueue
 
-DEFAULT_SETTINGS = {"include_participles": False, "include_gerunds": False, "merge_propn": True}
+# count_names — считать слова словаря и внутри имён собственных («любовь» в «Любовь Андреевна»); по умолчанию нет
+DEFAULT_SETTINGS = {"include_participles": False, "include_gerunds": False, "merge_propn": True, "count_names": False}
 
 HEADER_WORDS = {"слово", "word", "лемма", "lemma", "токен", "token"}
 
@@ -166,3 +167,46 @@ def option_counts(session: Session, entry: DictionaryEntry) -> dict[str, int]:
             q = q.where(TokenRow.upos == o["upos"])
         out[f"{o['lemma']}|{o['upos']}"] = session.scalar(q) or 0
     return out
+
+
+# ------------------------------------------------------------------ область словаря: все тексты или выбранные корпуса
+
+
+def scope_corpora(d: Dictionary) -> list[int]:
+    """Корпуса, с которыми сопоставляется словарь (settings["corpus_ids"]); пусто — все тексты."""
+    return [int(x) for x in (d.settings or {}).get("corpus_ids", []) if str(x).isdigit()]
+
+
+def scope_text_ids(session: Session, d: Dictionary) -> set[int] | None:
+    """Тексты области словаря; None — все тексты."""
+    from app.models import corpus_texts
+
+    cids = scope_corpora(d)
+    if not cids:
+        return None
+    return set(session.scalars(select(corpus_texts.c.text_id).where(corpus_texts.c.corpus_id.in_(cids))))
+
+
+def sync_scope(session: Session, text_ids: list[int]) -> int:
+    """После изменения корпусов у текстов: тексты, вошедшие в область словаря, ставятся на сопоставление,
+    вышедшие — теряют вхождения этого словаря. Возвращает число поставленных задач."""
+    from app.models import Hit, TextDoc
+
+    if not text_ids:
+        return 0
+    n = 0
+    for d in session.scalars(select(Dictionary)):
+        scope = scope_text_ids(session, d)
+        if scope is None:
+            continue
+        have = set(session.scalars(select(Hit.text_id).where(Hit.dictionary_id == d.id, Hit.text_id.in_(text_ids)).distinct()))
+        ready = set(session.scalars(select(TextDoc.id).where(TextDoc.id.in_(text_ids), TextDoc.status == "ready")))
+        add = sorted((ready & scope) - have)
+        drop = sorted(have - scope)
+        if drop:
+            session.execute(Hit.__table__.delete().where(Hit.dictionary_id == d.id, Hit.text_id.in_(drop)))
+        if add:
+            enqueue(session, "match", {"dictionary_id": d.id, "text_ids": add},
+                    title=f"Словарь «{d.name}» × новые тексты области ({len(add)})")
+            n += 1
+    return n

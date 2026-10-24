@@ -1,0 +1,76 @@
+{# Тело дашборда — общее для страницы приложения и автономного HTML-файла. Переменная: dash. #}
+<div class="dash">
+  <div class="dash-head">
+    <h1 style="margin-bottom:4px">{{ dash.title }}</h1>
+    <div class="muted small">Выборка: {{ dash.selection }}{% if dash.years %} · годы: {{ dash.years }}{% endif %} · сформировано {{ dash.generated }}</div>
+  </div>
+  <div class="stat-tiles" style="margin:14px 0">
+    {% for t in dash.tiles %}<div class="tile"><div class="tile-num">{{ t.value }}</div><div class="tile-label">{{ t.label }}</div></div>{% endfor %}
+    {% if dash.dictionary %}<div class="tile"><div class="tile-num">{{ dash.dictionary.ipm }}</div><div class="tile-label">ipm слов словаря «{{ dash.dictionary.name }}» ({{ dash.dictionary.hits }} вхождений; найдено {{ dash.dictionary.found }} из {{ dash.dictionary.entries }} слов)</div></div>{% endif %}
+  </div>
+
+  {% if dash.dictionary %}
+  <div class="grid cols-2">
+    <div class="panel"><h3 style="margin-top:0">Частые слова словаря</h3><div id="d-top" class="chart"></div></div>
+    {% if dash.dictionary.categories %}<div class="panel"><h3 style="margin-top:0">Категории словаря</h3><div id="d-cats" class="chart"></div></div>{% endif %}
+  </div>
+  {% if dash.dictionary.overview and dash.dictionary.overview.groups|length > 1 %}
+  <div class="panel"><h3 style="margin-top:0">Пять самых частых слов по группировке «{{ dash.dictionary.overview.dim_label }}» (ipm)</h3><div id="d-ov" class="chart"></div></div>
+  {% endif %}
+  {% if dash.textmap %}<div class="panel"><h3 style="margin-top:0">Где в тексте сгущаются слова словаря (ipm по 50 отрезкам)</h3><div id="d-map" class="chart"></div></div>{% endif %}
+  {% endif %}
+
+  <div class="grid cols-2">
+    {% if dash.keywords and dash.keywords['items'] %}<div class="panel"><h3 style="margin-top:0">Ключевые слова</h3>
+      <div class="muted small">{{ 'В сравнении с: ' ~ dash.keywords.ref ~ ' (по G²).' if dash.keywords.has_ref else 'Других текстов в базе нет — по частоте.' }}</div>
+      <div class="kw-cloud" style="margin-top:8px">{% set mx = dash.keywords['items'][0].ll or dash.keywords['items'][0].count or 1 %}
+        {% for k in dash.keywords['items'] %}<span style="font-size:{{ 12 + 16 * ((k.ll or k.count) / mx) }}px; margin:0 6px; display:inline-block">{{ k.lemma }}</span>{% endfor %}</div></div>{% endif %}
+    {% if dash.persons %}<div class="panel"><h3 style="margin-top:0">Персонажи (упоминаний)</h3><div id="d-per" class="chart"></div></div>{% endif %}
+  </div>
+
+  {% if dash.places %}<div class="panel"><h3 style="margin-top:0">Места</h3><div id="d-geo" class="chart" style="min-height:460px"></div>
+    {% if dash.countries %}<div class="small muted">Страны (вместе с местами): {% for c in dash.countries %}{{ c.name }} — {{ c.total }}{% if not loop.last %}; {% endif %}{% endfor %}</div>{% endif %}</div>{% endif %}
+
+  {% if not dash.single %}<div class="panel table-scroll"><h3 style="margin-top:0">Тексты выборки</h3>
+    <table><tr><th>Название</th><th>Автор</th><th class="num">Год</th><th class="num">Слов</th></tr>
+      {% for t in dash.texts %}<tr><td>{{ t.title }}</td><td>{{ t.author }}</td><td class="num">{{ t.year }}</td><td class="num">{{ t.words }}</td></tr>{% endfor %}</table>
+    {% if dash.n_texts_hidden %}<p class="muted small">… и ещё {{ dash.n_texts_hidden }} текстов.</p>{% endif %}</div>{% endif %}
+  <p class="muted small">Quotverba {{ app_version }}. Справочник мест — GeoNames (CC BY 4.0), контуры карты — Natural Earth.</p>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const dash = {{ dash|tojson }};
+  const bars = (id, rows, label, value, extra) => {
+    const el = document.getElementById(id);
+    if (!el || !rows.length) return;
+    const h = Math.max(260, 80 + 24 * rows.length);
+    el.style.minHeight = h + 'px';
+    drawChart(id, [{ type: 'bar', orientation: 'h', y: rows.map(label), x: rows.map(value), marker: { color: cssVar('--accent') },
+      hovertemplate: '%{y}: %{x}<extra></extra>' }], Object.assign({ height: h, yaxis: { automargin: true, autorange: 'reversed', tickfont: { size: 11 } },
+      margin: { l: 20, r: 20, t: 10, b: 40 } }, extra || {}));
+  };
+  if (dash.dictionary) {
+    bars('d-top', dash.dictionary.top, r => r.word, r => r.ipm, { xaxis: { title: 'ipm' } });
+    bars('d-cats', dash.dictionary.categories, r => r.category, r => r.ipm, { xaxis: { title: 'ipm' } });
+    if (dash.dictionary.overview && dash.dictionary.overview.groups.length > 1) drawGroups('d-ov', dash.dictionary.overview, 'ipm', 'ipm');
+  }
+  if (dash.textmap) {
+    const x = [...Array(dash.textmap.segments).keys()].map(k => k + 1);
+    drawChart('d-map', [{ type: 'scatter', mode: 'lines', name: 'все слова словаря', x, y: dash.textmap.all.ipm, line: { width: 3, color: cssVar('--accent') } },
+      ...dash.textmap.rows.map(r => ({ type: 'scatter', mode: 'lines', name: r.label, x, y: r.ipm, line: { width: 1 }, visible: 'legendonly' }))],
+      { xaxis: { title: 'отрезок текста (от начала к концу)' }, yaxis: { title: 'ipm' }, margin: { l: 50, r: 10, t: 30, b: 50 } });
+  }
+  bars('d-per', dash.persons, r => r.name, r => r.count);
+  if (dash.places.length) {
+    const maxC = Math.max(...dash.places.map(p => p.count));
+    drawChart('d-geo', [{ type: 'scattergeo', mode: 'markers+text', lat: dash.places.map(p => p.lat), lon: dash.places.map(p => p.lon),
+      text: dash.places.map((p, i) => i < 15 ? p.name : ''), textposition: 'top center', textfont: { size: 11 },
+      customdata: dash.places.map(p => [p.name, p.count, p.label]),
+      marker: { size: dash.places.map(p => 6 + 26 * Math.sqrt(p.count / maxC)), color: cssVar('--accent'), opacity: 0.75 },
+      hovertemplate: '<b>%{customdata[0]}</b><br>упоминаний: %{customdata[1]}<br>%{customdata[2]}<extra></extra>' }],
+      { geo: { resolution: 110, showcountries: true, countrycolor: cssVar('--border'), showland: true, landcolor: cssVar('--accent-soft'),
+        showocean: true, oceancolor: cssVar('--panel'), coastlinecolor: cssVar('--border'), projection: { type: 'natural earth' }, bgcolor: 'rgba(0,0,0,0)' },
+        margin: { l: 0, r: 0, t: 0, b: 0 }, height: 460 });
+  }
+});
+</script>
