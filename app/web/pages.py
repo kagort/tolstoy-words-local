@@ -21,6 +21,7 @@ from app.services.dictionaries import (
     DEFAULT_SETTINGS,
     add_entries,
     scope_corpora,
+    scope_text_ids,
     sync_scope,
     create_dictionary,
     option_counts,
@@ -374,7 +375,7 @@ def dictionaries_list(request: Request, db: Session = Depends(get_session)):
 async def dictionary_create(request: Request, name: str = Form(...), description: str = Form(""),
                             words: str = Form(""), file: UploadFile | None = File(None),
                             include_participles: str | None = Form(None), include_gerunds: str | None = Form(None),
-                            db: Session = Depends(get_session)):
+                            suggest: str | None = Form(None), db: Session = Depends(get_session)):
     items = []
     if file is not None and file.filename:
         items += parse_dictionary_file(file.filename, await file.read())
@@ -390,7 +391,7 @@ async def dictionary_create(request: Request, name: str = Form(...), description
                           {"include_participles": bool(include_participles), "include_gerunds": bool(include_gerunds)})
     db.commit()
     flash(request, f"Словарь создан: {len(d.entries)} слов. Проверьте разборы неоднозначных слов (подсвечены).", "success")
-    return redirect(f"/dictionaries/{d.id}")
+    return redirect(f"/dictionaries/{d.id}/cognates" if suggest else f"/dictionaries/{d.id}")
 
 
 @router.get("/dictionaries/{dict_id}")
@@ -406,7 +407,9 @@ def dictionary_detail(request: Request, dict_id: int, db: Session = Depends(get_
     pending = db.scalar(select(func.count()).select_from(Job).where(Job.status.in_(["queued", "running"]), Job.kind == "match")) or 0
     # вхождения, найденные прежней версией синтаксического слоя: связи в профиле слова неполные до пересчёта
     stale = db.scalar(select(func.count()).select_from(Hit).where(Hit.dictionary_id == dict_id, Hit.syntax_version != SYNTAX_VERSION)) or 0
+    no_category = sum(1 for e in d.entries if not e.category)
     return render(request, "dictionary_detail.html", d=d, hits=hits, in_names=in_names, opt_counts=opt_counts, pending=pending, stale=stale,
+                  no_category=no_category, has_categories=no_category < len(d.entries),
                   all_corpora=list(db.scalars(select(Corpus).order_by(Corpus.name))), scope=set(scope_corpora(d)),
                   names_ok=set((d.settings or {}).get("names_ok_entries", [])))
 
@@ -449,6 +452,73 @@ async def dictionary_add(request: Request, dict_id: int, words: str = Form(""), 
     new = add_entries(db, d, items)
     db.commit()
     flash(request, f"Добавлено слов: {len(new)}", "success")
+    return redirect(f"/dictionaries/{dict_id}")
+
+
+@router.get("/dictionaries/{dict_id}/cognates")
+def dictionary_cognates(request: Request, dict_id: int, db: Session = Depends(get_session)):
+    """Однокоренные слова из текстов для слов словаря (или для слов, вписанных в поле)."""
+    from app.services.wordfamily import cognates
+
+    d = db.get(Dictionary, dict_id)
+    if d is None:
+        raise HTTPException(404)
+    words_q = (request.query_params.get("words") or "").strip()
+    entries = {e.lemma: e for e in d.entries if not e.phrase}
+    words = [w.strip() for w in re.split(r"[,;\n]", words_q) if w.strip()] if words_q else list(entries)
+    scope = scope_text_ids(db, d)
+    found = cognates(db, words, sorted(scope) if scope is not None else None,
+                     exclude={e.lemma for e in d.entries} | {e.surface for e in d.entries})
+    for g in found:
+        e = entries.get(g["source"])
+        g["category"] = e.category if e else ""
+    return render(request, "dictionary_cognates.html", d=d, found=found, words_q=words_q, n_words=len(words))
+
+
+@router.post("/dictionaries/{dict_id}/add-suggested")
+def dictionary_add_suggested(request: Request, dict_id: int, rows: list[str] = Form([]), back: str = Form(""),
+                             db: Session = Depends(get_session)):
+    """Добавить отмеченные предложения (строка: слово\tкатегория\tкомментарий) с категорией исходного слова."""
+    d = db.get(Dictionary, dict_id)
+    if d is None:
+        raise HTTPException(404)
+    items = []
+    for r in rows:
+        word, cat, comment = (r.split("\t") + ["", "", ""])[:3]
+        if word.strip():
+            items.append({"surface": word.strip(), "category": cat.strip() or None, "upos": None, "comment": comment.strip() or None})
+    new = add_entries(db, d, items) if items else []
+    db.commit()
+    flash(request, f"В словарь «{d.name}» добавлено слов: {len(new)}. Вхождения ищутся в фоне (страница «Задачи»).", "success")
+    return redirect(back if back.startswith("/") else f"/dictionaries/{dict_id}")
+
+
+@router.get("/dictionaries/{dict_id}/categories")
+def dictionary_categories(request: Request, dict_id: int, db: Session = Depends(get_session)):
+    """Предложение категорий для слов без категории: группы по смыслу, правка названий и состава."""
+    from app.services.wordfamily import suggest_categories
+
+    d = db.get(Dictionary, dict_id)
+    if d is None:
+        raise HTTPException(404)
+    k = _int(request.query_params.get("k"))
+    sug = suggest_categories(db, dict_id, k=k if k and 2 <= k <= 20 else None)
+    return render(request, "dictionary_categories.html", d=d, sug=sug)
+
+
+@router.post("/dictionaries/{dict_id}/categories")
+async def dictionary_categories_apply(request: Request, dict_id: int, db: Session = Depends(get_session)):
+    from app.services.wordfamily import apply_categories
+
+    d = db.get(Dictionary, dict_id)
+    if d is None:
+        raise HTTPException(404)
+    form = await request.form()
+    names = {int(k[5:]): str(v) for k, v in form.items() if k.startswith("name_") and k[5:].isdigit()}
+    assign = {int(k[6:]): int(v) for k, v in form.items() if k.startswith("entry_") and k[6:].isdigit() and str(v).isdigit()}
+    n = apply_categories(db, dict_id, names, assign)
+    db.commit()
+    flash(request, f"Категории назначены: {n} слов", "success")
     return redirect(f"/dictionaries/{dict_id}")
 
 

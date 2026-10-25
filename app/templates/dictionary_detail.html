@@ -4,6 +4,10 @@
 <p><a href="/dictionaries">← Все словари</a></p>
 <h1>Словарь «{{ d.name }}»</h1>
 {% if scope %}<p class="muted">Сопоставляется только с корпусами: {% for c in all_corpora if c.id in scope %}{{ c.name }}{% if not loop.last %}, {% endif %}{% endfor %} (настройки ниже).</p>{% endif %}
+<div class="row" style="margin-bottom:10px">
+  <a class="btn secondary shrink" href="/dictionaries/{{ d.id }}/cognates" title="однокоренные слова из текстов: «милосердие» → «милосердный», «немилосердно»">🌱 Однокоренные из корпуса</a>
+  <a class="btn {{ '' if not has_categories else 'secondary' }} shrink" href="/dictionaries/{{ d.id }}/categories" title="сгруппировать слова без категории по смыслу (векторы navec)">🗂 Предложить категории{% if no_category %} ({{ no_category }} без категории){% endif %}</a>
+</div>
 {% if pending %}<div class="flash info">Идёт пересчёт вхождений (задач в очереди: {{ pending }}). Числа обновятся после завершения — см. <a href="/jobs">Задачи</a>.</div>{% endif %}
 
 <div class="panel table-scroll">
