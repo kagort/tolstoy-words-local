@@ -9,7 +9,7 @@ from app.models import Hit, TextDoc
 from app.nlp.syntax import role_label_ud
 from app.services import analytics as A
 
-REPORT_RELATIONS = ("attribute", "predicate", "governor", "subject_of_pred", "adverbial")
+REPORT_RELATIONS = ("attribute", "head", "subject", "object", "predicate", "governor", "subject_of_pred", "adverbial")
 MAX_TEXTS_FOR_TEXT_CHART = 40
 
 

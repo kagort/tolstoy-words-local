@@ -94,6 +94,7 @@ def test_full_flow(client):
 
     page = client.get(f"/dictionaries/{dict_id}")
     assert page.status_code == 200 and "запах" in page.text
+    assert "прежней версией синтаксического" not in page.text
 
     base = f"dictionary_id={dict_id}&corpus_id={corpus_id}"
     for tab in ("overview", "freq", "conc", "profile", "compare", "structure"):
@@ -111,6 +112,11 @@ def test_full_flow(client):
         assert freq["запах"] >= 4
         prof = A.word_profile(s, entry.id, ids)
         assert prof["total"] == freq["запах"]
+        # у глагола в профиле — его зависимые: «Пахло дымом и гарью» → дым, гарь
+        verb = s.query(DictionaryEntry).filter_by(dictionary_id=dict_id, surface="пахнуть").one()
+        vprof = A.word_profile(s, verb.id, ids)
+        deps = {x["lemma"] for rt in ("object", "adverbial") for x in vprof["relations"].get(rt, {}).get("items", [])}
+        assert {"дым", "гарь"} <= deps, vprof["relations"].keys()
         hit_id = s.query(Hit.id).filter_by(entry_id=entry.id).first()[0]
         sent_id = s.query(Hit.sentence_id).filter_by(entry_id=entry.id).first()[0]
 
