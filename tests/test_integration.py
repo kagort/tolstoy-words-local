@@ -342,7 +342,7 @@ def test_selection_report_stopwords(client):
         assert S.topics(s, all_ids, k=3)["n_chunks"] >= 1
     r = client.post("/entities/override", data={"norm": "Лев Толстой", "etype": "", "canonical": ""}, follow_redirects=False)
     assert r.status_code == 303
-    for tab, extra in (("entities", ""), ("entities", "&etype=PER&unit=paragraph&cross=PER&nolatin=1"),
+    for tab, extra in (("entities", ""), ("entities", "&etype=PER&eunit=paragraph&cross=PER&nolatin=1&f=noise&q=Т*"),
                        ("semantic", f"&entry_id={e_zapah.id}&k=2"), ("semantic", "&seed=запах, аромат&any=1&groups=3"), ("topics", "&k=3")):
         r = client.get(f"/analysis?tab={tab}&{base}{extra}")
         assert r.status_code == 200, (tab, extra)
@@ -372,7 +372,7 @@ def test_selection_report_stopwords(client):
         rep = C.report(s, C.parse_raw("Короткий текст про запах сирени."))
         assert not rep["enough"] and rep["rows"]
         assert rep["model"]["ok"] is False  # в тестовой базе мало образцов — калибровки нет, вердикта нет
-    for tab, extra in (("stylo", "&mfw=50"), ("stylo", f"&unit=chunk&chunk=2000&target={texts['Сирень']}"), ("textcmp", ""),
+    for tab, extra in (("stylo", "&mfw=50"), ("stylo", f"&sunit=chunk&chunk=2000&target={texts['Сирень']}"), ("textcmp", ""),
                        ("textcmp", f"&cmp={texts['Сирень']}&cmp={texts['Дым']}")):
         r = client.get(f"/analysis?tab={tab}&{base}{extra}")
         assert r.status_code == 200, (tab, extra)

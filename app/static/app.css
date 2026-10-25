@@ -183,3 +183,36 @@ option.muted { color: var(--muted); }
 .sel-opts .check { display: flex; align-items: center; gap: 6px; min-height: 38px; margin: 0; white-space: nowrap; }
 button.link { background: none; border: 0; padding: 0 2px; color: var(--muted); cursor: pointer; font-size: 11px; box-shadow: none; }
 button.link:hover { color: var(--err); }
+/* сетка полей панели вкладки: подписи на одной линии, поля одной высоты, кнопка — по нижнему краю */
+.fgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(90px, auto); gap: 10px 14px; align-items: end; }
+.fgrid label:not(.check) { margin-top: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fgrid > * { min-width: 0; }
+.fgrid .pair { display: flex; gap: 6px; }
+.fgrid .pair > :first-child { flex: 1; min-width: 0; }
+.fgrid .pair select { width: auto; }
+.fopts { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 10px; }
+.fopts label.check { margin: 0; }
+details.more { margin-top: 10px; }
+details.more > summary { cursor: pointer; color: var(--accent); font-size: 13px; margin-bottom: 8px; }
+@media (max-width: 760px) { .fgrid { grid-template-columns: 1fr 1fr; } .fgrid .act:empty { display: none; } }
+/* указатель имён */
+.ent-actions { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 10px 0 6px; }
+.ent-buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ent-buttons .pair { display: flex; gap: 6px; align-items: center; }
+.ent-buttons .pair input, .ent-buttons .pair select { width: auto; max-width: 240px; }
+.ent-hints { margin: 10px 0; padding: 8px 12px; border: 1px dashed var(--border); border-radius: 8px; }
+.icon-btn { background: none; border: 0; padding: 0 4px; cursor: pointer; font-size: 15px; filter: grayscale(0.4); }
+.icon-btn:hover { filter: none; }
+.inline-details { display: inline-block; vertical-align: top; }
+.noise-flag { font-weight: 600; }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); opacity: 0; pointer-events: none;
+  background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.25);
+  transition: all .2s; z-index: 50; display: flex; gap: 10px; align-items: center; }
+.toast.show { opacity: 1; transform: translateX(-50%); pointer-events: auto; }
+.toast button.secondary { color: var(--bg); border-color: var(--bg); }
+.ent-dict { position: relative; }
+.ent-dict > summary { list-style: none; }
+.ent-dict > summary::-webkit-details-marker { display: none; }
+.ent-dict-form { position: absolute; left: 0; z-index: 20; width: 340px; margin-top: 6px; padding: 12px 14px; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); }
+.ent-dict.right .ent-dict-form { left: auto; right: 0; }

@@ -1,0 +1,75 @@
+{# Указатель имён: обновляется целиком при вводе в поиск и смене фильтров (/analysis/entities-index) #}
+{% set back = '/analysis?' ~ request.url.query %}
+{% set selq = sel.query(False) %}
+{% if merge_hints %}
+<div class="ent-hints">
+  <strong class="small">Вероятно, один персонаж</strong> <span class="muted small">— имена с общим словом. «объединить» отметит их и впишет самое полное имя; проверьте и нажмите «Объединить».</span>
+  {% for g in merge_hints %}<div class="small" style="margin:4px 0">{{ g|join(' · ') }}
+    <button class="small secondary" type="button" onclick='prefillMerge({{ g|tojson }})'>объединить</button></div>{% endfor %}
+</div>
+{% endif %}
+{% if ents.n_noise and 'noise' not in ent_flags and not ent_hidden %}
+<p class="flash info small">Вероятный шум: {{ ents.n_noise }} {{ 'имя' if ents.n_noise % 10 == 1 and ents.n_noise % 100 != 11 else 'имён' }} похожи на ошибки модели
+  (первые слова предложений, обычные слова с заглавной буквы, латиница).
+  <button class="small" type="button" onclick="entFlag('noise')">Показать</button></p>
+{% endif %}
+<form id="bulk-form" method="post" action="/entities/merge" class="ent-actions">
+  <input type="hidden" name="back" value="{{ back }}"><input type="hidden" name="names_all" value="">
+  <div class="ent-count small"><strong>Найдено: {{ ents.total }}</strong>{% if ents.total > ents['items']|length %} <span class="muted">(показаны первые {{ ents['items']|length }})</span>{% endif %}
+    · <span id="ent-checked">отмечено: 0</span>
+    · <a href="#" onclick="entCheckAll(true); return false;">отметить все найденные</a> · <a href="#" onclick="entCheckAll(false); return false;">снять</a>
+    {% if ents.n_hidden and not ent_hidden %} · <a href="#" onclick="entShowHidden(); return false;">скрытые ({{ ents.n_hidden }})</a>{% endif %}</div>
+  <div class="ent-buttons">
+    {% if ent_hidden %}
+    <button type="button" onclick="entHide(entChecked(), false)">↩ Вернуть отмеченные</button>
+    {% else %}
+    <button type="button" class="danger" onclick="entHide(entChecked(), true)" title="«это не имя»: скрыть отмеченные во всех текстах (можно вернуть)">🗑 Не имя — скрыть</button>
+    <span class="pair"><select name="etype" aria-label="класс"><option value="">класс как у модели</option>{% for k, v in ETYPE_ONE.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select>
+      <button type="submit" class="secondary" formaction="/entities/etype" onclick="return entPrepare()">Перенести в класс</button></span>
+    <span class="pair"><input type="text" name="canonical" id="merge-canonical" placeholder="имя персонажа (пусто — самое длинное)">
+      <select name="scope" aria-label="где"><option value="all">во всех текстах</option>
+        {% for t in ent_texts[:200] %}<option value="{{ t.id }}" {{ 'selected' if ent_texts|length == 1 }}>только в «{{ t.title|truncate(40) }}»</option>{% endfor %}</select>
+      <button type="submit" class="secondary" formaction="/entities/merge" onclick="return entPrepare()">Объединить</button></span>
+    <details class="inline-details ent-dict"><summary class="btn secondary">📚 Словарь из отмеченных</summary>
+      <div class="ent-dict-form">
+        <label>Название словаря</label><input type="text" name="dict_name" placeholder="например: Персонажи «Войны и мира»">
+        <label>Категория записи</label><select name="mode">{% for k, v in NAME_MODES.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select>
+        <p class="help">Каждое отмеченное имя и все его варианты станут записями; многословные — словосочетаниями.
+          Частоты по категориям покажут частоты персонажей.</p>
+        <button type="submit" formaction="/entities/to-dictionary" onclick="return entPrepare()">Создать словарь</button>
+      </div></details>
+    {% endif %}
+  </div>
+</form>
+<script type="application/json" id="ent-all">{{ ents.all_names|tojson }}</script>
+<div class="table-scroll">
+<table class="ent-table">
+  <tr><th><input type="checkbox" title="отметить все на странице" onchange="document.querySelectorAll('.merge-check').forEach(c => { c.checked = this.checked; }); entCount()"></th>
+    <th>Имя (начальная форма)</th><th>Класс</th><th class="num">Упоминаний</th><th class="num">Текстов</th>
+    {% if 'noise' in ent_flags %}<th class="num">Шум</th><th>Почему</th>{% else %}<th>Варианты персонажа</th>{% endif %}<th></th><th></th></tr>
+  {% for e in ents['items'] %}
+  <tr data-name="{{ e.name }}"><td><input type="checkbox" name="names" value="{{ e.name }}" form="bulk-form" class="merge-check" onchange="entCount()" {{ 'checked' if 'noise' in ent_flags and e.noise >= NOISE_SURE }}></td>
+    <td><strong>{{ e.name }}</strong>{% if e.edited %} <span class="badge" title="есть ручная правка">✎</span>{% endif %}</td><td class="small">{{ e.label }}</td>
+    <td class="num">{{ e.count }}</td><td class="num">{{ e.texts }}</td>
+    {% if 'noise' in ent_flags %}
+    <td class="num">{{ '%.2f'|format(e.noise) }}</td><td class="small muted">{{ e.reasons|join('; ') }}</td>
+    {% else %}
+    <td class="small muted">{% for v in e.variants %}<span class="nowrap">{{ v }}<form class="inline" method="post" action="/entities/split">
+        <input type="hidden" name="variant" value="{{ v }}"><input type="hidden" name="back" value="{{ back }}">
+        {% for t in sel.ids %}<input type="hidden" name="text_ids" value="{{ t }}">{% endfor %}
+        <button class="link small" type="submit" title="отделить вариант от персонажа">✕</button></form></span>{% if not loop.last %}, {% endif %}{% endfor %}</td>
+    {% endif %}
+    <td class="small nowrap"><a href="#" onclick="showMarked('/api/entities/mentions?{{ selq }}&name={{ e.name|urlencode }}', 'Упоминания: {{ e.name|replace("'", "") }}'); return false;">упоминания</a></td>
+    <td class="nowrap">{% if ent_hidden %}<button class="small secondary" type="button" onclick='entHide({{ ([e.name] + e.variants)|tojson }}, false)'>вернуть</button>
+      {% else %}<button class="icon-btn" type="button" title="это не имя — скрыть" onclick='entHide([{{ e.name|tojson }}], true)'>🗑</button>
+      <details class="inline-details"><summary class="small">править</summary>
+      <form method="post" action="/entities/override" class="small" style="margin-top:4px">
+        <input type="hidden" name="norm" value="{{ e.name }}"><input type="hidden" name="back" value="{{ back }}">
+        <label>Класс</label><select name="etype"><option value="">как определила модель</option>{% for k, v in ETYPE_ONE.items() %}<option value="{{ k }}" {{ 'selected' if e.etype == k }}>{{ v }}</option>{% endfor %}</select>
+        <label>Слить с именем (вариант того же героя)</label><input type="text" name="canonical" placeholder="например: Пьер Безухов">
+        <label class="check"><input type="checkbox" name="hidden" value="1"> это не имя — скрыть</label>
+        <button class="small" type="submit">Сохранить</button>
+      </form></details>{% endif %}</td></tr>
+  {% else %}<tr><td colspan="9" class="muted">{{ 'Скрытых имён нет.' if ent_hidden else 'Имён не найдено.' }}</td></tr>{% endfor %}
+</table>
+</div>

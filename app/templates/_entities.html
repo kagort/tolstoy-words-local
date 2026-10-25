@@ -2,11 +2,8 @@
 {% if tab == 'entities' and ents %}
 {% set selq = sel.query(False) %}
 <div class="panel row">
-  <div><label>Класс{{ term('ner') }}</label><select name="etype" form="sel-form"><option value="">все</option>{% for k, v in ETYPES.items() %}<option value="{{ k }}" {{ 'selected' if ent_etype == k }}>{{ v }} ({{ ents.by_type.get(k, 0) }})</option>{% endfor %}</select></div>
-  <div><label>Поиск имени</label><input type="search" name="q" form="sel-form" value="{{ request.query_params.get('q', '') }}" placeholder="например: Пьер"></div>
-  <div><label>Связь — встречаются</label><select name="unit" form="sel-form">{% for k, v in UNITS.items() %}<option value="{{ k }}" {{ 'selected' if ent_unit == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div><label>Связь — встречаются</label><select name="eunit" form="sel-form">{% for k, v in UNITS.items() %}<option value="{{ k }}" {{ 'selected' if ent_unit == k }}>{{ v }}</option>{% endfor %}</select></div>
   <div><label>Сопоставить со словарём</label><select name="cross" form="sel-form">{% for k, v in ETYPES.items() %}<option value="{{ k }}" {{ 'selected' if ent_cross == k }}>{{ v }} × слова словаря</option>{% endfor %}</select></div>
-  <div class="shrink"><label class="check"><input type="checkbox" name="nolatin" value="1" form="sel-form" {{ 'checked' if request.query_params.get('nolatin') }}> без латиницы</label></div>
   <div class="shrink"><button type="submit" form="sel-form">Показать</button></div>
   <div class="shrink">Скачать: <a href="/export/entities.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/entities.csv{{ qs(request) }}">CSV</a></div>
 </div>
@@ -36,52 +33,30 @@
 
 <div class="panel" id="marked-box" style="display:none"><h3 style="margin-top:0" id="marked-title"></h3><div id="marked"></div></div>
 
-{% set back = request.url.path ~ '?' ~ request.url.query %}
-{% if merge_hints %}
-<div class="panel">
-  <h3 style="margin-top:0">Вероятно, один персонаж</h3>
-  <p class="help">Имена с общим словом. Нажмите «объединить» — имена отметятся в указателе, впишется самое полное имя; проверьте и нажмите «Объединить отмеченные».</p>
-  {% for g in merge_hints %}<div class="small" style="margin:4px 0">{{ g|join(' · ') }}
-    <button class="small secondary" type="button" onclick='prefillMerge({{ g|tojson }})'>объединить</button></div>{% endfor %}
-</div>
-{% endif %}
-<div class="panel table-scroll">
-  <h3 style="margin-top:0">Указатель имён {% if ents.total > ents['items']|length %}<span class="muted small">— первые {{ ents['items']|length }} из {{ ents.total }}</span>{% endif %}</h3>
-  <form id="merge-form" method="post" action="/entities/merge" class="row" style="align-items:flex-end;margin-bottom:8px">
-    <input type="hidden" name="back" value="{{ back }}">
-    <div><label>Объединить отмеченные в персонажа</label><input type="text" name="canonical" id="merge-canonical" placeholder="например: Раневская Любовь Андреевна (пусто — самое длинное из отмеченных)"></div>
-    <div class="shrink"><label>Где</label><select name="scope">
-      <option value="all">во всех текстах</option>
-      {% for t in ent_texts[:200] %}<option value="{{ t.id }}" {{ 'selected' if ent_texts|length == 1 }}>только в «{{ t.title|truncate(40) }}»</option>{% endfor %}</select></div>
-    <div class="shrink"><button type="submit">Объединить отмеченные</button></div>
-  </form>
-  <table>
-    <tr><th></th><th>Имя (начальная форма)</th><th>Класс</th><th class="num">Упоминаний</th><th class="num">Текстов</th><th>Варианты персонажа</th><th></th><th>Исправить</th></tr>
-    {% for e in ents['items'] %}
-    <tr><td><input type="checkbox" name="names" value="{{ e.name }}" form="merge-form" class="merge-check"></td>
-      <td><strong>{{ e.name }}</strong>{% if e.edited %} <span class="badge" title="есть ручная правка">✎</span>{% endif %}</td><td class="small">{{ e.label }}</td>
-      <td class="num">{{ e.count }}</td><td class="num">{{ e.texts }}</td>
-      <td class="small muted">{% for v in e.variants %}<span class="nowrap">{{ v }}<form class="inline" method="post" action="/entities/split">
-          <input type="hidden" name="variant" value="{{ v }}"><input type="hidden" name="back" value="{{ back }}">
-          {% for t in sel.ids %}<input type="hidden" name="text_ids" value="{{ t }}">{% endfor %}
-          <button class="link small" type="submit" title="отделить вариант от персонажа">✕</button></form></span>{% if not loop.last %}, {% endif %}{% endfor %}</td>
-      <td class="small nowrap"><a href="#" onclick="showMarked('/api/entities/mentions?{{ selq }}&name={{ e.name|urlencode }}', 'Упоминания: {{ e.name|replace("'", "") }}'); return false;">упоминания</a></td>
-      <td><details><summary class="small">править</summary>
-        <form method="post" action="/entities/override" class="small" style="margin-top:4px">
-          <input type="hidden" name="norm" value="{{ e.name }}"><input type="hidden" name="back" value="{{ back }}">
-          <label>Класс</label><select name="etype"><option value="">как определила модель</option>{% for k, v in ETYPE_ONE.items() %}<option value="{{ k }}" {{ 'selected' if e.etype == k }}>{{ v }}</option>{% endfor %}</select>
-          <label>Слить с именем (вариант того же героя)</label><input type="text" name="canonical" placeholder="например: Пьер Безухов">
-          <label class="check"><input type="checkbox" name="hidden" value="1"> это не имя — скрыть</label>
-          <button class="small" type="submit">Сохранить</button>
-        </form></details></td></tr>
-    {% else %}<tr><td colspan="8" class="muted">Имён не найдено.</td></tr>{% endfor %}
-  </table>
-  <p class="help">Модель Natasha обучена на новостях: в художественных текстах она путает фамилии и города («Ростов»), принимает иностранные фразы за названия, делит одного героя на варианты («Андрей», «князь Андрей», «Болконский»).
-    Исправляйте в колонке «Исправить»: класс, скрытие; варианты одного героя — флажками и «Объединить отмеченные» (во всех текстах или в одном), ✕ у варианта — отделить. Правки действуют во всех текстах и выгрузках и сохраняются при повторном извлечении.</p>
+<div class="panel" id="ent-panel">
+  <h3 style="margin-top:0">Указатель имён</h3>
+  <div class="fgrid ent-filter">
+    <div><label title="Т* — начинается, *ович — кончается, =Вера — точно, иначе — часть имени">Поиск <span class="muted">(Т*, *ович, =Вера)</span></label>
+      <input type="search" name="q" form="sel-form" value="{{ request.query_params.get('q', '') }}" placeholder="например: Пьер" autocomplete="off" data-ent-live></div>
+    <div><label>Класс{{ term('ner') }}</label><select name="etype" form="sel-form" data-ent-live><option value="">все</option>{% for k, v in ETYPES.items() %}<option value="{{ k }}" {{ 'selected' if ent_etype == k }}>{{ v }} ({{ ents.by_type.get(k, 0) }})</option>{% endfor %}</select></div>
+    <div><label>Показывать</label><select name="hidden" form="sel-form" data-ent-live>
+      <option value="">имена</option><option value="1" {{ 'selected' if ent_hidden }}>скрытые («это не имя»)</option></select></div>
+    <div class="act"></div>
+  </div>
+  <div class="fopts">{% for k, v in ENT_FLAGS.items() %}
+    <label class="check{{ ' noise-flag' if k == 'noise' }}"><input type="checkbox" name="f" value="{{ k }}" form="sel-form" data-ent-live {{ 'checked' if k in ent_flags }}> {{ v }}</label>{% endfor %}
+  </div>
+  <div id="ent-index">{% include "_entities_index.html" %}</div>
+  <p class="help">Модель Natasha обучена на новостях: в художественных текстах она путает фамилии и города («Ростов»), принимает иностранные фразы и
+    первые слова предложений за имена, делит одного героя на варианты («Андрей», «князь Андрей», «Болконский»).
+    Шум: фильтр «вероятный шум» (или поиск и быстрые фильтры) → «Отметить все найденные» → «Не имя — скрыть»; 🗑 в строке — скрыть одно имя.
+    Скрытые не пропадают: «Показывать: скрытые» → «Вернуть». Варианты одного героя — флажками и «Объединить» (во всех текстах или в одном),
+    ✕ у варианта — отделить. Правки действуют во всех текстах и выгрузках и сохраняются при повторном извлечении.</p>
 </div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+  initEntityIndex();
   const selq = {{ selq|tojson }};
   {% if network and network.nodes %}
   const net = {{ network|tojson }};
@@ -106,7 +81,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const elD = document.getElementById('chart-entdict');
   if (elD && elD.on) elD.on('plotly_click', ev => {
     const p = ev.points[0], w = ed.words[p.pointIndex[1]], name = ed.names[ed.names.length - 1 - p.pointIndex[0]];
-    showMarked(`/api/entities/cooccurrence?${selq}&name=${encodeURIComponent(name)}&entry=${w.entry_id}&unit=${ed.unit}`, `«${name}» и «${w.word}» ${ {{ UNITS[ent_unit]|tojson }} }`);
+    showMarked(`/api/entities/cooccurrence?${selq}&name=${encodeURIComponent(name)}&entry=${w.entry_id}&eunit=${ed.unit}`, `«${name}» и «${w.word}» ${ {{ UNITS[ent_unit]|tojson }} }`);
   });
   {% endif %}
 });

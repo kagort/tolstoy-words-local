@@ -228,20 +228,30 @@
 
 {# ============================================================== КОНКОРДАНС #}
 {% if tab == 'conc' and conc %}
-<div class="panel row">
-  <div><label>Слово</label><select name="entry_id" form="sel-form"><option value="">{{ 'выбранные слова (' ~ sel.words|length ~ ')' if sel.words else 'все слова словаря' }}</option>{% for e in entries %}{% set n = word_counts.get(e.id, 0) %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}{{ ' class=muted' if not n }}>{{ e.surface }} ({{ n }})</option>{% endfor %}</select></div>
-  <div><label>Роль слова в предложении</label><select name="role" form="sel-form"><option value="">любая</option>{% for k in ROLE_LABELS %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('role') == k }}>{{ role_label(k) }}</option>{% endfor %}</select></div>
-  <div><label>Тип связи</label><select name="rel_type" form="sel-form"><option value="">любой</option>{% for k in REL_LABELS %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('rel_type') == k }}>{{ rel_label(k) }}</option>{% endfor %}</select></div>
-  <div class="shrink"><label>Словосочетание {{ term('phrase') }}</label>
-    <input type="text" name="phrase" form="sel-form" value="{{ request.query_params.get('phrase', '') }}" placeholder="здравый смысл; закон * порядок" style="width:220px">
-    <label class="check small"><input type="checkbox" name="phrase_any" form="sel-form" value="1" {{ 'checked' if request.query_params.get('phrase_any') }}> в любом порядке</label></div>
-  <div class="shrink"><label>Рядом со словом</label>
-    <input type="text" name="near" form="sel-form" value="{{ request.query_params.get('near', '') }}" placeholder="лемма" style="width:110px">
-    <select name="window" form="sel-form" title="окно, слов">{% for w in (1, 2, 3, 5, 10) %}<option value="{{ w }}" {{ 'selected' if (request.query_params.get('window') or '3') == w|string }}>±{{ w }}</option>{% endfor %}</select></div>
-  <div><label>Связанное слово (лемма)</label><input type="text" name="related" form="sel-form" value="{{ request.query_params.get('related', '') }}" placeholder="например: сладкий"></div>
-  <div class="shrink"><label class="check"><input type="checkbox" name="invalid" form="sel-form" value="1" {{ 'checked' if request.query_params.get('invalid') }}> показать ложные</label>
-    <label class="check" title="вхождения внутри имён собственных («Любовь Андреевна» для слова «любовь») — не считаются, пока не отмечены ✓"><input type="checkbox" name="names" form="sel-form" value="1" {{ 'checked' if request.query_params.get('names') }}> только в именах</label></div>
-  <div class="shrink"><button type="submit" form="sel-form">Найти</button></div>
+{% set more_open = request.query_params.get('phrase') or request.query_params.get('near') or request.query_params.get('related') or request.query_params.get('phrase_any') or request.query_params.get('invalid') or request.query_params.get('names') %}
+<div class="panel">
+  <div class="fgrid">
+    <div><label>Слово</label><select name="entry_id" form="sel-form"><option value="">{{ 'выбранные слова (' ~ sel.words|length ~ ')' if sel.words else 'все слова словаря' }}</option>{% for e in entries %}{% set n = word_counts.get(e.id, 0) %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}{{ ' class=muted' if not n }}>{{ e.surface }} ({{ n }})</option>{% endfor %}</select></div>
+    <div><label>Роль слова в предложении</label><select name="role" form="sel-form"><option value="">любая</option>{% for k in ROLE_LABELS %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('role') == k }}>{{ role_label(k) }}</option>{% endfor %}</select></div>
+    <div><label>Тип связи</label><select name="rel_type" form="sel-form"><option value="">любой</option>{% for k in REL_LABELS %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('rel_type') == k }}>{{ rel_label(k) }}</option>{% endfor %}</select></div>
+    <div class="act"><button type="submit" form="sel-form">Найти</button></div>
+  </div>
+  <details class="more" {{ 'open' if more_open }}><summary>Дополнительно: словосочетание, соседние и связанные слова, ложные вхождения</summary>
+    <div class="fgrid">
+      <div><label>Словосочетание {{ term('phrase') }}</label>
+        <input type="text" name="phrase" form="sel-form" value="{{ request.query_params.get('phrase', '') }}" placeholder="здравый смысл; закон * порядок"></div>
+      <div><label>Рядом со словом (лемма, окно)</label><div class="pair">
+        <input type="text" name="near" form="sel-form" value="{{ request.query_params.get('near', '') }}" placeholder="лемма">
+        <select name="window" form="sel-form" title="окно, слов">{% for w in (1, 2, 3, 5, 10) %}<option value="{{ w }}" {{ 'selected' if (request.query_params.get('window') or '3') == w|string }}>±{{ w }}</option>{% endfor %}</select></div></div>
+      <div><label>Связанное слово (лемма)</label><input type="text" name="related" form="sel-form" value="{{ request.query_params.get('related', '') }}" placeholder="например: сладкий"></div>
+      <div class="act"></div>
+    </div>
+    <div class="fopts">
+      <label class="check"><input type="checkbox" name="phrase_any" form="sel-form" value="1" {{ 'checked' if request.query_params.get('phrase_any') }}> словосочетание в любом порядке</label>
+      <label class="check"><input type="checkbox" name="invalid" form="sel-form" value="1" {{ 'checked' if request.query_params.get('invalid') }}> показать ложные</label>
+      <label class="check" title="вхождения внутри имён собственных («Любовь Андреевна» для слова «любовь») — не считаются, пока не отмечены ✓"><input type="checkbox" name="names" form="sel-form" value="1" {{ 'checked' if request.query_params.get('names') }}> только в именах</label>
+    </div>
+  </details>
 </div>
 <div class="row" style="margin-bottom:6px">
   <div class="muted">Найдено: {{ conc.total }}{% if conc.phrase_sentences is not none %} (предложений со словосочетанием: {{ conc.phrase_sentences }}){% endif %}. Наведите курсор на строку — появится окно с соседними предложениями; ID или выделенное слово открывают разбор предложения 🌳.</div>

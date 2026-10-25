@@ -6,7 +6,7 @@ import logging
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from sqlalchemy import and_, delete, not_, select, update
+from sqlalchemy import and_, delete, not_, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
@@ -44,7 +44,10 @@ def entry_token_filter(entry: DictionaryEntry, settings: dict):
             allowed.add("PROPN")
         if entry.upos == "VERB":
             allowed.add("AUX")
-        conds.append(TokenRow.upos.in_(sorted(allowed)))
+        if entry.upos == "PROPN":  # имя: парсер мог разобрать как существительное — берём, если с заглавной («Вера», не «вера»)
+            conds.append(or_(TokenRow.upos == "PROPN", and_(TokenRow.upos == "NOUN", TokenRow.form.op("~")("^[А-ЯЁA-Z]"))))
+        else:
+            conds.append(TokenRow.upos.in_(sorted(allowed)))
         if entry.upos in ("VERB", "ADJ"):
             if not settings.get("include_participles", False):
                 conds.append(not_(TokenRow.feats.like("%VerbForm=Part%")))

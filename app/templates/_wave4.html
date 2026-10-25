@@ -1,7 +1,7 @@
 {# ============================================================== АВТОРСТВО (СТИЛОМЕТРИЯ) #}
 {% if tab == 'stylo' and sty %}
 <div class="panel row">
-  <div class="shrink"><label>Единицы</label><select name="unit" form="sel-form"><option value="text" {{ 'selected' if sty.unit == 'text' }}>целые тексты</option><option value="chunk" {{ 'selected' if sty.unit == 'chunk' }}>фрагменты текстов</option></select></div>
+  <div class="shrink"><label>Единицы</label><select name="sunit" form="sel-form"><option value="text" {{ 'selected' if sty.unit == 'text' }}>целые тексты</option><option value="chunk" {{ 'selected' if sty.unit == 'chunk' }}>фрагменты текстов</option></select></div>
   <div class="shrink"><label>Размер фрагмента, слов</label><select name="chunk" form="sel-form">{% for c in [2000, 5000, 10000, 20000] %}<option {{ 'selected' if sty.chunk == c }}>{{ c }}</option>{% endfor %}</select></div>
   <div class="shrink"><label>Самых частых слов (MFW){{ term('mfw') }}</label><select name="mfw" form="sel-form">{% for n in MFW_CHOICES %}<option {{ 'selected' if sty.mfw == n }}>{{ n }}</option>{% endfor %}</select></div>
   <div><label>Расстояние{{ term('cosine_delta') }}</label><select name="kind" form="sel-form">{% for k, v in DISTANCES.items() %}<option value="{{ k }}" {{ 'selected' if sty.kind == k }}>{{ v }}</option>{% endfor %}</select></div>
