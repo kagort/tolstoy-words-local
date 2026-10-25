@@ -347,11 +347,15 @@ def export_entities(fmt: str, request: Request, db: Session = Depends(get_sessio
     sel = _selection(db, request)
     qp = request.query_params
     etype = qp.get("etype") if qp.get("etype") in E.ETYPES else None
-    ix = E.entity_index(db, sel.ids, etype, qp.get("q") or "", top=1_000_000)
+    from app.web.pages import _entity_flags
+
+    ix = E.entity_index(db, sel.ids, etype, qp.get("q") or "", top=None, flags=_entity_flags(qp),
+                        hidden_only=bool(qp.get("hidden")), features=True)
     frames = {"Имена": pd.DataFrame([{"Имя": x["name"], "Класс": x["label"], "Упоминаний": x["count"], "Текстов": x["texts"],
-                                      "Слитые варианты": ", ".join(x["variants"]), "Ручная правка": "да" if x["edited"] else ""}
+                                      "Слитые варианты": ", ".join(x["variants"]), "Ручная правка": "да" if x["edited"] else "",
+                                      "Оценка шума": x["noise"], "Почему": "; ".join(x["reasons"])}
                                      for x in ix["items"]])}
-    unit = qp.get("unit") if qp.get("unit") in E.UNITS else "sentence"
+    unit = qp.get("eunit") if qp.get("eunit") in E.UNITS else "sentence"
     net = E.persons_network(db, sel.ids, unit, top=100)
     frames["Сеть персонажей"] = pd.DataFrame([{"Персона 1": e["a"], "Персона 2": e["b"], "Совместно": e["w"]} for e in net["edges"]])
     cross = qp.get("cross") if qp.get("cross") in E.ETYPES else "LOC"

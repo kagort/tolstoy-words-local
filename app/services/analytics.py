@@ -24,6 +24,9 @@ from app.services.stats import SIGNIFICANCE_LL, gries_dp, ipm, log_dice, log_lik
 # вхождение считается: отмечено ✓, или не проверялось и не стоит внутри имени собственного (см. matching.flag_name_hits)
 VALID = or_(Hit.is_valid.is_(True), and_(Hit.is_valid.is_(None), Hit.in_name.is_(False)))
 DEFAULT_SCOPES = ("direct", "shared")
+# вхождения категории (и суммы по нескольким словам): одно слово текста — один раз, даже если его нашли две записи
+# («Анна Павловна» и «Анна Павловна Шерер» в словаре персонажей)
+TOKENS = func.count(func.distinct(Hit.token_id))
 
 
 # ------------------------------------------------------------------ корпус
@@ -121,7 +124,7 @@ def frequency_by_text(session: Session, dictionary_id: int, text_ids: list[int],
               "texts_full": [text_labels(t.title, t.author, None, t.meta)[1] for t in texts]}
     if by == "cat":
         cat = func.coalesce(func.nullif(DictionaryEntry.category, ""), NO_CATEGORY)
-        q = (select(cat, Hit.text_id, func.count()).select_from(Hit).join(DictionaryEntry, DictionaryEntry.id == Hit.entry_id)
+        q = (select(cat, Hit.text_id, TOKENS).select_from(Hit).join(DictionaryEntry, DictionaryEntry.id == Hit.entry_id)
              .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(text_ids or [-1]), VALID))
         if entry_ids:
             q = q.where(Hit.entry_id.in_(entry_ids))
@@ -578,9 +581,9 @@ def overview(session: Session, dictionary_id: int, text_ids: list[int], entry_id
     if by == "cat":
         item = func.coalesce(func.nullif(DictionaryEntry.category, ""), NO_CATEGORY)
         scope = [Hit.entry_id.in_(entry_ids)] if entry_ids else []
-        ranked = session.execute(select(item, func.count()).select_from(Hit)
+        ranked = session.execute(select(item, TOKENS).select_from(Hit)
                                  .join(DictionaryEntry, DictionaryEntry.id == Hit.entry_id)
-                                 .where(*base_where, *scope).group_by(item).order_by(func.count().desc())).all()
+                                 .where(*base_where, *scope).group_by(item).order_by(TOKENS.desc())).all()
         chosen = [c for c, _ in ranked] if entry_ids else [c for c, _ in ranked][:CATEGORIES_TOP]
         items = [(c, c) for c in chosen]
         scope = scope + [item.in_(chosen or ["-"])]
@@ -595,13 +598,13 @@ def overview(session: Session, dictionary_id: int, text_ids: list[int], entry_id
     counts, texts_with = defaultdict(dict), defaultdict(dict)
     total_counts, total_texts = {}, {}
     if items:
-        q = (select(key, item, func.count(), func.count(func.distinct(Hit.text_id))).select_from(Hit)
+        q = (select(key, item, TOKENS, func.count(func.distinct(Hit.text_id))).select_from(Hit)
              .join(TextDoc, TextDoc.id == Hit.text_id).join(DictionaryEntry, DictionaryEntry.id == Hit.entry_id)
              .where(*base_where, *scope))
         for g, it, c, t in session.execute(q.group_by(key, item)):
             g = int(g) if dim in ("text", "period") and g is not None else g
             counts[it][g], texts_with[it][g] = c, t
-        tot = (select(key, func.count(), func.count(func.distinct(Hit.text_id))).select_from(Hit)
+        tot = (select(key, TOKENS, func.count(func.distinct(Hit.text_id))).select_from(Hit)
                .join(TextDoc, TextDoc.id == Hit.text_id).join(DictionaryEntry, DictionaryEntry.id == Hit.entry_id)
                .where(*base_where, *scope).group_by(key))
         for g, c, t in session.execute(tot):
@@ -649,7 +652,7 @@ def category_frequency(session: Session, dictionary_id: int, text_ids: list[int]
     ids = text_ids or [-1]
     key, groups = group_sizes(session, ids, dim, step)
     cat = func.coalesce(func.nullif(DictionaryEntry.category, ""), NO_CATEGORY)
-    q = (select(cat, key, func.count()).select_from(Hit)
+    q = (select(cat, key, TOKENS).select_from(Hit)
          .join(DictionaryEntry, DictionaryEntry.id == Hit.entry_id).join(TextDoc, TextDoc.id == Hit.text_id)
          .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), VALID))
     if entry_ids:

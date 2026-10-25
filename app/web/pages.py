@@ -782,24 +782,142 @@ def text_passage(text_id: int, request: Request, db: Session = Depends(get_sessi
                                  _int(qp.get("dictionary_id")), words)}
 
 
-def _entities_context(db: Session, request: Request, dict_id: int, sel) -> dict:
+def _entity_flags(qp) -> set[str]:
+    from app.services.entities import FLAGS
+
+    flags = {f for f in qp.getlist("f") if f in FLAGS}
+    if qp.get("nolatin"):  # старый параметр ссылок
+        flags.add("nolatin")
+    return flags
+
+
+def _entities_context(db: Session, request: Request, dict_id: int, sel, full: bool = True) -> dict:
+    """full=False — только указатель (обновление списка при вводе в поиск, без сети персонажей и графиков)."""
     from app.services import entities as E
+    from app.services.dict_build import NAME_MODES
 
     qp = request.query_params
     etype = qp.get("etype") if qp.get("etype") in E.ETYPES else None
-    unit = qp.get("unit") if qp.get("unit") in E.UNITS else "sentence"
-    ix = E.entity_index(db, sel.ids, etype, qp.get("q") or "")
-    if qp.get("nolatin"):
-        ix["items"] = [x for x in ix["items"] if any("а" <= ch.lower() <= "я" or ch.lower() == "ё" for ch in x["name"])]
-        ix["total"] = len(ix["items"]) if len(ix["items"]) < ix["total"] else ix["total"]
-        ix["n_mentions"] = sum(x["count"] for x in ix["items"])
+    unit = qp.get("eunit") if qp.get("eunit") in E.UNITS else "sentence"
+    flags = _entity_flags(qp)
+    hidden_only = bool(qp.get("hidden"))
+    ix = E.entity_index(db, sel.ids, etype, qp.get("q") or "", flags=flags, hidden_only=hidden_only, features=True)
     cross = qp.get("cross") if qp.get("cross") in ("LOC", "PER", "ORG") else "LOC"
     sel_texts = list(db.execute(select(TextDoc.id, TextDoc.title).where(TextDoc.id.in_(sel.ids or [-1])).order_by(TextDoc.title)))
-    return {"ents": ix, "ent_etype": etype, "ent_unit": unit, "ent_cross": cross,
-            "merge_hints": E.merge_suggestions(ix["items"]), "ent_texts": sel_texts,
-            "network": E.persons_network(db, sel.ids, unit) if ix["n_mentions"] else None,
-            "ent_dict": E.entity_dictionary(db, sel.ids, dict_id, sel.words, cross, unit) if ix["n_mentions"] else None,
-            "ETYPES": E.ETYPES, "ETYPE_ONE": E.ETYPE_ONE, "UNITS": E.UNITS}
+    ctx = {"ents": ix, "ent_etype": etype, "ent_unit": unit, "ent_cross": cross, "ent_flags": flags, "ent_hidden": hidden_only,
+           "merge_hints": E.merge_suggestions(ix["items"]) if not (flags or hidden_only) else [], "ent_texts": sel_texts,
+           "ETYPES": E.ETYPES, "ETYPE_ONE": E.ETYPE_ONE, "UNITS": E.UNITS, "ENT_FLAGS": E.FLAGS, "NOISE_SURE": E.NOISE_SURE,
+           "NAME_MODES": NAME_MODES}
+    if full:
+        ctx["network"] = E.persons_network(db, sel.ids, unit) if ix["n_mentions"] else None
+        ctx["ent_dict"] = E.entity_dictionary(db, sel.ids, dict_id, sel.words, cross, unit) if ix["n_mentions"] else None
+    return ctx
+
+
+@router.get("/analysis/entities-index")
+def entities_index_fragment(request: Request, db: Session = Depends(get_session)):
+    """Указатель имён без остальной страницы — для поиска по мере ввода."""
+    from app.web.deps import templates
+
+    ctx = _analysis_context(db, request)
+    ctx.update(_entities_context(db, request, ctx["dict_id"], ctx["sel"], full=False))
+    ctx["request"] = request
+    return templates.TemplateResponse(request, "_entities_index.html", ctx)
+
+
+@router.post("/api/entities/hide")
+async def entities_hide(request: Request, db: Session = Depends(get_session)):
+    """«Это не имя» для группы имён (hidden=true) или возврат скрытых (hidden=false); без перезагрузки страницы."""
+    from app.services.entities import set_hidden
+    from app.services.matching import flag_name_hits
+
+    body = await request.json()
+    names = [str(x) for x in body.get("names") or [] if str(x).strip()][:20000]
+    if not names:
+        return JSONResponse({"error": "не отмечено ни одного имени"}, status_code=400)
+    tids = set_hidden(db, names, bool(body.get("hidden", True)))
+    db.flush()
+    if tids:  # скрытое «имя» возвращает слова словаря в частоты, возвращённое — снова исключает
+        flag_name_hits(db, text_ids=tids)
+    db.commit()
+    return {"n": len(set(names))}
+
+
+@router.post("/entities/etype")
+def entities_etype(request: Request, names: list[str] = Form([]), names_all: str = Form(""), etype: str = Form(""),
+                   back: str = Form("/analysis?tab=entities"), db: Session = Depends(get_session)):
+    """Перенести отмеченные имена в другой класс (персона, место, организация)."""
+    from app.services.entities import ETYPE_ONE, set_etype
+    from app.services.matching import flag_name_hits
+
+    names = _names_from_form(names, names_all)
+    if not names:
+        flash(request, "Отметьте имена в указателе", "error")
+    else:
+        tids = set_etype(db, names, etype or None)
+        db.flush()
+        if tids:
+            flag_name_hits(db, text_ids=tids)
+        db.commit()
+        flash(request, f"Класс «{ETYPE_ONE.get(etype, 'как определила модель')}»: имён {len(names)}", "success")
+    return redirect(back if back.startswith("/") else "/analysis?tab=entities")
+
+
+@router.post("/entities/to-dictionary")
+def entities_to_dictionary(request: Request, names: list[str] = Form([]), names_all: str = Form(""), dict_name: str = Form(""),
+                           mode: str = Form("person"), back: str = Form("/analysis?tab=entities"), db: Session = Depends(get_session)):
+    """Словарь из отмеченных имён указателя: персонаж — категория, варианты имени — записи."""
+    from app.services import dict_build as DB
+    from app.services import entities as E
+    from app.services.selection import from_params
+    from urllib.parse import parse_qs, urlsplit
+
+    chosen = set(_names_from_form(names, names_all))
+    if not chosen:
+        flash(request, "Отметьте имена в указателе (или «отметить все найденные»)", "error")
+        return redirect(back if back.startswith("/") else "/analysis?tab=entities")
+    sel = from_params(db, parse_qs(urlsplit(back).query))
+    items = [x for x in E.entity_index(db, sel.ids, top=None)["items"] if x["name"] in chosen]
+    try:
+        d = DB.build_dictionary(db, dict_name, DB.name_groups(items, mode if mode in DB.NAME_MODES else "person", E.ETYPE_ONE),
+                                f"Из указателя имён ({len(items)} имён)")
+    except ValueError as exc:
+        db.rollback()
+        flash(request, str(exc), "error")
+        return redirect(back if back.startswith("/") else "/analysis?tab=entities")
+    db.commit()
+    flash(request, f"Словарь «{d.name}» создан из указателя имён: {len(d.entries)} записей, сопоставление поставлено в очередь", "success")
+    return redirect(f"/dictionaries/{d.id}")
+
+
+@router.post("/places/to-dictionary")
+def places_to_dictionary(request: Request, dict_name: str = Form(""), mode: str = Form("place"), only_map: str | None = Form(None),
+                         back: str = Form("/analysis?tab=geo"), db: Session = Depends(get_session)):
+    """Словарь из мест выборки (вкладка «География»)."""
+    from app.services import dict_build as DB
+    from app.services.geo import place_map
+    from app.services.selection import from_params
+    from urllib.parse import parse_qs, urlsplit
+
+    sel = from_params(db, parse_qs(urlsplit(back).query))
+    gm = place_map(db, sel.ids, top=5000)
+    points = gm["points"] + ([] if only_map else gm["unresolved"])
+    try:
+        d = DB.build_dictionary(db, dict_name, DB.place_groups(points, mode if mode in DB.PLACE_MODES else "place"),
+                                f"Из мест на карте ({len(points)} мест)")
+    except ValueError as exc:
+        db.rollback()
+        flash(request, str(exc), "error")
+        return redirect(back if back.startswith("/") else "/analysis?tab=geo")
+    db.commit()
+    flash(request, f"Словарь «{d.name}» создан из мест: {len(d.entries)} записей, сопоставление поставлено в очередь", "success")
+    return redirect(f"/dictionaries/{d.id}")
+
+
+def _names_from_form(names: list[str], names_all: str) -> list[str]:
+    """Отмеченные флажки плюс «Отметить все найденные» (список всех имён по фильтру, по строке на имя)."""
+    out = {n.strip() for n in names if n.strip()} | {n.strip() for n in names_all.split("\n") if n.strip()}
+    return sorted(out)
 
 
 def _semantic_context(db: Session, request: Request, dict_id: int, sel, entry_id: int | None) -> dict:
@@ -857,7 +975,7 @@ def _stylo_context(db: Session, request: Request, sel) -> dict:
     from app.services import stylometry as ST
 
     qp = request.query_params
-    unit = qp.get("unit") if qp.get("unit") in ("text", "chunk") else ("chunk" if len(sel.ids) < 4 else "text")
+    unit = qp.get("sunit") if qp.get("sunit") in ("text", "chunk") else ("chunk" if len(sel.ids) < 4 else "text")
     chunk = _int(qp.get("chunk")) or 5000
     chunk = chunk if chunk in (2000, 5000, 10000, 20000) else 5000
     target = _int(qp.get("target"))
@@ -897,7 +1015,7 @@ def entity_cooccurrence(request: Request, db: Session = Depends(get_session)):
     qp = request.query_params
     sel = from_params(db, qp)
     return {"sentences": cooccurrence_examples(db, sel.ids, qp.get("name", ""), _int(qp.get("entry")) or 0,
-                                               qp.get("unit") or "sentence")}
+                                               qp.get("eunit") or "sentence")}
 
 
 @router.post("/entities/override")
@@ -919,10 +1037,12 @@ def entity_override(request: Request, norm: str = Form(...), etype: str = Form("
 
 
 @router.post("/entities/merge")
-def entities_merge(request: Request, names: list[str] = Form([]), canonical: str = Form(""), scope: str = Form("all"),
-                   back: str = Form("/analysis?tab=entities"), db: Session = Depends(get_session)):
+def entities_merge(request: Request, names: list[str] = Form([]), names_all: str = Form(""), canonical: str = Form(""),
+                   scope: str = Form("all"), back: str = Form("/analysis?tab=entities"), db: Session = Depends(get_session)):
     """Объединить отмеченные имена в одного персонажа — во всех текстах или только в одном."""
     from app.services.entities import merge_names
+
+    names = _names_from_form(names, names_all)
 
     target = canonical.strip() or (max(names, key=len) if names else "")
     if len(set(names) | {target}) < 2 or not target:
@@ -1005,7 +1125,9 @@ def analysis(request: Request, db: Session = Depends(get_session)):
     elif tab == "geo":
         from app.services.geo import EDIT_KINDS, KIND_LABELS, place_map
 
-        ctx.update({"geo": place_map(db, sel.ids), "GEO_KINDS": KIND_LABELS, "EDIT_KINDS": EDIT_KINDS,
+        from app.services.dict_build import PLACE_MODES
+
+        ctx.update({"geo": place_map(db, sel.ids), "GEO_KINDS": KIND_LABELS, "EDIT_KINDS": EDIT_KINDS, "PLACE_MODES": PLACE_MODES,
                     "geo_mode": "countries" if qp.get("geo_mode") == "countries" else "places"})
     elif tab == "semantic":
         ctx.update(_semantic_context(db, request, dict_id, sel, entry_id))

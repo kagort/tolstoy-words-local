@@ -407,3 +407,82 @@ function prefillMerge(names) {
   const inp = document.getElementById('merge-canonical');
   if (inp) { inp.value = longest; inp.scrollIntoView({ behavior: 'smooth', block: 'center' }); inp.focus(); }
 }
+
+// ------------------------------------------------------------ указатель имён: поиск по мере ввода, групповые правки
+function entParams() {
+  const form = document.getElementById('sel-form');
+  return new URLSearchParams(new FormData(form)).toString();
+}
+let entTimer = null, entSeq = 0;
+async function entRefresh() {
+  const qs = entParams(), seq = ++entSeq;
+  const res = await fetch('/analysis/entities-index?' + qs);
+  if (!res.ok || seq !== entSeq) return;  // ответ на устаревший ввод — не показываем
+  const box = document.getElementById('ent-index');
+  if (box) box.innerHTML = await res.text();
+  history.replaceState(null, '', '/analysis?' + qs);
+  entCount();
+}
+function initEntityIndex() {
+  document.querySelectorAll('[data-ent-live]').forEach(el => {
+    const ev = el.type === 'search' ? 'input' : 'change';
+    el.addEventListener(ev, () => { clearTimeout(entTimer); entTimer = setTimeout(entRefresh, el.type === 'search' ? 300 : 0); });
+    if (el.type === 'search') el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(entTimer); entRefresh(); } });
+  });
+}
+function entFlag(flag) {
+  const box = document.querySelector(`[data-ent-live][name="f"][value="${flag}"]`);
+  if (box) { box.checked = true; entRefresh(); }
+}
+function entShowHidden() {
+  const s = document.querySelector('[data-ent-live][name="hidden"]');
+  if (s) { s.value = '1'; entRefresh(); }
+}
+function entAllNames() {
+  const el = document.getElementById('ent-all');
+  return el ? JSON.parse(el.textContent) : [];
+}
+function entCheckAll(on) {
+  document.querySelectorAll('.merge-check').forEach(c => { c.checked = on; });
+  const f = document.querySelector('#bulk-form [name="names_all"]');
+  if (f) f.value = on ? entAllNames().join('\n') : '';
+  entCount();
+}
+function entChecked() {
+  const f = document.querySelector('#bulk-form [name="names_all"]');
+  const names = new Set([...document.querySelectorAll('.merge-check:checked')].map(c => c.value));
+  if (f && f.value) f.value.split('\n').forEach(n => names.add(n));
+  return [...names];
+}
+function entCount() {
+  const el = document.getElementById('ent-checked');
+  const f = document.querySelector('#bulk-form [name="names_all"]');
+  if (el) el.textContent = `отмечено: ${entChecked().length}` + (f && f.value ? ' (все найденные)' : '');
+}
+function entPrepare() {
+  if (!entChecked().length) { toast('Отметьте имена в указателе'); return false; }
+  return true;
+}
+async function entHide(names, hidden, quiet) {
+  if (!names.length) { toast('Отметьте имена в указателе'); return; }
+  const res = await fetch('/api/entities/hide', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ names, hidden }) });
+  if (!res.ok) { toast('Не удалось сохранить правку'); return; }
+  await entRefresh();
+  if (quiet) return;
+  const what = names.length === 1 ? `«${names[0]}»` : `имён: ${names.length}`;
+  toast(hidden ? `Скрыто ${what}` : `Возвращено ${what}`, hidden ? { label: 'Отменить', run: () => entHide(names, false, true) } : null);
+}
+// всплывающее сообщение внизу экрана (с кнопкой действия, например «Отменить»)
+function toast(text, action) {
+  let el = document.getElementById('toast');
+  if (!el) { el = document.createElement('div'); el.id = 'toast'; el.className = 'toast'; document.body.appendChild(el); }
+  el.innerHTML = '';
+  el.appendChild(document.createTextNode(text + ' '));
+  if (action) {
+    const b = document.createElement('button'); b.className = 'small secondary'; b.textContent = action.label;
+    b.onclick = () => { el.classList.remove('show'); action.run(); }; el.appendChild(b);
+  }
+  el.classList.add('show');
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 8000);
+}

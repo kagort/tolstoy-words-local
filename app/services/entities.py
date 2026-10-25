@@ -13,13 +13,13 @@ import re
 from collections import Counter, defaultdict
 from functools import lru_cache
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
 from app.models import Entity, EntityOverride, Hit, SentenceRow, TextDoc, TokenRow
 from app.nlp.parsers import _morph
-from app.nlp.tree import parse_feats
+from app.nlp.tree import norm, parse_feats
 from app.services import analytics as A
 from app.services.jobs import set_progress
 
@@ -200,7 +200,31 @@ def resolve(norm_name: str, etype: str, ovr: dict, text_id: int | None = None) -
     return name, typ, hidden
 
 
-def entity_index(session: Session, text_ids: list[int], etype: str | None = None, query: str = "", top: int = 300) -> dict:
+# быстрые фильтры указателя (для поиска шума)
+FLAGS = {"one": "одно слово", "init": "только в начале предложения", "rare": "1–2 упоминания",
+         "lower": "есть и со строчной буквы", "edited": "есть ручная правка", "nolatin": "без латиницы",
+         "noise": "вероятный шум"}
+NOISE_MIN, NOISE_SURE = 0.5, 0.7  # кандидат в шум / уверенный кандидат (отмечается заранее)
+
+
+def match_mask(mask: str, names: list[str]) -> bool:
+    """Поиск в указателе: «Т*» — начинается, «*ович» — кончается, «=Вера» — точно, иначе — подстрока (без учёта регистра и ё)."""
+    m = norm(mask.strip())
+    if not m:
+        return True
+    ns = [norm(n) for n in names]
+    if m.startswith("="):
+        return m[1:].strip() in ns
+    if "*" in m:
+        rx = re.compile("^" + ".*".join(re.escape(part) for part in m.split("*")) + "$")
+        return any(rx.match(n) for n in ns)
+    return any(m in n for n in ns)
+
+
+def entity_index(session: Session, text_ids: list[int], etype: str | None = None, query: str = "", top: int | None = 300,
+                 flags: set[str] | frozenset = frozenset(), hidden_only: bool = False, features: bool = False) -> dict:
+    """Указатель имён выборки. flags — быстрые фильтры (FLAGS); hidden_only — только скрытые («это не имя»);
+    features — посчитать признаки шума (оценка и причины для каждого имени; нужно для flags noise/init/lower)."""
     ovr = overrides(session)
     rows = session.execute(
         select(Entity.norm, Entity.etype, Entity.text_id, func.count(), func.min(Entity.sentence_id))
@@ -208,9 +232,12 @@ def entity_index(session: Session, text_ids: list[int], etype: str | None = None
     ).all()
     agg: dict[str, dict] = {}
     by_type = Counter()
+    n_hidden = set()
     for norm_name, typ, tid, c, first in rows:
         name, typ2, hidden = resolve(norm_name, typ, ovr, tid)
         if hidden:
+            n_hidden.add(name)
+        if hidden != hidden_only:
             continue
         a = agg.setdefault(name, {"name": name, "types": Counter(), "count": 0, "tids": set(), "variants": Counter(), "first": first})
         a["types"][typ2] += c
@@ -219,20 +246,179 @@ def entity_index(session: Session, text_ids: list[int], etype: str | None = None
         a["variants"][norm_name] += c
         a["first"] = min(a["first"], first)
     edited = set(ovr["ovr"]) | set(ovr["glob"]) | {n for _, n in ovr["text"]}
-    items = []
+    need_feats = features or bool(flags & {"noise", "init", "lower"})
+    feats = name_features(session, text_ids, ovr, hidden_only) if need_feats and agg else {}
+    items, n_noise = [], 0
     for a in agg.values():
         typ = a["types"].most_common(1)[0][0]
         by_type[typ] += 1
+        variants = [v for v, _ in a["variants"].most_common(12) if v != a["name"]]
+        it = {"name": a["name"], "etype": typ, "label": ETYPE_ONE.get(typ, typ), "count": a["count"], "texts": len(a["tids"]),
+              "variants": variants, "all_variants": [v for v in a["variants"] if v != a["name"]], "first": a["first"],
+              "edited": a["name"] in edited or any(v in edited for v in a["variants"])}
+        if need_feats:
+            f = feats.get(a["name"], {"n": a["count"], "init": 0, "propn": 0, "lower": 0})
+            it["noise"], it["reasons"] = noise_score(a["name"], f, it["texts"])
+            it["init"], it["lower"] = f["init"], f["lower"]
+            n_noise += it["noise"] >= NOISE_MIN
         if etype and typ != etype:
             continue
-        if query and query.lower() not in a["name"].lower():
+        if query and not match_mask(query, [a["name"], *a["variants"]]):
             continue
-        items.append({"name": a["name"], "etype": typ, "label": ETYPE_ONE.get(typ, typ), "count": a["count"], "texts": len(a["tids"]),
-                      "variants": [v for v, _ in a["variants"].most_common(12) if v != a["name"]], "first": a["first"],
-                      "edited": a["name"] in edited or any(v in edited for v in a["variants"])})
-    items.sort(key=lambda x: -x["count"])
-    return {"items": items[:top], "total": len(items), "by_type": dict(by_type),
+        if not _pass_flags(it, flags):
+            continue
+        items.append(it)
+    if "noise" in flags:
+        items.sort(key=lambda x: (-x["noise"], -x["count"]))
+    else:
+        items.sort(key=lambda x: -x["count"])
+    return {"items": items[:top] if top else items, "total": len(items), "by_type": dict(by_type),
+            "all_names": [x["name"] for x in items], "n_hidden": len(n_hidden), "n_noise": n_noise if need_feats else None,
             "n_mentions": sum(x["count"] for x in items), "missing": texts_without_entities(session, text_ids)}
+
+
+def _pass_flags(it: dict, flags) -> bool:
+    if "one" in flags and " " in it["name"].strip():
+        return False
+    if "rare" in flags and it["count"] > 2:
+        return False
+    if "edited" in flags and not it["edited"]:
+        return False
+    if "init" in flags and it.get("init", 0) < it["count"]:
+        return False
+    if "lower" in flags and not it.get("lower"):
+        return False
+    if "noise" in flags and it.get("noise", 0) < NOISE_MIN:
+        return False
+    if "nolatin" in flags and not re.search("[а-яё]", it["name"].lower()):
+        return False
+    return True
+
+
+_LEAD = " \t\n«»\"„“”'‘’—–‒-…([.,:;!?*"
+_FUNCTION_POS = {"VERB", "INFN", "ADVB", "CONJ", "PRCL", "INTJ", "PREP", "NPRO", "PRED", "GRND", "PRTF", "PRTS",
+                 "ADJF", "ADJS", "COMP", "NUMR"}
+
+
+def name_features(session: Session, text_ids: list[int], ovr: dict | None = None, hidden_only: bool = False) -> dict[str, dict]:
+    """Признаки шума по каноническим именам: n — упоминаний, init — в начале предложения или реплики, propn — первое
+    слово разобрано как PROPN, lower — то же слово (однословное имя) в выборке со строчной буквы."""
+    ovr = ovr or overrides(session)
+    q = (select(Entity.norm, Entity.etype, Entity.text_id, Entity.surface,
+                func.substr(SentenceRow.text, 1, Entity.start_char), TokenRow.upos)
+         .join(SentenceRow, SentenceRow.id == Entity.sentence_id)
+         .outerjoin(TokenRow, and_(TokenRow.sentence_id == Entity.sentence_id, TokenRow.start_char == Entity.start_char))
+         .where(Entity.text_id.in_(text_ids or [-1])))
+    feats: dict[str, dict] = {}
+    for norm_name, typ, tid, surface, prefix, upos in session.execute(q):
+        name, _, hidden = resolve(norm_name, typ, ovr, tid)
+        if hidden != hidden_only:
+            continue
+        f = feats.setdefault(name, {"n": 0, "init": 0, "propn": 0, "forms": set()})
+        f["n"] += 1
+        f["init"] += not (prefix or "").strip(_LEAD)
+        f["propn"] += upos == "PROPN"
+        if " " not in surface.strip():
+            f["forms"].add(norm(surface.strip()))
+    forms = sorted(set().union(*(f["forms"] for f in feats.values()))) if feats else []
+    lower: dict[str, int] = {}
+    for k in range(0, len(forms), 1000):
+        lower.update(session.execute(
+            select(TokenRow.form_norm, func.count())
+            .where(TokenRow.text_id.in_(text_ids), TokenRow.form_norm.in_(forms[k : k + 1000]), TokenRow.form.op("~")("^[а-яёa-z]"))
+            .group_by(TokenRow.form_norm)).all())
+    for f in feats.values():
+        f["lower"] = sum(lower.get(x, 0) for x in f.pop("forms"))
+    return feats
+
+
+@lru_cache(maxsize=20000)
+def _word_kind(word: str) -> str:
+    """name — pymorphy знает как имя, фамилию, топоним; function — служебное слово, наречие, глагол, прилагательное,
+    местоимение; common — обычное существительное; unknown — слова нет в словаре."""
+    morph = _morph()
+    parses = morph.parse(word)
+    if any(p.score >= 0.05 and _NAME_TAGS & set(str(p.tag).replace(" ", ",").split(",")) for p in parses):
+        return "name"
+    if not morph.word_is_known(word.lower()):
+        return "unknown"
+    pos = parses[0].tag.POS if parses else None
+    return "function" if pos in _FUNCTION_POS else "common"
+
+
+def noise_score(name: str, f: dict, texts: int) -> tuple[float, list[str]]:
+    """Оценка 0…1: насколько «имя» похоже на ошибку модели, и причины. Решает пользователь — ничего не скрывается само."""
+    reasons, s = [], 0.0
+    n = max(f["n"], 1)
+    flat = name.replace(" ", "")
+    if re.search(r"[A-Za-z0-9]", name) or len(flat) <= 2 or (len(flat) > 3 and flat.isupper()):
+        s += 0.35  # одной латиницы мало: «Pierre», «Moscou» во французских репликах — настоящие имена
+        reasons.append("латиница, цифры, одна-две буквы или только заглавные")
+    if " " not in name.strip():
+        ling = 0.0
+        if f["init"] / n >= 0.6:
+            ling += 0.4 * f["init"] / n
+            reasons.append(f"{f['init']} из {f['n']} — в начале предложения")
+        if f["lower"]:
+            share = f["lower"] / (f["lower"] + n)
+            if share >= 0.3:
+                ling += 0.4 * share
+                reasons.append(f"со строчной буквы — {f['lower']} раз")
+        if f["propn"] / n < 0.5:
+            ling += 0.15
+            reasons.append("разбор: не имя собственное")
+        kind = _word_kind(name.strip())
+        if kind == "function":
+            ling += 0.3
+            reasons.append("наречие, союз, глагол, прилагательное или местоимение")
+        elif kind == "common":
+            ling += 0.1
+        mid = f["n"] - f["init"]
+        if kind == "name":
+            ling *= 0.5
+        if mid >= 2:  # «Вера», «Любовь», «Ростов» с заглавной в середине предложения — настоящие имена
+            ling *= 0.3
+        s += ling
+    if s > 0 and f["n"] == 1 and texts == 1:
+        s += 0.1
+        reasons.append("одно упоминание")
+    return round(min(s, 1.0), 2), reasons
+
+
+def set_hidden(session: Session, names: list[str], hidden: bool) -> list[int]:
+    """«Это не имя» для группы имён (или возврат скрытых). Остальные правки (класс, слияние) сохраняются.
+    Возвращает тексты, где встречаются эти имена и их варианты (для пересчёта пометок «слово внутри имени»)."""
+    names = sorted({x.strip() for x in names if x and x.strip()})
+    for name in names:
+        o = session.get(EntityOverride, name) or EntityOverride(norm=name, hidden=False)
+        o.hidden = hidden
+        if not (o.etype or o.canonical or o.hidden):
+            if session.get(EntityOverride, name) is not None:
+                session.delete(o)
+            continue
+        session.add(o)
+    return _texts_of(session, names)
+
+
+def set_etype(session: Session, names: list[str], etype: str | None) -> list[int]:
+    names = sorted({x.strip() for x in names if x and x.strip()})
+    for name in names:
+        o = session.get(EntityOverride, name) or EntityOverride(norm=name, hidden=False)
+        o.etype = etype if etype in ETYPES else None
+        if not (o.etype or o.canonical or o.hidden):
+            if session.get(EntityOverride, name) is not None:
+                session.delete(o)
+            continue
+        session.add(o)
+    return _texts_of(session, names)
+
+
+def _texts_of(session: Session, names: list[str]) -> list[int]:
+    from app.models import EntityAlias
+
+    variants = set(names) | set(session.scalars(select(EntityAlias.norm).where(EntityAlias.canonical.in_(names or [""]))))
+    variants |= set(session.scalars(select(EntityOverride.norm).where(EntityOverride.canonical.in_(names or [""]))))
+    return list(session.scalars(select(func.distinct(Entity.text_id)).where(Entity.norm.in_(sorted(variants) or [""]))))
 
 
 def _canonical_rows(session: Session, text_ids: list[int], etype: str | None = None):

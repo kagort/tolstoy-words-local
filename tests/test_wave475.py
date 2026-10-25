@@ -199,7 +199,7 @@ def test_merge_characters(client, data):
     hints = merge_suggestions([{"name": "Андрей", "etype": "PER", "count": 5}, {"name": "князь Андрей", "etype": "PER", "count": 3},
                                {"name": "Пьер", "etype": "PER", "count": 9}])
     assert hints == [["Андрей", "князь Андрей"]]
-    assert "Объединить отмеченные" in client.get(base).text
+    assert "Объединить</button>" in client.get(base).text
 
 
 def test_geo_kind_and_countries(client, data):
