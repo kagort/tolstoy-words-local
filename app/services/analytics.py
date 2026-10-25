@@ -334,7 +334,7 @@ def word_profile(session: Session, entry_id: int, text_ids: list[int], scopes=DE
             .group_by(TokenRow.lemma_norm)
         ).all())
     relations = {}
-    order = ["attribute", "predicate", "governor", "subject_of_pred", "adverbial", "conj", "case"]
+    order = ["attribute", "head", "subject", "object", "predicate", "governor", "subject_of_pred", "adverbial", "conj", "case"]
     for rt in sorted(grouped, key=lambda k: order.index(k) if k in order else 99):
         items = grouped[rt]
         for x in items:

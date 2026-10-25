@@ -224,6 +224,58 @@ def test_phase_verb_compound_predicate():
     assert lemmas(an, 1, "predicate") == {"начать", "усиливаться"}
 
 
+INS_SG_F = "Case=Ins|Gender=Fem|Number=Sing"
+INS_PL = "Case=Ins|Number=Plur"
+DEMIAN = sentence_from_rows([  # Гессе, «Демиан»: разбор Stanza
+    ("Пахнет", "пахнуть", "VERB", "Number=Sing|Person=3|Tense=Pres|VerbForm=Fin", 0, "root"),
+    ("теплой", "тёплый", "ADJ", INS_SG_F, 3, "amod"),
+    ("теснотой", "теснота", "NOUN", INS_SG_F, 1, "iobj"),
+    (",", ",", "PUNCT", "", 5, "punct"),
+    ("кроликами", "кролик", "NOUN", INS_PL, 3, "conj"),
+    ("и", "и", "CCONJ", "", 7, "cc"),
+    ("служанками", "служанка", "NOUN", INS_PL, 3, "conj"),
+    (",", ",", "PUNCT", "", 10, "punct"),
+    ("домашними", "домашний", "ADJ", INS_PL, 10, "amod"),
+    ("снадобьями", "снадобье", "NOUN", INS_PL, 3, "conj"),
+    ("и", "и", "CCONJ", "", 13, "cc"),
+    ("сушеными", "сушёный", "ADJ", INS_PL, 13, "amod"),
+    ("фруктами", "фрукт", "NOUN", INS_PL, 3, "conj"),
+    (".", ".", "PUNCT", "", 1, "punct"),
+])
+
+
+def test_verb_profile_has_all_dependents():
+    """У глагола в профиле — все зависимые, а не только однородные сказуемые."""
+    an = SentenceAnalysis(DEMIAN)
+    assert rels(an, 1, "object") == {("теснота", "direct"), ("кролик", "shared"), ("служанка", "shared"),
+                                     ("снадобье", "shared"), ("фрукт", "shared")}
+    assert lemmas(an, 2, "head") == {"теснота"}
+    assert lemmas(an, 9, "head") == {"снадобье"}  # внутри ряда — только своё слово
+    assert lemmas(an, 13, "governor") == {"пахнуть"}
+    assert lemmas(an, 10, "attribute") == {"домашний"}
+    # «теплой» (ед. ч.) не согласуется с «кроликами» (мн. ч.) — не общее определение ряда
+    assert lemmas(an, 3, "attribute") == {"тёплый"}
+    assert not lemmas(an, 5, "attribute")
+
+
+def test_verb_subject_adverbials_and_shared_head():
+    s = sentence_from_rows([
+        ("Ночью", "ночь", "NOUN", "Case=Ins|Gender=Fem|Number=Sing", 4, "obl"),
+        ("сильно", "сильно", "ADV", "", 4, "advmod"),
+        ("не", "не", "PART", "", 4, "advmod"),
+        ("пахли", "пахнуть", "VERB", "Number=Plur|Tense=Past|VerbForm=Fin", 0, "root"),
+        ("белые", "белый", "ADJ", "Case=Nom|Number=Plur", 6, "amod"),
+        ("сирень", "сирень", "NOUN", "Case=Nom|Gender=Fem|Number=Sing", 4, "nsubj"),
+        ("и", "и", "CCONJ", "", 8, "cc"),
+        ("жасмин", "жасмин", "NOUN", M_SG_NOM, 6, "conj"),
+        (".", ".", "PUNCT", "", 4, "punct"),
+    ])
+    an = SentenceAnalysis(s)
+    assert rels(an, 4, "subject") == {("сирень", "direct"), ("жасмин", "shared")}
+    assert lemmas(an, 4, "adverbial") == {"ночь", "сильно"}  # частица «не» — не обстоятельство
+    assert lemmas(an, 5, "head") == {"сирень", "жасмин"}  # «белые» мн. ч. — общее определение ряда
+
+
 def test_sanitize_tree_fixes_cycles_and_roots():
     words = [
         Parsed("запах", "запах", "NOUN", head=1, deprel="conj"),  # петля

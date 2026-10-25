@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 from app.nlp.tree import Sentence, base_rel
 
-SYNTAX_VERSION = "1.0"
+SYNTAX_VERSION = "1.1"
 
 # ------------------------------------------------------------------ словари правил
 
@@ -56,8 +56,12 @@ PLACE_PREPS = {
 TIME_PREPS = {"до", "после", "через", "накануне", "спустя", "во время", "в течение"}
 CAUSE_PREPS = {"из-за", "благодаря", "вследствие", "ввиду", "от"}
 PURPOSE_PREPS = {"для", "ради"}
+# «ночью», «зимой»: творительный без предлога — обстоятельство времени, а не дополнение
+TIME_NOUNS = {"утро", "день", "вечер", "ночь", "зима", "весна", "лето", "осень", "рассвет", "закат", "сумерки", "полдень", "полночь"}
 
 ATTR_RELS = {"amod", "det", "nmod", "acl", "nummod", "appos"}
+HEAD_RELS = {"amod", "det", "nmod", "acl", "nummod"}  # определение → определяемое слово
+DEP_RELS = {"obj", "iobj", "obl", "advmod", "advcl"}  # зависимые глагола: дополнения и обстоятельства
 SUBJ_RELS = {"nsubj", "csubj"}
 OBJ_RELS = {"obj", "iobj"}
 SKIP_DEP_RELS = {"conj", "cc", "punct", "orphan", "fixed", "flat", "goeswith", "reparandum", "dep"}
@@ -89,6 +93,9 @@ ROLE_UD = {
 
 REL_UD = {
     "attribute": "amod, nmod, acl",
+    "head": "голова amod / nmod / acl",
+    "subject": "nsubj, csubj",
+    "object": "obj, iobj, obl",
     "predicate": "голова nsubj; cop, xcomp",
     "governor": "голова obj / iobj / obl",
     "subject_of_pred": "nsubj",
@@ -112,6 +119,9 @@ def rel_label_ud(rel_type: str) -> str:
 
 REL_LABELS = {
     "attribute": "определения",
+    "head": "определяемое слово",
+    "subject": "подлежащее при сказуемом",
+    "object": "дополнения при глаголе",
     "predicate": "сказуемое при подлежащем",
     "governor": "управляющее слово",
     "subject_of_pred": "субъект действия",
@@ -303,6 +313,13 @@ class SentenceAnalysis:
         if drel in ("amod", "det"):
             if td.feat("Number") == "Plur" and tm.feat("Number") == "Sing" and tx.feat("Number") == "Sing":
                 return "shared", "agreement", 0.95
+            # не согласуется с членом x: «тёплой теснотой, кроликами» — «тёплой» не относится к «кроликами»
+            dc, xc = td.feat("Case"), tx.feat("Case")
+            if (dc and xc and dc != xc) or (td.feat("Number") == "Sing" and tx.feat("Number") == "Plur"):
+                return "private", "agreement", 0.9
+            dg, xg = td.feat("Gender"), tx.feat("Gender")
+            if td.feat("Number") == "Sing" and tx.feat("Number") == "Sing" and dg and xg and dg != xg:
+                return "private", "agreement", 0.9
         if drel == "nsubj" and tx.upos in ("VERB", "AUX", "ADJ"):
             ok = self._agrees(d, x)
             if ok is False:
@@ -420,6 +437,8 @@ class SentenceAnalysis:
         case = self.t(i).feat("Case") or ""
         detail = self.case_detail(i)
         if not prep:
+            if case == "Ins" and self.lemma(i) in TIME_NOUNS:
+                return Role("adverbial", "времени", detail)
             if case in ("Ins", "Dat", "Gen", "Acc"):
                 return Role("object", "косвенное", detail)
             return Role("adverbial", "", detail)
@@ -473,6 +492,20 @@ class SentenceAnalysis:
                     detail = r
                 add("attribute", "down", d, detail=detail.strip(), path=full, source=src, scope=scope, rule=rule, confidence=conf)
 
+        # 1б. определяемое слово (для определения): «тёплой теснотой» → «теснота»
+        if role.role == "attribute" and base_rel(s.tok(h).deprel) in HEAD_RELS and s.tok(h).head:
+            H = s.tok(h).head
+            add("head", "up", H, detail=role.subtype, path=s.tok(h).deprel, source="enhanced" if via else "basic",
+                scope="shared" if via else "direct", rule="conj_inherit" if via else "")
+            gh = self.group_of(H)
+            if gh:  # общее определение однородного ряда: «домашними снадобьями и фруктами»
+                for Q in gh.members:
+                    if Q == H:
+                        continue
+                    scope, rule, conf = self.decide_scope(h, H, Q)
+                    if scope in ("shared", "uncertain"):
+                        add("head", "up", Q, detail=role.subtype, path="conj", source="enhanced", scope=scope, rule=rule, confidence=conf)
+
         # 2. сказуемое при подлежащем
         if role.role == "subject":
             P = s.tok(h).head
@@ -521,6 +554,10 @@ class SentenceAnalysis:
                 if r in ("advmod", "advcl") or (r == "obl" and self.role(d).role == "adverbial"):
                     add("adverbial", "up", d, detail=self.role(d).subtype + (" " + self.case_detail(d) if r == "obl" else ""), path=r)
 
+        # 5б. зависимые глагола / сказуемого: подлежащее, дополнения, обстоятельства
+        if T.upos in ("VERB", "AUX") or role.role == "predicate":
+            self._add_dependents(i, add)
+
         # 6. однородные члены
         if g:
             for m in g.members:
@@ -538,6 +575,41 @@ class SentenceAnalysis:
                 if r.rel_type != "conj":
                     r.negated = True
         return out
+
+    def _add_dependents(self, i: int, add) -> None:
+        """«Пахнет тёплой теснотой, кроликами…» → подлежащее, дополнения (с однородными членами), обстоятельства."""
+        s = self.s
+        subj = self._find_subject(i)
+        if subj:
+            S, rule = subj
+            inherited = rule in ("conj_inherit", "control", "gerund")
+            add("subject", "down", S, path="nsubj", source="enhanced" if rule else "basic",
+                scope="shared" if inherited else "direct", rule=rule)
+            self._add_members(S, "subject", "", "nsubj>conj", "direct", add)
+        for d, scope, rule, conf, src in self.deps_for(i, DEP_RELS):
+            td = s.tok(d)
+            if td.upos == "PART" or td.lemma.lower() in RELATIVE_PRON:
+                continue
+            drole = self.role(d)
+            if drole.role == "object":
+                rt, detail = "object", f"{drole.subtype} {self.case_detail(d)}".strip()
+            elif drole.role == "adverbial":
+                rt = "adverbial"
+                detail = (drole.subtype + (" " + self.case_detail(d) if self.rel(d) == "obl" else "")).strip()
+            else:
+                continue
+            add(rt, "down", d, detail=detail, path=td.deprel, source=src, scope=scope, rule=rule, confidence=conf)
+            self._add_members(d, rt, detail, td.deprel + ">conj", scope, add)
+
+    def _add_members(self, d: int, rt: str, detail: str, path: str, scope: str, add) -> None:
+        """Остальные члены однородного ряда, вершина которого d: «теснотой, кроликами и служанками»."""
+        g = self.group_of(d)
+        if not g or g.head != d:
+            return
+        for m in g.members:
+            if m != d:
+                add(rt, "down", m, detail=detail, path=path, source="enhanced",
+                    scope="shared" if scope == "direct" else scope, rule="conj_expand", negated=m in g.negated)
 
     def _add_predicate(self, out, P, i, via, add) -> None:
         s = self.s

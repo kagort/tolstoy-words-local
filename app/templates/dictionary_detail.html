@@ -67,6 +67,7 @@
       <div class="word-grid" style="max-height:140px">{% for c in all_corpora %}<label class="check-item"><input type="checkbox" name="scope_corpus_ids" value="{{ c.id }}" {{ 'checked' if c.id in scope }}> {{ c.name }}</label>{% endfor %}</div>
       <p><button type="submit">Сохранить и пересчитать</button></p>
     </form>
+    {% if stale and not pending %}<p class="flash info">Вхождения ({{ stale }}) найдены прежней версией синтаксического разбора: в профиле слова не хватает связей (у глаголов — подлежащих, дополнений и обстоятельств, у прилагательных — определяемых слов). Нажмите «Пересчитать вхождения».</p>{% endif %}
     <p class="row">
       <form class="inline shrink" method="post" action="/dictionaries/{{ d.id }}/rematch"><button class="secondary" type="submit">Пересчитать вхождения</button></form>
       <a class="btn secondary shrink" href="/export/dictionary/{{ d.id }}.csv">Скачать словарь (CSV)</a>

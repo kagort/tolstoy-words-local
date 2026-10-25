@@ -15,7 +15,7 @@ from app.config import settings
 from app.db import get_session
 from app.models import Corpus, Dictionary, DictionaryEntry, Entity, Hit, Job, SentenceRow, TextDoc, TokenRelation, TokenRow
 from app.nlp.normalize import normalize_text
-from app.nlp.syntax import SentenceAnalysis
+from app.nlp.syntax import SYNTAX_VERSION, SentenceAnalysis
 from app.services import analytics as A
 from app.services.dictionaries import (
     DEFAULT_SETTINGS,
@@ -404,7 +404,9 @@ def dictionary_detail(request: Request, dict_id: int, db: Session = Depends(get_
                                                                          Hit.is_valid.is_(None)).group_by(Hit.entry_id)).all())
     opt_counts = {e.id: option_counts(db, e) for e in d.entries if e.ambiguous or not e.verified}
     pending = db.scalar(select(func.count()).select_from(Job).where(Job.status.in_(["queued", "running"]), Job.kind == "match")) or 0
-    return render(request, "dictionary_detail.html", d=d, hits=hits, in_names=in_names, opt_counts=opt_counts, pending=pending,
+    # вхождения, найденные прежней версией синтаксического слоя: связи в профиле слова неполные до пересчёта
+    stale = db.scalar(select(func.count()).select_from(Hit).where(Hit.dictionary_id == dict_id, Hit.syntax_version != SYNTAX_VERSION)) or 0
+    return render(request, "dictionary_detail.html", d=d, hits=hits, in_names=in_names, opt_counts=opt_counts, pending=pending, stale=stale,
                   all_corpora=list(db.scalars(select(Corpus).order_by(Corpus.name))), scope=set(scope_corpora(d)),
                   names_ok=set((d.settings or {}).get("names_ok_entries", [])))
 
