@@ -323,8 +323,10 @@ def word_profile(session: Session, entry_id: int, text_ids: list[int], scopes=DE
     if not include_negated:
         rel_q = rel_q.where(TokenRelation.negated.is_(False))
     grouped = defaultdict(list)
+    stopped: Counter = Counter()  # сколько разных слов скрыто стоп-словами — показываем, чтобы связь не терялась молча
     for r in session.execute(rel_q):
         if stop and r.rel_type != "case" and norm(r.related_lemma) in stop:
+            stopped[r.rel_type] += 1
             continue
         grouped[r.rel_type].append({"lemma": r.related_lemma, "count": r.n, "texts": r.texts, "example": r.example})
     # частоты связанных лемм в корпусе для logDice
@@ -344,7 +346,7 @@ def word_profile(session: Session, entry_id: int, text_ids: list[int], scopes=DE
             x["logdice"] = round(log_dice(x["count"], total, fy.get(norm(x["lemma"]), x["count"])), 2) if rt != "case" else None
         items.sort(key=lambda x: (-x["count"], -(x["logdice"] or 0)))
         relations[rt] = {"label": rel_label_ud(rt), "items": items[:top], "distinct": len(items),
-                         "total": sum(x["count"] for x in items)}
+                         "total": sum(x["count"] for x in items), "stopped": stopped[rt]}
     return {
         "entry": entry,
         "total": total,

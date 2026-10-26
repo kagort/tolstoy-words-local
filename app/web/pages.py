@@ -1340,8 +1340,10 @@ def analysis(request: Request, db: Session = Depends(get_session)):
                 entry_id = freq[0]["entry_id"] if freq else ctx["entries"][0].id
             ctx["entry_id"] = entry_id
         if entry_id:
+            # все связанные слова: первые PROFILE_TOP видны сразу, остальные — под «ещё …» (раньше редкие отбрасывались молча)
             ctx["profile"] = A.word_profile(db, entry_id, text_ids, scopes=scopes, include_negated=bool(qp.get("negated")),
-                                            stop=sel.stopset)
+                                            stop=sel.stopset, top=10_000)
+            ctx["PROFILE_TOP"] = 25
             ctx["forms"] = A.forms_distribution(db, entry_id, text_ids)
     elif tab == "compare":
         corpus_b = _int(qp.get("corpus_b"))

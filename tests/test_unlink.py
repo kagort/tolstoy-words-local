@@ -102,3 +102,29 @@ def test_stale_hits_warning_in_analysis(client):
     assert "Идёт пересчёт вхождений" in client.get(base).text
     run_pending()
     assert "прежней версией синтаксического разбора" not in client.get(base).text
+
+
+def test_profile_shows_rare_relations_and_stopped(client, monkeypatch):
+    from app.db import SessionLocal
+    from app.models import Dictionary
+    from app.web import pages
+
+    with SessionLocal() as s:
+        d = s.query(Dictionary).filter_by(name="Пчёлы").one()
+        dict_id, entry_id = d.id, d.entries[0].id
+    base = f"/analysis?tab=profile&dictionary_id={dict_id}&corpus_id={client.corpus_id}&entry_id={entry_id}"
+    page = client.get(base).text
+    assert "жужжать" in page and "ещё " not in page
+    # блок длиннее порога: редкие связанные слова — под «ещё …», а не отбрасываются
+    orig = pages.A.word_profile
+
+    def fake(*a, **kw):
+        out = orig(*a, **kw)
+        block = out["relations"]["predicate"]
+        block["items"] = block["items"] + [{"lemma": f"слово{i}", "count": 1, "texts": 1, "example": None, "logdice": 0} for i in range(30)]
+        block["stopped"] = 2
+        return out
+
+    monkeypatch.setattr(pages.A, "word_profile", fake)
+    page = client.get(base).text
+    assert "слово29" in page and "<summary>ещё " in page and "Скрыто стоп-словами: 2" in page

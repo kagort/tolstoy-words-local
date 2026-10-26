@@ -324,13 +324,17 @@
   {% for rt, block in profile.relations.items() %}
   <div class="panel">
     <h3 style="margin-top:0">{{ block.label|capitalize }} <span class="muted small">— {{ block.total }} связей, {{ block.distinct }} разных слов</span></h3>
-    <table>
-      <tr><th>Слово</th><th class="num">Частота</th><th class="num">Текстов</th>{% if rt != 'case' %}<th class="num">logDice{{ term('logdice') }}</th>{% endif %}</tr>
-      {% for x in block['items'] %}
+    {% macro rel_rows(items, rt, sq, entry_id) %}{% for x in items %}
       <tr><td><a href="/analysis?tab=conc&{{ sq }}&entry_id={{ entry_id }}&rel_type={{ rt }}&related={{ x.lemma|urlencode }}">{{ x.lemma }}</a></td>
         <td class="num">{{ x.count }}</td><td class="num">{{ x.texts }}</td>{% if rt != 'case' %}<td class="num">{{ x.logdice }}</td>{% endif %}</tr>
-      {% endfor %}
+      {% endfor %}{% endmacro %}
+    <table>
+      <tr><th>Слово</th><th class="num">Частота</th><th class="num">Текстов</th>{% if rt != 'case' %}<th class="num">logDice{{ term('logdice') }}</th>{% endif %}</tr>
+      {{ rel_rows(block['items'][:PROFILE_TOP], rt, sq, entry_id) }}
     </table>
+    {% if block['items']|length > PROFILE_TOP %}<details class="small"><summary>ещё {{ block['items']|length - PROFILE_TOP }} {{ 'слово' if (block['items']|length - PROFILE_TOP) % 10 == 1 and (block['items']|length - PROFILE_TOP) % 100 != 11 else 'слов' }} (реже)</summary>
+      <table>{{ rel_rows(block['items'][PROFILE_TOP:], rt, sq, entry_id) }}</table></details>{% endif %}
+    {% if block.stopped %}<p class="help">Скрыто стоп-словами: {{ block.stopped }} (список — в панели выбора).</p>{% endif %}
   </div>
   {% endfor %}
 </div>
