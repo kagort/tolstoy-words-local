@@ -374,3 +374,76 @@ def test_stylometry_math_and_ai_features():
                      ("роль", "роль", "NOUN", {}), (".", ".", "PUNCT", {})]}]
     f = features(s)
     assert f["n_words"] == 7 and f["markers"] > 0 and f["commas"] > 0
+
+
+# ---------------------------------------------------------------- 1.2: ряды у всех связей, деепричастие ≠ личный глагол
+
+ACC_M = "Case=Acc|Gender=Masc|Number=Sing"
+PAST_N = "Gender=Neut|Number=Sing|Tense=Past|VerbForm=Fin"
+
+# «Всё, опять оживая, устремилось, поднялось навстречу ему и торжественно, до неба послало ему свой роскошный,
+# сладостный фимиам» — разбор Stanza у пользователя: «поднялось» и «послало» прикреплены к деепричастию «оживая»
+FIMIAM = sentence_from_rows([
+    ("Всё", "всё", "PRON", "Case=Nom|Gender=Neut|Number=Sing", 6, "nsubj"),     # 1
+    (",", ",", "PUNCT", "", 4, "punct"),                                          # 2
+    ("опять", "опять", "ADV", "", 4, "advmod"),                                   # 3
+    ("оживая", "оживать", "VERB", "Aspect=Imp|Tense=Pres|VerbForm=Conv", 6, "advcl"),  # 4
+    (",", ",", "PUNCT", "", 4, "punct"),                                          # 5
+    ("устремилось", "устремиться", "VERB", PAST_N, 0, "root"),                    # 6
+    (",", ",", "PUNCT", "", 8, "punct"),                                          # 7
+    ("поднялось", "подняться", "VERB", PAST_N, 4, "conj"),                        # 8
+    ("навстречу", "навстречу", "ADV", "", 8, "advmod"),                           # 9
+    ("ему", "он", "PRON", "Case=Dat|Gender=Masc|Number=Sing", 9, "iobj"),         # 10
+    ("и", "и", "CCONJ", "", 16, "cc"),                                            # 11
+    ("торжественно", "торжественно", "ADV", "", 9, "conj"),                       # 12
+    (",", ",", "PUNCT", "", 15, "punct"),                                         # 13
+    ("до", "до", "ADP", "", 15, "case"),                                          # 14
+    ("неба", "небо", "NOUN", "Case=Gen|Gender=Neut|Number=Sing", 16, "obl"),      # 15
+    ("послало", "послать", "VERB", PAST_N, 4, "conj"),                            # 16
+    ("ему", "он", "PRON", "Case=Dat|Gender=Masc|Number=Sing", 16, "iobj"),        # 17
+    ("свой", "свой", "DET", ACC_M, 22, "det"),                                    # 18
+    ("роскошный", "роскошный", "ADJ", ACC_M, 22, "amod"),                         # 19
+    (",", ",", "PUNCT", "", 21, "punct"),                                         # 20
+    ("сладостный", "сладостный", "ADJ", ACC_M, 19, "conj"),                       # 21
+    ("фимиам", "фимиам", "NOUN", ACC_M, 16, "obj"),                               # 22
+])
+
+
+def test_attribute_series_expanded():
+    an = SentenceAnalysis(FIMIAM)
+    assert rels(an, 22, "attribute") >= {("свой", "direct"), ("роскошный", "direct"), ("сладостный", "shared")}
+
+
+def test_finite_verb_not_homogeneous_with_converb():
+    an = SentenceAnalysis(FIMIAM)
+    groups = [sorted(g.members) for g in an.groups]
+    assert [6, 8, 16] in groups and not any(4 in g for g in groups)
+    for i in (6, 8, 16):
+        assert an.role(i).role == "predicate", i
+    assert an.role(4).role == "adverbial"
+    assert lemmas(an, 1, "predicate") == {"устремиться", "подняться", "послать"}
+    assert FIMIAM.tok(8).head == 4  # исходное дерево не меняется (страница предложения показывает разбор как есть)
+
+
+def test_subject_of_pred_series_expanded():
+    s = sentence_from_rows([
+        ("Мать", "мать", "NOUN", "Case=Nom|Gender=Fem|Number=Sing", 4, "nsubj"),
+        ("и", "и", "CCONJ", "", 3, "cc"),
+        ("отец", "отец", "NOUN", M_SG_NOM, 1, "conj"),
+        ("ели", "есть", "VERB", "Number=Plur|Tense=Past|VerbForm=Fin", 0, "root"),
+        ("суп", "суп", "NOUN", ACC_M, 4, "obj"),
+    ])
+    an = SentenceAnalysis(s)
+    assert lemmas(an, 5, "subject_of_pred") == {"мать", "отец"}
+
+
+def test_subject_adverbials_series_expanded():
+    s = sentence_from_rows([
+        ("Он", "он", "PRON", M_SG_NOM, 2, "nsubj"),
+        ("шёл", "идти", "VERB", PAST_M, 0, "root"),
+        ("быстро", "быстро", "ADV", "", 2, "advmod"),
+        ("и", "и", "CCONJ", "", 5, "cc"),
+        ("уверенно", "уверенно", "ADV", "", 3, "conj"),
+    ])
+    an = SentenceAnalysis(s)
+    assert lemmas(an, 1, "adverbial") == {"быстро", "уверенно"}
