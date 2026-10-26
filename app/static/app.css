@@ -222,3 +222,5 @@ tr.rel-off td { color: var(--muted); }
 tr.rel-off td:not(:last-child) { text-decoration: line-through; }
 .link-btn { background: none; border: 0; padding: 0; color: var(--muted); font: inherit; cursor: pointer; }
 .link-btn:hover { color: var(--err); }
+.kw-size .link-btn { font-size: inherit; text-decoration: underline dotted; }
+.kw-size .link-btn.on { color: var(--text); font-weight: 600; text-decoration: none; }
