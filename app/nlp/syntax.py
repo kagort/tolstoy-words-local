@@ -12,11 +12,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from app.nlp.tree import Sentence, base_rel
 
-SYNTAX_VERSION = "1.1"
+SYNTAX_VERSION = "1.2"  # 1.2: ряды раскрываются у всех связей; личный глагол не однороден деепричастию
 
 # ------------------------------------------------------------------ словари правил
 
@@ -181,8 +181,47 @@ class Role:
 # ------------------------------------------------------------------ анализ предложения
 
 
+# связи, для которых ряд связанного слова раскрывается с проверкой decide_scope (сказуемое, управляющее и определяемое
+# слово); у остальных — общим правилом _expand_series, раскрывать не нужно — у однородных членов и предлогов
+CHECKED_EXPANSION = {"predicate", "governor", "head"}
+NO_EXPANSION = {"conj", "case"}
+
+
+def _is_converb(t) -> bool:
+    return t.feat("VerbForm") == "Conv"
+
+
+def _is_finite_verb(t) -> bool:
+    return t.upos in ("VERB", "AUX") and (t.feat("VerbForm") == "Fin" or (not t.feat("VerbForm") and bool(t.feat("Tense") or t.feat("Mood"))))
+
+
+def repair_tree(sent: Sentence) -> Sentence:
+    """Исправление типичных ошибок разбора до анализа (само дерево в базе и на странице не меняется).
+
+    Личный глагол не бывает однородным деепричастию: «всё, опять оживая, устремилось, поднялось… и… послало» —
+    если «поднялось» и «послало» прикреплены через conj к «оживая», они переносятся в ряд сказуемого, которому
+    подчинено деепричастие («устремилось»).
+    """
+    moves = {}
+    for t in sent.tokens:
+        if t.deprel != "conj" or not t.head or not _is_finite_verb(t):
+            continue
+        h = sent.tok(t.head)
+        if not _is_converb(h) or base_rel(h.deprel) != "advcl" or not h.head:
+            continue
+        P = h.head
+        while P and sent.tok(P).deprel == "conj" and sent.tok(P).head:  # к вершине ряда сказуемых
+            P = sent.tok(P).head
+        if P and sent.tok(P).upos in ("VERB", "AUX", "ADJ", "NOUN", "PRON", "PROPN", "NUM"):
+            moves[t.idx] = P
+    if not moves:
+        return sent
+    return Sentence([replace(t, head=moves[t.idx]) if t.idx in moves else t for t in sent.tokens], sent.text)
+
+
 class SentenceAnalysis:
     def __init__(self, sent: Sentence) -> None:
+        sent = repair_tree(sent)
         self.s = sent
         self.groups = self._build_groups()
         self.group_by_member: dict[int, CoordGroup] = {}
@@ -570,11 +609,34 @@ class SentenceAnalysis:
         if preps:
             out.append(Relation("case", "down", preps[0], cd, s.tok(preps[0]).upos, detail=cd, path="case"))
 
+        self._expand_series(i, out)
         if g and i in g.negated:
             for r in out:
                 if r.rel_type != "conj":
                     r.negated = True
         return out
+
+    def _expand_series(self, i: int, out: list[Relation]) -> None:
+        """Общее правило: если связанное слово — вершина однородного ряда, связь получают и остальные члены ряда.
+        «роскошный, сладостный фимиам» → у «фимиам» определения «роскошный» и «сладостный»; «Мать и отец ели суп» →
+        у «суп» субъект действия «мать» и «отец»; «шёл быстро и уверенно» → у подлежащего оба обстоятельства."""
+        own = self.group_of(i)
+        have = {(r.rel_type, r.related_idx) for r in out}
+        for r in list(out):
+            if r.rel_type in NO_EXPANSION or r.rel_type in CHECKED_EXPANSION:
+                continue
+            g2 = self.group_of(r.related_idx)
+            if not g2 or g2.head != r.related_idx or g2 is own:
+                continue
+            for m in g2.members:
+                if m == r.related_idx or m == i or (r.rel_type, m) in have:
+                    continue
+                tm = self.s.tok(m)
+                out.append(Relation(r.rel_type, r.direction, m, tm.lemma.lower(), tm.upos, detail=r.detail,
+                                    path=(r.path + ">conj")[:64], source="enhanced",
+                                    scope="shared" if r.scope == "direct" else r.scope, rule="conj_expand",
+                                    confidence=r.confidence, negated=m in g2.negated))
+                have.add((r.rel_type, m))
 
     def _add_dependents(self, i: int, add) -> None:
         """«Пахнет тёплой теснотой, кроликами…» → подлежащее, дополнения (с однородными членами), обстоятельства."""
@@ -585,7 +647,6 @@ class SentenceAnalysis:
             inherited = rule in ("conj_inherit", "control", "gerund")
             add("subject", "down", S, path="nsubj", source="enhanced" if rule else "basic",
                 scope="shared" if inherited else "direct", rule=rule)
-            self._add_members(S, "subject", "", "nsubj>conj", "direct", add)
         for d, scope, rule, conf, src in self.deps_for(i, DEP_RELS):
             td = s.tok(d)
             if td.upos == "PART" or td.lemma.lower() in RELATIVE_PRON:
@@ -599,17 +660,6 @@ class SentenceAnalysis:
             else:
                 continue
             add(rt, "down", d, detail=detail, path=td.deprel, source=src, scope=scope, rule=rule, confidence=conf)
-            self._add_members(d, rt, detail, td.deprel + ">conj", scope, add)
-
-    def _add_members(self, d: int, rt: str, detail: str, path: str, scope: str, add) -> None:
-        """Остальные члены однородного ряда, вершина которого d: «теснотой, кроликами и служанками»."""
-        g = self.group_of(d)
-        if not g or g.head != d:
-            return
-        for m in g.members:
-            if m != d:
-                add(rt, "down", m, detail=detail, path=path, source="enhanced",
-                    scope="shared" if scope == "direct" else scope, rule="conj_expand", negated=m in g.negated)
 
     def _add_predicate(self, out, P, i, via, add) -> None:
         s = self.s
