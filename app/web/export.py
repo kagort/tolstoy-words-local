@@ -115,16 +115,24 @@ def export_frequency(fmt: str, request: Request, db: Session = Depends(get_sessi
     df = pd.DataFrame(f["rows"]).rename(columns={"share": "Доля среди слов таблицы, %",
         "word": "Слово", "lemma": "Лемма", "upos": "Часть речи", "category": "Категория", "count": "Вхождений",
         "ipm": "ipm", "sentences": "Предложений", "texts": "Текстов", "dp": "DP (неравномерность)"}).drop(columns=["entry_id"], errors="ignore")
+    from app.services.dictionaries import no_categories
+
+    if no_categories(db.get(Dictionary, dict_id)):
+        df = df.drop(columns=["Категория"], errors="ignore")
     heat = A.frequency_by_text(db, dict_id, ids, top=200, entry_ids=words, by=_selection(db, request).unit or "word")
     df_heat = pd.DataFrame(heat["z"], index=heat["words"], columns=heat["texts_full"]).reset_index().rename(columns={"index": "Слово (ipm по текстам)"}) if heat["words"] else pd.DataFrame()
     frames = {"Частоты": df, "По текстам (ipm)": df_heat}
-    cats = A.category_frequency(db, dict_id, ids, entry_ids=words, dim=request.query_params.get("cat_dim") or "author")
-    if cats["has_categories"]:
+    from app.services.dictionaries import no_categories
+
+    cats = None if no_categories(db.get(Dictionary, dict_id)) else A.category_frequency(
+        db, dict_id, ids, entry_ids=words, dim=request.query_params.get("cat_dim") or "author")
+    if cats and cats["has_categories"]:
         frames["По категориям"] = pd.DataFrame([
             {"Категория": r["category"], "Слов в категории": r["entries"], "Вхождений": r["count"], "ipm": r["ipm"], "Доля, %": r["share"],
              **{f"ipm: {g['full']}": v for g, v in zip(cats["groups"], r["groups_ipm"])}} for r in cats["rows"]])
-    params = _params(db, request) | {"Слов в корпусе": f["corpus_words"], "Текстов": f["n_texts"],
-                                     "Категории по группировке": cats["dim_label"]}
+    params = _params(db, request) | {"Слов в корпусе": f["corpus_words"], "Текстов": f["n_texts"]}
+    if cats and cats["has_categories"]:
+        params["Категории по группировке"] = cats["dim_label"]
     return _send(frames, fmt, "frequency", params)
 
 
@@ -239,8 +247,11 @@ def export_report(fmt: str, request: Request, db: Session = Depends(get_session)
 
     dict_id, ids = _ctx(db, request)
     rep = _report_context(db, request, dict_id, _selection(db, request))["rep"]
+    from app.services.dictionaries import no_categories
+
+    flat = no_categories(db.get(Dictionary, dict_id))
     frames = {"Слова": pd.DataFrame([{
-        "Слово": c["word"], "Лемма": c["lemma"], "Категория": c["category"], "Вхождений": c["count"], "ipm": c["ipm"],
+        "Слово": c["word"], "Лемма": c["lemma"], **({} if flat else {"Категория": c["category"]}), "Вхождений": c["count"], "ipm": c["ipm"],
         "Предложений": c["sentences"], "Текстов": c["texts"], "DP": c["dp"], "Главная роль": c["top_role"],
         "Доля главной роли, %": c["top_role_pct"]} for c in rep["cards"]])}
     for dim, ov in rep["overviews"].items():
@@ -526,7 +537,10 @@ def export_dictionary(dict_id: int, db: Session = Depends(get_session)):
     if d is None:
         raise HTTPException(404)
     entries = list(db.scalars(select(DictionaryEntry).where(DictionaryEntry.dictionary_id == dict_id).order_by(DictionaryEntry.id)))
-    df = pd.DataFrame([{"слово": e.surface, "категория": e.category or "", "часть речи": e.upos or "",
+    from app.services.dictionaries import no_categories
+
+    flat = no_categories(d)  # словарь «без категорий» выгружается простым списком слов (без колонки «категория»)
+    df = pd.DataFrame([{"слово": e.surface, **({} if flat else {"категория": e.category or ""}), "часть речи": e.upos or "",
                         "комментарий": e.comment or "", "лемма": e.lemma, "режим": e.match_mode} for e in entries])
     return Response(df.to_csv(index=False, sep=";").encode("utf-8-sig"), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="dictionary-{dict_id}.csv"'})

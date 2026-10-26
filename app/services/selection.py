@@ -128,6 +128,12 @@ def from_params(session: Session, qp, corpus_key: str = "corpus_id") -> Selectio
         noprop=bool(get("noprop")),
         unit="cat" if get("unit") == "cat" else "",
     )
+    if sel.unit and str(get("dictionary_id") or "").isdigit():
+        from app.models import Dictionary
+        from app.services.dictionaries import no_categories
+
+        if no_categories(session.get(Dictionary, int(get("dictionary_id")))):
+            sel.unit = ""  # словарь «без категорий»: графики только по словам
     from app.services.stopwords import resolve
 
     sel.stopset = resolve(session, sel.stop)

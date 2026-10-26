@@ -77,8 +77,12 @@ def text_map(session: Session, text_id: int, dictionary_id: int, entry_ids: list
     all_counts = [sum(per_entry[e][k] for e in per_entry) for k in range(segments)]
     summary = [row("все слова словаря", all_counts, "all")]
     cats = defaultdict(lambda: [0] * segments)
+    from app.models import Dictionary
+    from app.services.dictionaries import no_categories
+
+    flat = no_categories(session.get(Dictionary, dictionary_id))  # словарь «без категорий» — без строк категорий
     for e, counts in per_entry.items():
-        if entries[e].category:
+        if entries[e].category and not flat:
             for k in range(segments):
                 cats[entries[e].category][k] += counts[k]
     summary += [row(f"категория «{c}»", v, "category") for c, v in sorted(cats.items())]

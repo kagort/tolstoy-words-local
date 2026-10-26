@@ -24,9 +24,9 @@
     {% if tab != 'compare' %}<div>{{ corpus_select() }}</div>{% endif %}
     <div><label title="скрывают служебные слова в связях профиля и отчёта; данные не удаляются">Стоп-слова{{ term('stopwords') }} <a href="/stopwords" class="small">(списки)</a></label>
       <select name="stop">{% for o in stop_options %}<option value="{{ o.value }}" {{ 'selected' if o.value == sel.stop }}>{{ o.label }}</option>{% endfor %}</select></div>
-    <div class="shrink sel-opts"><label>Графики{{ term('unit') }}</label>
+    {% if not no_cats %}<div class="shrink sel-opts"><label>Графики{{ term('unit') }}</label>
       <select name="unit" title="строки графиков обзора, тепловых карт и карты текста — слова или суммы по категориям словаря">
-        <option value="" {{ 'selected' if not sel.unit }}>по словам</option><option value="cat" {{ 'selected' if sel.unit == 'cat' }}>по категориям</option></select></div>
+        <option value="" {{ 'selected' if not sel.unit }}>по словам</option><option value="cat" {{ 'selected' if sel.unit == 'cat' }}>по категориям</option></select></div>{% endif %}
     <div class="shrink sel-opts"><label>Имена собственные{{ term('noprop') }}</label>
       <label class="check" title="убирает имена людей, мест и организаций из ключевых слов, TF-IDF, тем, семантики, коллокаций и стилометрии (данные не удаляются){{ '; сейчас исключено лемм: ' ~ sel.names|length if sel.noprop }}"><input type="checkbox" name="noprop" value="1" {{ 'checked' if sel.noprop }}> не учитывать</label></div>
     <div class="shrink"><button type="submit">Применить</button></div>
@@ -127,7 +127,7 @@
   <div class="shrink"><button type="submit" form="sel-form">Показать</button></div>
 </div>
 {% if ov.by == 'cat' %}<p class="help">Строки — категории словаря{{ ' выбранных слов' if sel.words else ' (самые частые; категория ФОРМУЛЫ пересекается с отдельными словами)' }}. Переключатель «Графики» — в панели выше.</p>
-{% elif not sel.words %}<p class="help">Показаны 5 самых частых слов. Другие слова — в блоке «Слова словаря» выше{% if entries|length > 50 %}; в словаре {{ entries|length }} слов — удобнее смотреть <a href="/analysis{{ qs(request, unit='cat') }}">по категориям</a>{% endif %}.</p>{% endif %}
+{% elif not sel.words %}<p class="help">Показаны 5 самых частых слов. Другие слова — в блоке «Слова словаря» выше{% if entries|length > 50 and not no_cats %}; в словаре {{ entries|length }} слов — удобнее смотреть <a href="/analysis{{ qs(request, unit='cat') }}">по категориям</a>{% endif %}.</p>{% endif %}
 {% if ov.hidden_groups %}<div class="flash info">Показаны {{ ov.groups|length - 1 }} групп с наибольшим числом вхождений, остальные {{ ov.hidden_groups }} — строкой «остальные».
   <a href="/analysis{{ qs(request, gtop='all') }}">Показать все группы</a>{% if ov.dim == 'text' %} · или <a href="/analysis{{ qs(request, dim='author', gtop=None) }}">сгруппировать по авторам</a>{% endif %}.</div>
 {% elif request.query_params.get('gtop') == 'all' and ov.groups|length > 30 %}<p class="help"><a href="/analysis{{ qs(request, gtop=None) }}">Свернуть до 30 групп</a></p>{% endif %}
@@ -203,12 +203,12 @@
 <div class="panel table-scroll">
   <table>
     <tr><th><input type="checkbox" title="отметить все" onchange="document.querySelectorAll('.freq-check').forEach(c => { c.checked = this.checked; syncWord(c); })"></th>
-      <th>Слово</th><th>Лемма</th><th>Категория</th><th class="num">Вхождений</th><th class="num">ipm{{ term('ipm') }}</th><th class="num">Предложений</th><th class="num">Текстов</th>
+      <th>Слово</th><th>Лемма</th>{% if not no_cats %}<th>Категория</th>{% endif %}<th class="num">Вхождений</th><th class="num">ipm{{ term('ipm') }}</th><th class="num">Предложений</th><th class="num">Текстов</th>
       <th class="num" title="какую часть всех вхождений слов этой таблицы составляет слово">Доля, %{{ term('share') }}</th>
       <th class="num" title="Мера неравномерности Грайса: 0 — равномерно по текстам, ближе к 1 — сосредоточено в немногих">DP{{ term('dp') }}</th><th>Перейти</th><th>Все предложения со словом</th></tr>
     {% for r in freq.rows %}
     <tr><td><input type="checkbox" class="freq-check" value="{{ r.entry_id }}" {{ 'checked' if r.entry_id in sel.words }} onchange="syncWord(this)"></td>
-      <td><strong>{{ r.word }}</strong></td><td>{{ r.lemma }} <span class="muted small">{{ pos_label(r.upos) }}</span></td><td>{{ r.category }}</td>
+      <td><strong>{{ r.word }}</strong></td><td>{{ r.lemma }} <span class="muted small">{{ pos_label(r.upos) }}</span></td>{% if not no_cats %}<td>{{ r.category }}</td>{% endif %}
       <td class="num">{{ r.count }}</td><td class="num">{{ r.ipm }}</td><td class="num">{{ r.sentences }}</td><td class="num">{{ r.texts }}</td>
       <td class="num">{{ r.share }}</td>
       <td class="num">{{ r.dp if r.dp is not none else '' }}</td>
