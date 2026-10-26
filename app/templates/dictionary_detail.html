@@ -22,13 +22,16 @@
 {% if pending %}<div class="flash info">Идёт пересчёт вхождений (задач в очереди: {{ pending }}). Числа обновятся после завершения — см. <a href="/jobs">Задачи</a>.</div>{% endif %}
 
 <div class="panel table-scroll">
-  <h2 style="margin-top:0">Слова и их разбор</h2>
+  <div class="row" style="align-items:baseline">
+    <h2 style="margin-top:0">Слова и их разбор <span class="muted small">— {{ entries|length }}</span></h2>
+    <div class="shrink small">Порядок: {% for k, v in DICT_SORTS.items() %}{% if k == sort %}<strong>{{ v }}</strong>{% else %}<a href="/dictionaries/{{ d.id }}{{ '' if k == 'hits' else '?sort=' ~ k }}">{{ v }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+  </div>
   <p class="help">Система определяет лемму и часть речи по словарю pymorphy3. <strong>Подсвеченные</strong> слова неоднозначны — проверьте вариант
     (например, «духи» — это <em>духи</em> (парфюм) или <em>дух</em>?). В скобках — сколько токенов с такой леммой уже есть в базе.
     Режим «по формам» ищет перечисленные словоформы, а не лемму: полезно, если парсер лемматизирует слово иначе.</p>
   <table>
-    <tr><th>Слово</th><th>Разбор (лемма · часть речи)</th><th>Режим</th><th>Категория</th><th class="num">Вхождений</th><th></th></tr>
-    {% for e in d.entries %}
+    <tr><th>Слово</th><th>Разбор (лемма · часть речи)</th><th>Режим</th><th>Категория</th><th class="num">Вхождений{{ ' ↓' if sort == 'hits' }}</th><th></th></tr>
+    {% for e in entries %}
     <tr id="e{{ e.id }}" class="{{ 'ambiguous' if e.ambiguous and not e.verified }}">
       <td><form id="f{{ e.id }}" method="post" action="/dictionaries/{{ d.id }}/entries/{{ e.id }}"></form><strong>{{ e.surface }}</strong>{% if e.phrase %} <span class="badge" title="словосочетание: ищется по главному слову «{{ e.lemma }}», остальные слова проверяются рядом">словосочетание</span>{% endif %}{% if e.verified %} <span class="badge ready" title="проверено">✓</span>{% elif e.ambiguous %} <span class="badge warn">проверить</span>{% endif %}</td>
       <td>
@@ -49,7 +52,9 @@
           {% if e.id in names_ok %}<span class="muted" title="вхождения внутри имён собственных считаются">+ в именах</span>
           {% else %}<a class="muted" href="/analysis?tab=conc&dictionary_id={{ d.id }}&entry_id={{ e.id }}&names=1" title="вхождения внутри имён персонажей (например, «Любовь Андреевна» для слова «любовь») не считаются">{{ in_names[e.id] }} в именах</a>{% endif %}
           <form class="inline" method="post" action="/dictionaries/{{ d.id }}/entries/{{ e.id }}/names"><button class="small secondary" type="submit" title="{{ 'не считать вхождения внутри имён' if e.id in names_ok else 'считать и внутри имён (например, «Бог»)' }}">{{ '−' if e.id in names_ok else '+' }}</button></form></div>{% endif %}</td>
-      <td class="num"><button form="f{{ e.id }}" class="small" type="submit">Сохранить</button></td>
+      <td class="num nowrap"><button form="f{{ e.id }}" class="small" type="submit">Сохранить</button>
+        <button form="f{{ e.id }}" class="small danger" type="submit" formaction="/dictionaries/{{ d.id }}/entries/{{ e.id }}/delete"
+          title="удалить слово и его вхождения из словаря" onclick='return confirm({{ ("Удалить «" ~ e.surface ~ "» из словаря вместе с его вхождениями?")|tojson }})'>Удалить из словаря</button></td>
     </tr>
     {% endfor %}
   </table>

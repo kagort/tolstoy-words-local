@@ -144,3 +144,47 @@ def test_suggest_categories_in_flat_mode(client):
     with SessionLocal() as s:
         d = s.get(Dictionary, dict_id)
         assert {e.category for e in d.entries} == {"НОВАЯ"} and d.settings["no_categories"] is False
+
+
+@needs_db
+def test_delete_entry_button(client):
+    from app.db import SessionLocal
+    from app.models import Dictionary, Hit
+
+    with SessionLocal() as s:
+        d = s.query(Dictionary).filter_by(name="Ароматы").one()
+        dict_id = d.id
+        e = next(e for e in d.entries if e.surface == "аромат")
+        eid = e.id
+    page = client.get(f"/dictionaries/{dict_id}").text
+    assert f'formaction="/dictionaries/{dict_id}/entries/{eid}/delete"' in page and "Удалить из словаря" in page
+    r = client.post(f"/dictionaries/{dict_id}/entries/{eid}/delete", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith(f"/dictionaries/{dict_id}")
+    assert "удалено из словаря" in client.get(r.headers["location"]).text
+    with SessionLocal() as s:
+        assert all(x.surface != "аромат" for x in s.get(Dictionary, dict_id).entries)
+        assert s.query(Hit).filter_by(entry_id=eid).count() == 0
+
+
+@needs_db
+def test_dictionary_sorted_by_hits(client):
+    import re
+
+    from app.db import SessionLocal
+    from app.models import Dictionary
+    from app.web.pages import _entry_hits
+
+    client.post("/dictionaries", data={"name": "Порядок", "words": "запах, сад, благоухание"})
+    from app.services.jobs import run_pending
+
+    run_pending()
+    with SessionLocal() as s:
+        d = s.query(Dictionary).filter_by(name="Порядок").one()
+        hits = _entry_hits(s, d.id)
+        expected = [e.surface for e in sorted(d.entries, key=lambda e: (-hits.get(e.id, 0), e.surface))]
+        dict_id = d.id
+    page = client.get(f"/dictionaries/{dict_id}").text
+    shown = re.findall(r'<tr id="e\d+"[^>]*>\s*<td><form[^>]*></form><strong>([^<]+)</strong>', page)
+    assert shown == expected and hits  # «сад» (3 вхождения) выше «благоухания» (2) и «запаха» (1)
+    abc = re.findall(r'<tr id="e\d+"[^>]*>\s*<td><form[^>]*></form><strong>([^<]+)</strong>', client.get(f"/dictionaries/{dict_id}?sort=abc").text)
+    assert abc == sorted(expected)
