@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Дашборд{% endblock %}
-{% block head %}<script src="/static-vendor/plotly.min.js"></script>{% endblock %}
+{% block head %}<script src="/static-vendor/plotly.min.js"></script>{% if dash.v2 %}<script src="/static/dash_v2.js?v={{ asset_version }}"></script>{% endif %}{% endblock %}
 {% block content %}
 <div class="row no-print" style="margin-bottom:8px">
   <div class="shrink"><a href="/analysis?{{ selq }}">← к анализу этой выборки</a></div>
@@ -13,5 +13,5 @@
     · <a href="/export/dashboard.html?{{ selq }}&dictionary_id={{ dict_id }}&cdn=1" title="маленький файл; библиотека графиков загружается из интернета">HTML облегчённый</a>
     · <a href="#" onclick="window.print(); return false;">PDF (печать)</a></div>
 </div>
-{% include "_dashboard_body.html" %}
+{% include "_dashboard_v2_body.html" if dash.v2 else "_dashboard_body.html" %}
 {% endblock %}

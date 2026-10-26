@@ -33,7 +33,7 @@ from app.services.metadata import parse_years
 from app.services.jobs import enqueue
 from app.services.stopwords import options as stop_options
 from app.services.matching import load_sentences
-from app.web.deps import flash, render
+from app.web.deps import flash, render, ui_mode
 
 router = APIRouter()
 
@@ -1622,13 +1622,15 @@ def help_article(request: Request, slug: str):
 
 
 def _dashboard_data(db: Session, request: Request) -> tuple[dict, object, int | None, list]:
+    """Данные дашборда: в новом интерфейсе — дашборд v2 (services/dashboard_v2.py), в классическом — прежний."""
     from app.services.dashboard import build
+    from app.services.dashboard_v2 import build_v2
     from app.services.selection import from_params
 
     sel = from_params(db, request.query_params)
     dictionaries = list(db.scalars(select(Dictionary).order_by(Dictionary.id)))
     dict_id = _int(request.query_params.get("dictionary_id")) or (dictionaries[0].id if dictionaries else None)
-    return build(db, sel, dict_id), sel, dict_id, dictionaries
+    return (build_v2 if ui_mode(request) == "v2" else build)(db, sel, dict_id), sel, dict_id, dictionaries
 
 
 @router.get("/dashboard")

@@ -564,6 +564,17 @@ def export_geo(fmt: str, request: Request, db: Session = Depends(get_session)):
     return _send({"Места": df, "Страны": df_c}, fmt, "geo", _params(db, request) | {"Мест на карте": len(g["points"])})
 
 
+def _inline_fonts(static) -> str:
+    """fonts.css со шрифтами внутри (data: URI) — автономный файл выглядит так же, как приложение, и без интернета."""
+    import base64
+
+    def data_uri(m):
+        path = static / m.group(1).removeprefix("/static/")
+        return "url(data:font/woff2;base64," + base64.b64encode(path.read_bytes()).decode("ascii") + ")"
+
+    return re.sub(r"url\((/static/fonts/[^)]+\.woff2)\)", data_uri, (static / "fonts.css").read_text(encoding="utf-8"))
+
+
 @router.get("/dashboard.html")
 def export_dashboard(request: Request, db: Session = Depends(get_session)):
     """Дашборд одним HTML-файлом: стили, скрипты, библиотека графиков и контуры карты внутри — открывается без интернета.
@@ -581,8 +592,13 @@ def export_dashboard(request: Request, db: Session = Depends(get_session)):
     plotly_js = "" if cdn else (Path(plotly.__file__).parent / "package_data" / "plotly.min.js").read_text(encoding="utf-8")
     version = (Path(plotly.__file__).parent / "package_data" / "plotly.min.js").open(encoding="utf-8").read(200)
     m = re.search(r"plotly\.js v([\d.]+)", version)
-    html = templates.get_template("dashboard_standalone.html").render(
-        dash=dash, css=(static / "app.css").read_text(encoding="utf-8"), appjs=(static / "app.js").read_text(encoding="utf-8"),
+    css, appjs, fonts, tpl = (static / "app.css").read_text(encoding="utf-8"), (static / "app.js").read_text(encoding="utf-8"), "", "dashboard_standalone.html"
+    if dash.get("v2"):  # новый интерфейс: свои стили, шрифты (встроены в файл) и графики дашборда v2
+        css += "\n" + (static / "v2.css").read_text(encoding="utf-8")
+        appjs += "\n" + (static / "dash_v2.js").read_text(encoding="utf-8")
+        fonts, tpl = _inline_fonts(static), "dashboard_v2_standalone.html"
+    html = templates.get_template(tpl).render(
+        dash=dash, css=css, appjs=appjs, fonts=fonts, standalone=True,
         topojson=(static / "topojson" / "world_110m.json").read_text(encoding="utf-8"), plotly=plotly_js, cdn=cdn,
         plotly_version=m.group(1) if m else "", app_version=__version__)
     name = re.sub(r"[^\w\-]+", "_", dash["title"]).strip("_")[:60] or "dashboard"
