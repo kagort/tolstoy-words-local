@@ -67,7 +67,9 @@ def build(session: Session, sel, dictionary_id: int | None) -> dict:
     if d is not None and ids:
         freq = A.frequency(session, d.id, ids)
         rows = [r for r in freq["rows"] if r["count"]]
-        cats = A.category_frequency(session, d.id, ids, dim="author" if len(authors) > 1 else "text")
+        from app.services.dictionaries import no_categories
+
+        cats = None if no_categories(d) else A.category_frequency(session, d.id, ids, dim="author" if len(authors) > 1 else "text")
         top_ids = [r["entry_id"] for r in rows[:5]]
         dim = "text" if single or len(authors) <= 1 else "author"
         ov = A.overview(session, d.id, ids, top_ids, dim) if top_ids and not single else None
@@ -76,7 +78,7 @@ def build(session: Session, sel, dictionary_id: int | None) -> dict:
             "found": len(rows), "entries": len(freq["rows"]),
             "top": [{"word": r["word"], "count": r["count"], "ipm": r["ipm"]} for r in rows[:20]],
             "categories": [{"category": r["category"], "count": r["count"], "ipm": r["ipm"], "share": r["share"]}
-                           for r in cats["rows"] if r["count"]][:20] if cats["has_categories"] else [],
+                           for r in cats["rows"] if r["count"]][:20] if cats and cats["has_categories"] else [],
             "overview": ov,
         }
         if single:

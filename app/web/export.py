@@ -118,8 +118,11 @@ def export_frequency(fmt: str, request: Request, db: Session = Depends(get_sessi
     heat = A.frequency_by_text(db, dict_id, ids, top=200, entry_ids=words, by=_selection(db, request).unit or "word")
     df_heat = pd.DataFrame(heat["z"], index=heat["words"], columns=heat["texts_full"]).reset_index().rename(columns={"index": "Слово (ipm по текстам)"}) if heat["words"] else pd.DataFrame()
     frames = {"Частоты": df, "По текстам (ipm)": df_heat}
-    cats = A.category_frequency(db, dict_id, ids, entry_ids=words, dim=request.query_params.get("cat_dim") or "author")
-    if cats["has_categories"]:
+    from app.services.dictionaries import no_categories
+
+    cats = None if no_categories(db.get(Dictionary, dict_id)) else A.category_frequency(
+        db, dict_id, ids, entry_ids=words, dim=request.query_params.get("cat_dim") or "author")
+    if cats and cats["has_categories"]:
         frames["По категориям"] = pd.DataFrame([
             {"Категория": r["category"], "Слов в категории": r["entries"], "Вхождений": r["count"], "ipm": r["ipm"], "Доля, %": r["share"],
              **{f"ipm: {g['full']}": v for g, v in zip(cats["groups"], r["groups_ipm"])}} for r in cats["rows"]])

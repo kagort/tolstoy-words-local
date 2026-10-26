@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+import unicodedata
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -15,8 +16,29 @@ from app.nlp.normalize import decode_bytes
 from app.nlp.tree import norm
 from app.services.jobs import enqueue
 
-# count_names — считать слова словаря и внутри имён собственных («любовь» в «Любовь Андреевна»); по умолчанию нет
-DEFAULT_SETTINGS = {"include_participles": False, "include_gerunds": False, "merge_propn": True, "count_names": False}
+# count_names — считать слова словаря и внутри имён собственных («любовь» в «Любовь Андреевна»); по умолчанию нет;
+# no_categories — словарь без категорий: анализ показывает простой список слов (категории в записях сохраняются)
+DEFAULT_SETTINGS = {"include_participles": False, "include_gerunds": False, "merge_propn": True, "count_names": False,
+                    "no_categories": False}
+# невидимые символы и знаки ударения, которые попадают в словари из Word и сайтов: «благоуха́ния», «духи\u200b»
+_INVISIBLE = dict.fromkeys(map(ord, "\u0301\u0300\u00ad\u200b\u200c\u200d\u2060\ufeff"), None)
+
+
+def clean_surface(s: str) -> str:
+    """Написание слова словаря без невидимых символов, ударений и лишних пробелов."""
+    s = unicodedata.normalize("NFC", unicodedata.normalize("NFD", s or "").translate(_INVISIBLE))
+    return re.sub(r"\s+", " ", s.replace("\u00a0", " ")).strip()
+
+
+def entry_key(e: DictionaryEntry) -> tuple:
+    """Записи с одним ключом находят одни и те же слова текста: «благоухание» и «благоухания» — лемма «благоухание»."""
+    if e.phrase:
+        return ("phrase", norm(clean_surface(e.surface)))
+    return ("word", e.lemma_norm, e.upos or "", e.match_mode or "lemma")
+
+
+def no_categories(d: Dictionary | None) -> bool:
+    return bool(d is not None and (d.settings or {}).get("no_categories"))
 
 HEADER_WORDS = {"слово", "word", "лемма", "lemma", "токен", "token"}
 
@@ -74,7 +96,7 @@ def _rows_to_entries(rows: list[list[str]]) -> list[dict]:
 def make_entry(item: dict) -> DictionaryEntry:
     from app.services import phrases as P
 
-    surface = item["surface"]
+    surface = clean_surface(item["surface"])
     phrase = None
     head_word = surface.split()[0] if surface else surface
     if P.is_phrase(surface):
@@ -109,10 +131,15 @@ def make_entry(item: dict) -> DictionaryEntry:
 
 
 def create_dictionary(session: Session, name: str, items: list[dict], description: str | None = None,
-                      settings: dict | None = None, enqueue_match: bool = True) -> Dictionary:
+                      settings: dict | None = None, enqueue_match: bool = True, skipped: list | None = None) -> Dictionary:
+    """skipped — сюда попадают повторы: написание, совпавшее с уже добавленным словом по лемме («благоухания»)."""
     d = Dictionary(name=name.strip(), description=description, settings={**DEFAULT_SETTINGS, **(settings or {})})
+    seen: dict[tuple, DictionaryEntry] = {}
     for it in items:
-        d.entries.append(make_entry(it))
+        e = make_entry(it)
+        if _merge_into(seen, e, skipped):
+            continue
+        d.entries.append(e)
     session.add(d)
     session.flush()
     if enqueue_match:
@@ -120,13 +147,35 @@ def create_dictionary(session: Session, name: str, items: list[dict], descriptio
     return d
 
 
-def add_entries(session: Session, d: Dictionary, items: list[dict]) -> list[DictionaryEntry]:
-    existing = {e.surface.lower() for e in d.entries}
+def _merge_into(seen: dict, e: DictionaryEntry, skipped: list | None) -> bool:
+    """True — запись повторяет уже добавленную (та же лемма): её форма дописывается в комментарий, запись не создаётся."""
+    k = entry_key(e)
+    first = seen.get(k)
+    if first is None:
+        seen[k] = e
+        return False
+    if e.surface.lower() != first.surface.lower():
+        _note_form(first, e.surface)
+    if first.category is None and e.category:
+        first.category = e.category
+    if skipped is not None:
+        skipped.append((e.surface, first.surface))
+    return True
+
+
+def _note_form(e: DictionaryEntry, form: str) -> None:
+    note = f"также: {form}"
+    if note not in (e.comment or ""):
+        e.comment = f"{e.comment}; {note}" if e.comment else note
+
+
+def add_entries(session: Session, d: Dictionary, items: list[dict], skipped: list | None = None) -> list[DictionaryEntry]:
+    seen = {entry_key(e): e for e in d.entries}
     new = []
     for it in items:
-        if it["surface"].lower() in existing:
-            continue
         e = make_entry(it)
+        if _merge_into(seen, e, skipped):
+            continue
         d.entries.append(e)
         new.append(e)
     session.flush()
@@ -210,3 +259,34 @@ def sync_scope(session: Session, text_ids: list[int]) -> int:
                     title=f"Словарь «{d.name}» × новые тексты области ({len(add)})")
             n += 1
     return n
+
+
+def duplicate_groups(d: Dictionary) -> list[list[DictionaryEntry]]:
+    """Группы записей словаря с одной леммой (повторы и словоформы одного слова)."""
+    groups: dict[tuple, list[DictionaryEntry]] = {}
+    for e in sorted(d.entries, key=lambda e: e.id or 0):
+        groups.setdefault(entry_key(e), []).append(e)
+    return [g for g in groups.values() if len(g) > 1]
+
+
+def merge_duplicates(session: Session, d: Dictionary) -> int:
+    """Оставляет в каждой группе повторов одну запись (проверенную ✓, иначе первую): формы — в комментарий, категория —
+    первая непустая. Вхождения удалённых записей совпадают с вхождениями оставшейся и удаляются вместе с ними."""
+    removed = 0
+    for g in duplicate_groups(d):
+        keep = next((e for e in g if e.verified), g[0])
+        for e in g:
+            if e is keep:
+                continue
+            if e.surface.lower() != keep.surface.lower():
+                _note_form(keep, e.surface)
+            if not keep.category and e.category:
+                keep.category = e.category
+            d.entries.remove(e)
+            session.delete(e)
+            removed += 1
+    if removed:
+        for e in d.entries:  # написание без невидимых символов
+            e.surface = clean_surface(e.surface)
+    session.flush()
+    return removed

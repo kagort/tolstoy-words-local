@@ -398,10 +398,13 @@ async def dictionary_create(request: Request, name: str = Form(...), description
     if db.scalar(select(Dictionary).where(Dictionary.name == name.strip())):
         flash(request, "Словарь с таким названием уже есть", "error")
         return redirect("/dictionaries")
+    skipped: list = []
     d = create_dictionary(db, name, items, description.strip() or None,
-                          {"include_participles": bool(include_participles), "include_gerunds": bool(include_gerunds)})
+                          {"include_participles": bool(include_participles), "include_gerunds": bool(include_gerunds)},
+                          skipped=skipped)
     db.commit()
-    flash(request, f"Словарь создан: {len(d.entries)} слов. Проверьте разборы неоднозначных слов (подсвечены).", "success")
+    flash(request, f"Словарь создан: {len(d.entries)} слов. Проверьте разборы неоднозначных слов (подсвечены)."
+          + _skipped_note(skipped), "success")
     return redirect(f"/dictionaries/{d.id}/cognates" if suggest else f"/dictionaries/{d.id}")
 
 
@@ -418,9 +421,13 @@ def dictionary_detail(request: Request, dict_id: int, db: Session = Depends(get_
     pending = db.scalar(select(func.count()).select_from(Job).where(Job.status.in_(["queued", "running"]), Job.kind == "match")) or 0
     # вхождения, найденные прежней версией синтаксического слоя: связи в профиле слова неполные до пересчёта
     stale = db.scalar(select(func.count()).select_from(Hit).where(Hit.dictionary_id == dict_id, Hit.syntax_version != SYNTAX_VERSION)) or 0
+    from app.services.dictionaries import duplicate_groups
+
     no_category = sum(1 for e in d.entries if not e.category)
+    dup_groups = duplicate_groups(d)
     return render(request, "dictionary_detail.html", d=d, hits=hits, in_names=in_names, opt_counts=opt_counts, pending=pending, stale=stale,
-                  no_category=no_category, has_categories=no_category < len(d.entries),
+                  no_category=no_category, has_categories=no_category < len(d.entries), dup_groups=dup_groups,
+                  no_cats=bool((d.settings or {}).get("no_categories")),
                   all_corpora=list(db.scalars(select(Corpus).order_by(Corpus.name))), scope=set(scope_corpora(d)),
                   names_ok=set((d.settings or {}).get("names_ok_entries", [])))
 
@@ -460,9 +467,33 @@ async def dictionary_add(request: Request, dict_id: int, words: str = Form(""), 
     items = parse_dictionary_text(words) if words.strip() else []
     if file is not None and file.filename:
         items += parse_dictionary_file(file.filename, await file.read())
-    new = add_entries(db, d, items)
+    skipped: list = []
+    new = add_entries(db, d, items, skipped=skipped)
     db.commit()
-    flash(request, f"Добавлено слов: {len(new)}", "success")
+    flash(request, f"Добавлено слов: {len(new)}." + _skipped_note(skipped), "success")
+    return redirect(f"/dictionaries/{dict_id}")
+
+
+def _skipped_note(skipped: list) -> str:
+    """Сообщение о пропущенных повторах: «благоухания» → «благоухание» (одна лемма — одна запись)."""
+    if not skipped:
+        return ""
+    sample = ", ".join(f"«{a}» → «{b}»" for a, b in skipped[:6])
+    return f" Повторы по лемме не добавлены ({len(skipped)}): {sample}{' …' if len(skipped) > 6 else ''}."
+
+
+@router.post("/dictionaries/{dict_id}/merge-duplicates")
+def dictionary_merge_duplicates(request: Request, dict_id: int, db: Session = Depends(get_session)):
+    """Объединить записи с одной леммой (повторы и словоформы одного слова)."""
+    from app.services.dictionaries import merge_duplicates
+
+    d = db.get(Dictionary, dict_id)
+    if d is None:
+        raise HTTPException(404)
+    n = merge_duplicates(db, d)
+    db.commit()
+    flash(request, f"Повторы объединены: удалено записей {n}; их формы записаны в комментарий оставшейся записи." if n
+          else "Повторов по лемме нет", "success")
     return redirect(f"/dictionaries/{dict_id}")
 
 
@@ -537,6 +568,7 @@ async def dictionary_categories_apply(request: Request, dict_id: int, db: Sessio
 def dictionary_settings(request: Request, dict_id: int, name: str = Form(...), description: str = Form(""),
                         include_participles: str | None = Form(None), include_gerunds: str | None = Form(None),
                         merge_propn: str | None = Form(None), count_names: str | None = Form(None),
+                        no_categories: str | None = Form(None),
                         scope_corpus_ids: list[str] = Form([]), db: Session = Depends(get_session)):
     from app.services.matching import flag_name_hits
 
@@ -546,7 +578,7 @@ def dictionary_settings(request: Request, dict_id: int, name: str = Form(...), d
     d.name, d.description = name.strip(), description.strip() or None
     old = dict(d.settings or {})
     new = {**old, "include_participles": bool(include_participles), "include_gerunds": bool(include_gerunds),
-           "merge_propn": bool(merge_propn), "count_names": bool(count_names),
+           "merge_propn": bool(merge_propn), "count_names": bool(count_names), "no_categories": bool(no_categories),
            "corpus_ids": sorted({int(c) for c in scope_corpus_ids if c.isdigit()})}
     d.settings = new
     match_keys = ("include_participles", "include_gerunds", "merge_propn", "corpus_ids")
@@ -731,12 +763,17 @@ def _analysis_context(db: Session, request: Request) -> dict:
         word_counts = {r["entry_id"]: r["count"] for r in A.frequency(db, dict_id, sel.ids)["rows"]}
     # в выпадающих списках и внутри категорий — сначала частые слова выборки, слова без вхождений — в конце
     entries.sort(key=lambda e: (-word_counts.get(e.id, 0), e.surface.lower()))
+    cur = next((d for d in dictionaries if d.id == dict_id), None)
+    from app.services.dictionaries import no_categories
+
+    no_cats = no_categories(cur)  # настройка словаря «Без категорий»: простой список слов, графики только по словам
+    if no_cats:
+        sel.unit = ""
     categories: dict[str, list] = {}
-    for e in sorted(entries, key=lambda e: e.category or ""):
-        categories.setdefault(e.category or "", []).append(e)
+    for e in sorted(entries, key=lambda e: "" if no_cats else (e.category or "")):
+        categories.setdefault("" if no_cats else (e.category or ""), []).append(e)
     # словарь только для выбранных корпусов, а в выборке есть другие тексты — предупреждаем
     scope_out = 0
-    cur = next((d for d in dictionaries if d.id == dict_id), None)
     if cur is not None:
         from app.services.dictionaries import scope_text_ids
 
@@ -746,7 +783,7 @@ def _analysis_context(db: Session, request: Request) -> dict:
     return dict(dictionaries=dictionaries, corpora=corpora, dict_id=dict_id, corpus_id=sel.corpus_id, entries=entries,
                 scope_out=scope_out,
                 corpus_name=sel.corpus_name, tab=qp.get("tab", "overview"), sel=sel, sel_texts=corpus_texts(db, sel),
-                facets=A.facets(db, sel.corpus_ids), word_counts=word_counts, categories=categories,
+                facets=A.facets(db, sel.corpus_ids), word_counts=word_counts, categories=categories, no_cats=no_cats,
                 n_texts=len(sel.ids), stop_options=stop_options(db))
 
 
@@ -1224,7 +1261,7 @@ def analysis(request: Request, db: Session = Depends(get_session)):
         ctx["freq"] = A.only_words(A.frequency(db, dict_id, text_ids), words)
         ctx["heat"] = A.frequency_by_text(db, dict_id, text_ids, entry_ids=words, by="cat" if sel.unit == "cat" else "word")
         ctx["freq_filtered"] = bool(words)
-        ctx["cats"] = A.category_frequency(db, dict_id, text_ids, entry_ids=words, dim=qp.get("cat_dim") or "author")
+        ctx["cats"] = None if ctx["no_cats"] else A.category_frequency(db, dict_id, text_ids, entry_ids=words, dim=qp.get("cat_dim") or "author")
         ctx["DIMENSIONS"] = A.DIMENSIONS
     elif tab == "conc":
         ctx["conc"] = A.concordance(
