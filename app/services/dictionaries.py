@@ -79,17 +79,27 @@ def parse_dictionary_text(content: str) -> list[dict]:
     return _rows_to_entries([[w] for w in words])
 
 
+# колонки файла словаря по заголовку (иначе — по порядку: слово; категория; часть речи; комментарий)
+COLUMN_NAMES = {"surface": {"слово", "word", "лемма", "lemma", "токен", "token"}, "category": {"категория", "category"},
+                "upos": {"часть речи", "pos", "upos"}, "comment": {"комментарий", "comment"}}
+
+
 def _rows_to_entries(rows: list[list[str]]) -> list[dict]:
+    cols = {"surface": 0, "category": 1, "upos": 2, "comment": 3}
     if rows and rows[0] and rows[0][0].strip().lower() in HEADER_WORDS:
+        head = [c.strip().lower() for c in rows[0]]
+        cols = {k: next((i for i, h in enumerate(head) if h in names), None) for k, names in COLUMN_NAMES.items()}
         rows = rows[1:]
     out, seen = [], set()
     for r in rows:
-        cells = [c.strip() for c in r] + ["", "", "", ""]
-        surface = cells[0]
+        cells = [c.strip() for c in r]
+        get = lambda k: cells[cols[k]] if cols[k] is not None and cols[k] < len(cells) else ""  # noqa: E731
+        surface = get("surface")
         if not surface or surface.lower() in seen:
             continue
         seen.add(surface.lower())
-        out.append({"surface": surface, "category": cells[1] or None, "upos": cells[2].upper() or None, "comment": cells[3] or None})
+        out.append({"surface": surface, "category": get("category") or None, "upos": get("upos").upper() or None,
+                    "comment": get("comment") or None})
     return out
 
 

@@ -107,5 +107,21 @@ def test_no_categories_setting(client):
     page = client.get(f"/analysis?tab=freq&{base}&unit=cat").text
     assert "По категориям словаря" not in page and 'name="unit"' not in page
     assert "Словарь без категорий" in client.get(f"/dictionaries/{dict_id}").text
+    assert "<th>Категория</th>" not in page
+    csv = client.get(f"/export/dictionary/{dict_id}.csv").content.decode("utf-8-sig")
+    assert csv.splitlines()[0] == "слово;часть речи;комментарий;лемма;режим"
+    import pandas as pd
+
+    freq = pd.read_excel(io.BytesIO(client.get(f"/export/frequency.xlsx?{base}").content), sheet_name=None)
+    assert "Категория" not in freq["Частоты"].columns and "По категориям" not in freq
     for tab in ("overview", "map", "report", "conc"):
         assert client.get(f"/analysis?tab={tab}&{base}&unit=cat").status_code == 200, tab
+
+
+def test_import_by_header_names():
+    from app.services.dictionaries import parse_dictionary_text
+
+    items = parse_dictionary_text("слово;часть речи;комментарий\nзапах;NOUN;главное\nаромат;;\n")
+    assert items[0] == {"surface": "запах", "category": None, "upos": "NOUN", "comment": "главное"}
+    items = parse_dictionary_text("запах;ЗАПАХИ;NOUN\nвонь;ЗАПАХИ;\n")  # без заголовка — по порядку колонок
+    assert items[0]["category"] == "ЗАПАХИ" and items[0]["upos"] == "NOUN"

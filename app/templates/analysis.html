@@ -203,12 +203,12 @@
 <div class="panel table-scroll">
   <table>
     <tr><th><input type="checkbox" title="отметить все" onchange="document.querySelectorAll('.freq-check').forEach(c => { c.checked = this.checked; syncWord(c); })"></th>
-      <th>Слово</th><th>Лемма</th><th>Категория</th><th class="num">Вхождений</th><th class="num">ipm{{ term('ipm') }}</th><th class="num">Предложений</th><th class="num">Текстов</th>
+      <th>Слово</th><th>Лемма</th>{% if not no_cats %}<th>Категория</th>{% endif %}<th class="num">Вхождений</th><th class="num">ipm{{ term('ipm') }}</th><th class="num">Предложений</th><th class="num">Текстов</th>
       <th class="num" title="какую часть всех вхождений слов этой таблицы составляет слово">Доля, %{{ term('share') }}</th>
       <th class="num" title="Мера неравномерности Грайса: 0 — равномерно по текстам, ближе к 1 — сосредоточено в немногих">DP{{ term('dp') }}</th><th>Перейти</th><th>Все предложения со словом</th></tr>
     {% for r in freq.rows %}
     <tr><td><input type="checkbox" class="freq-check" value="{{ r.entry_id }}" {{ 'checked' if r.entry_id in sel.words }} onchange="syncWord(this)"></td>
-      <td><strong>{{ r.word }}</strong></td><td>{{ r.lemma }} <span class="muted small">{{ pos_label(r.upos) }}</span></td><td>{{ r.category }}</td>
+      <td><strong>{{ r.word }}</strong></td><td>{{ r.lemma }} <span class="muted small">{{ pos_label(r.upos) }}</span></td>{% if not no_cats %}<td>{{ r.category }}</td>{% endif %}
       <td class="num">{{ r.count }}</td><td class="num">{{ r.ipm }}</td><td class="num">{{ r.sentences }}</td><td class="num">{{ r.texts }}</td>
       <td class="num">{{ r.share }}</td>
       <td class="num">{{ r.dp if r.dp is not none else '' }}</td>
