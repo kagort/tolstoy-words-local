@@ -461,9 +461,14 @@ def entry_update(request: Request, dict_id: int, entry_id: int, option: str = Fo
         new_lemma, new_upos = option.split("|", 1)
     if lemma.strip():
         new_lemma = lemma.strip()
-    update_entry(db, e, lemma=new_lemma, upos=new_upos if new_upos is not None else e.upos, match_mode=match_mode, category=category)
+    from app.services.dictionaries import no_categories
+
+    flat = no_categories(e.dictionary)  # словарь «без категорий» — поле категории не показывается и не сохраняется
+    changed = update_entry(db, e, lemma=new_lemma, upos=new_upos if new_upos is not None else e.upos, match_mode=match_mode,
+                           category=None if flat else category)
     db.commit()
-    flash(request, f"Слово «{e.surface}» обновлено; пересчёт вхождений поставлен в очередь", "success")
+    flash(request, f"Слово «{e.surface}» сохранено и отмечено как проверенное"
+          + ("; пересчёт вхождений поставлен в очередь" if changed else ""), "success")
     return redirect(f"/dictionaries/{dict_id}#e{entry_id}")
 
 
@@ -619,6 +624,11 @@ def dictionary_settings(request: Request, dict_id: int, name: str = Form(...), d
            "merge_propn": bool(merge_propn), "count_names": bool(count_names), "no_categories": bool(no_categories),
            "corpus_ids": sorted({int(c) for c in scope_corpus_ids if c.isdigit()})}
     d.settings = new
+    cleared = 0
+    if new["no_categories"]:
+        from app.services.dictionaries import clear_categories
+
+        cleared = clear_categories(d)
     match_keys = ("include_participles", "include_gerunds", "merge_propn", "corpus_ids")
     if any(old.get(k, DEFAULT_SETTINGS.get(k, [])) != new[k] for k in match_keys):
         enqueue(db, "match", {"dictionary_id": d.id}, title=f"Пересчёт словаря «{d.name}»")
@@ -627,6 +637,8 @@ def dictionary_settings(request: Request, dict_id: int, name: str = Form(...), d
         db.flush()
         flag_name_hits(db, [d.id])
         msg = "Настройки сохранены"
+    if cleared:
+        msg += f"; категории удалены у {cleared} слов"
     db.commit()
     flash(request, msg, "success")
     return redirect(f"/dictionaries/{dict_id}")
@@ -675,9 +687,12 @@ def dictionary_rematch(request: Request, dict_id: int, db: Session = Depends(get
     d = db.get(Dictionary, dict_id)
     if d is None:
         raise HTTPException(404)
+    from app.services.dictionaries import clear_categories, no_categories
+
+    cleared = clear_categories(d) if no_categories(d) else 0  # «без категорий»: старые названия категорий не остаются
     enqueue(db, "match", {"dictionary_id": d.id}, title=f"Пересчёт словаря «{d.name}»")
     db.commit()
-    flash(request, "Пересчёт поставлен в очередь", "success")
+    flash(request, "Пересчёт поставлен в очередь" + (f"; категории удалены у {cleared} слов" if cleared else ""), "success")
     return redirect(f"/dictionaries/{dict_id}")
 
 

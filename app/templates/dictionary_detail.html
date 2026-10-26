@@ -30,7 +30,7 @@
     (например, «духи» — это <em>духи</em> (парфюм) или <em>дух</em>?). В скобках — сколько токенов с такой леммой уже есть в базе.
     Режим «по формам» ищет перечисленные словоформы, а не лемму: полезно, если парсер лемматизирует слово иначе.</p>
   <table>
-    <tr><th>Слово</th><th>Разбор (лемма · часть речи)</th><th>Режим</th><th>Категория</th><th class="num">Вхождений{{ ' ↓' if sort == 'hits' }}</th><th></th></tr>
+    <tr><th>Слово</th><th>Разбор (лемма · часть речи)</th><th>Режим</th>{% if not no_cats %}<th>Категория</th>{% endif %}<th class="num">Вхождений{{ ' ↓' if sort == 'hits' }}</th><th></th></tr>
     {% for e in entries %}
     <tr id="e{{ e.id }}" class="{{ 'ambiguous' if e.ambiguous and not e.verified }}">
       <td><form id="f{{ e.id }}" method="post" action="/dictionaries/{{ d.id }}/entries/{{ e.id }}"></form><strong>{{ e.surface }}</strong>{% if e.phrase %} <span class="badge" title="словосочетание: ищется по главному слову «{{ e.lemma }}», остальные слова проверяются рядом">словосочетание</span>{% endif %}{% if e.verified %} <span class="badge ready" title="проверено">✓</span>{% elif e.ambiguous %} <span class="badge warn">проверить</span>{% endif %}</td>
@@ -46,7 +46,7 @@
         <details class="small"><summary>своя лемма</summary><input form="f{{ e.id }}" type="text" name="lemma" placeholder="например: духи"></details>
       </td>
       <td><select name="match_mode" form="f{{ e.id }}"><option value="lemma" {{ 'selected' if e.match_mode == 'lemma' }}>по лемме</option><option value="forms" {{ 'selected' if e.match_mode == 'forms' }}>по формам</option></select></td>
-      <td><input form="f{{ e.id }}" type="text" name="category" value="{{ e.category or '' }}"></td>
+      {% if not no_cats %}<td><input form="f{{ e.id }}" type="text" name="category" value="{{ e.category or '' }}"></td>{% endif %}
       <td class="num"><a href="/analysis?tab=conc&dictionary_id={{ d.id }}&entry_id={{ e.id }}">{{ hits.get(e.id, 0) }}</a>
         {% if in_names.get(e.id) or e.id in names_ok %}<div class="small">
           {% if e.id in names_ok %}<span class="muted" title="вхождения внутри имён собственных считаются">+ в именах</span>
@@ -76,13 +76,13 @@
   </div>
   <div class="panel">
     <h2 style="margin-top:0">Настройки</h2>
-    <form method="post" action="/dictionaries/{{ d.id }}/settings">
+    <form method="post" action="/dictionaries/{{ d.id }}/settings" onsubmit="return !(this.no_categories.checked && {{ (has_categories and not no_cats)|tojson }}) || confirm('Режим «без категорий»: категории всех слов будут удалены. Продолжить?')">
       <label>Название</label><input type="text" name="name" value="{{ d.name }}" required>
       <label>Описание</label><input type="text" name="description" value="{{ d.description or '' }}">
       <label class="check"><input type="checkbox" name="include_participles" {{ 'checked' if d.settings.get('include_participles') }}> причастия считать формами глагола</label>
       <label class="check"><input type="checkbox" name="include_gerunds" {{ 'checked' if d.settings.get('include_gerunds') }}> деепричастия считать формами глагола</label>
       <label class="check"><input type="checkbox" name="merge_propn" {{ 'checked' if d.settings.get('merge_propn', True) }}> существительные искать и среди имён собственных</label>
-      <label class="check"><input type="checkbox" name="no_categories" {{ 'checked' if d.settings.get('no_categories') }}> без категорий (анализ показывает простой список слов, графики — только по словам; категории в записях сохраняются)</label>
+      <label class="check"><input type="checkbox" name="no_categories" {{ 'checked' if d.settings.get('no_categories') }}> без категорий (анализ показывает простой список слов, графики — только по словам; при сохранении категории всех слов удаляются — вернуть их можно кнопкой «Предложить категории» или загрузкой словаря)</label>
       <label class="check"><input type="checkbox" name="count_names" {{ 'checked' if d.settings.get('count_names') }}> считать слова и внутри имён персонажей (иначе «Любовь Андреевна» не попадает в частоты слова «любовь»; места и организации — «Америка», «НАТО» — считаются всегда)</label>
       <label>Сопоставлять с <span class="muted small">(ничего не отмечено — со всеми текстами; иначе только с текстами отмеченных корпусов — быстрее и не нужен точный разбор остальных текстов)</span></label>
       <div class="word-grid" style="max-height:140px">{% for c in all_corpora %}<label class="check-item"><input type="checkbox" name="scope_corpus_ids" value="{{ c.id }}" {{ 'checked' if c.id in scope }}> {{ c.name }}</label>{% endfor %}</div>
