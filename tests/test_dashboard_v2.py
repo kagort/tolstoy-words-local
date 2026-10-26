@@ -89,3 +89,17 @@ def test_standalone_v2(client):
     assert "Корпус × словарь" in html and "function drawDashV2" in html and "--cat-1" in html
     assert "data:font/woff2;base64," in html and "/static/fonts/" not in html  # шрифты внутри файла
     assert "/static/" not in html.split("<body", 1)[1]
+
+
+def test_analysis_tabs_v2_charts(client):
+    q = f"dictionary_id={client.dict_id}&corpus_id={client.corpus_id}"
+    page = client.get(f"/analysis?tab=overview&{q}").text
+    assert "Анализ · корпус × словарь" in page and "/static/charts_v2.js" in page and "Отклонения от среднего" in page
+    for tab in ("freq", "structure", "compare"):
+        page = client.get(f"/analysis?tab={tab}&{q}").text
+        assert "window.QV2" in page, tab
+    assert "Площадь прямоугольника" in client.get(f"/analysis?tab=freq&{q}").text  # treemap категорий
+    client.cookies.set("qv_ui", "classic")
+    page = client.get(f"/analysis?tab=overview&{q}").text
+    assert "charts_v2.js" not in page and "корпус × словарь" not in page and "Тепловая карта:" in page
+    client.cookies.set("qv_ui", "v2")

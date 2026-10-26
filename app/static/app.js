@@ -111,7 +111,9 @@ function drawHeat(id, rows, cols, colsFull, z, opts) {
   const ord = opts.sort === false ? [...R.keys()] : similarityOrder(Z);
   const RF = vertical ? CF : R;
   const zz = ord.map(i => Z[i]), rr = ord.map(i => R[i]), rf = ord.map(i => RF[i]);
-  const trace = { type: 'heatmap', z: zz, x: C, y: rr, colorscale: 'Blues', reversescale: true,
+  const v2 = document.body && document.body.classList.contains('v2');  // новый интерфейс: шкала из токенов
+  const trace = { type: 'heatmap', z: zz, x: C, y: rr, colorscale: v2 ? [[0, cssVar('--surface-muted')], [1, cssVar('--cat-1')]] : 'Blues',
+    reversescale: !v2, xgap: v2 ? 1 : 0, ygap: v2 ? 1 : 0,
     customdata: vertical ? rf.map(f => C.map(() => f)) : rr.map(() => CF),
     hovertemplate: vertical ? '%{customdata} — %{x}: %{z}<extra></extra>' : '%{y} — %{customdata}: %{z}<extra></extra>' };
   const height = Math.max(200, 90 + 24 * rr.length);
