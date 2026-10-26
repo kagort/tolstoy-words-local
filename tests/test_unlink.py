@@ -84,3 +84,21 @@ def _text_id(s):
     from app.models import TextDoc
 
     return s.query(TextDoc).one().id
+
+
+def test_stale_hits_warning_in_analysis(client):
+    from app.db import SessionLocal
+    from app.models import Dictionary, Hit
+    from app.services.jobs import run_pending
+
+    with SessionLocal() as s:
+        dict_id = s.query(Dictionary).filter_by(name="Пчёлы").one().id
+        s.query(Hit).update({Hit.syntax_version: "1.0"})
+        s.commit()
+    base = f"/analysis?tab=profile&dictionary_id={dict_id}&corpus_id={client.corpus_id}"
+    page = client.get(base).text
+    assert "прежней версией синтаксического разбора" in page and f'action="/dictionaries/{dict_id}/rematch"' in page
+    client.post(f"/dictionaries/{dict_id}/rematch")
+    assert "Идёт пересчёт вхождений" in client.get(base).text
+    run_pending()
+    assert "прежней версией синтаксического разбора" not in client.get(base).text

@@ -833,8 +833,14 @@ def _analysis_context(db: Session, request: Request) -> dict:
         scope = scope_text_ids(db, cur)
         if scope is not None:
             scope_out = sum(1 for t in sel.ids if t not in scope)
+    # вхождения прежней версии синтаксического слоя: связи (профиль, коллокации, роли) — по старым правилам до пересчёта;
+    # страница предложения при этом уже показывает новые — предупреждаем, чтобы расхождение не выглядело ошибкой
+    stale = db.scalar(select(func.count()).select_from(Hit).where(
+        Hit.dictionary_id == dict_id, Hit.text_id.in_(sel.ids or [-1]), Hit.syntax_version != SYNTAX_VERSION)) or 0 if dict_id else 0
+    stale_pending = bool(stale) and bool(db.scalar(select(func.count()).select_from(Job).where(
+        Job.status.in_(["queued", "running"]), Job.kind == "match")))
     return dict(dictionaries=dictionaries, corpora=corpora, dict_id=dict_id, corpus_id=sel.corpus_id, entries=entries,
-                scope_out=scope_out,
+                scope_out=scope_out, stale=stale, stale_pending=stale_pending,
                 corpus_name=sel.corpus_name, tab=qp.get("tab", "overview"), sel=sel, sel_texts=corpus_texts(db, sel),
                 facets=A.facets(db, sel.corpus_ids), word_counts=word_counts, categories=categories, no_cats=no_cats,
                 n_texts=len(sel.ids), stop_options=stop_options(db))
