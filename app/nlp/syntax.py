@@ -187,12 +187,23 @@ CHECKED_EXPANSION = {"predicate", "governor", "head"}
 NO_EXPANSION = {"conj", "case"}
 
 
+# морфология иногда путает деепричастие и личную форму («пригибая», «вглядываясь» с пометкой VerbForm=Fin,
+# «простирал» с пометкой Conv), поэтому пометка сверяется с окончанием
+CONVERB_ENDINGS = ("ясь", "аясь", "вшись", "вши", "в")
+PAST_ENDINGS = ("л", "ла", "ло", "ли", "лся", "лась", "лось", "лись")
+
+
+def _looks_converb(form: str) -> bool:
+    f = form.lower()
+    return f.endswith(CONVERB_ENDINGS) or (f.endswith("я") and not f.endswith("ся"))
+
+
 def _is_converb(t) -> bool:
-    return t.feat("VerbForm") == "Conv"
+    return t.feat("VerbForm") == "Conv" and not t.form.lower().endswith(PAST_ENDINGS)
 
 
 def _is_finite_verb(t) -> bool:
-    return t.upos in ("VERB", "AUX") and (t.feat("VerbForm") == "Fin" or (not t.feat("VerbForm") and bool(t.feat("Tense") or t.feat("Mood"))))
+    return t.upos in ("VERB", "AUX") and t.feat("VerbForm") == "Fin" and not _looks_converb(t.form)
 
 
 def repair_tree(sent: Sentence) -> Sentence:
