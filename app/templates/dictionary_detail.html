@@ -7,7 +7,8 @@
 <div class="row" style="margin-bottom:10px">
   <a class="btn secondary shrink" href="/dictionaries/{{ d.id }}/cognates" title="однокоренные слова из текстов: «милосердие» → «милосердный», «немилосердно»">🌱 Однокоренные из корпуса</a>
   {% if not no_cats %}<a class="btn {{ '' if not has_categories else 'secondary' }} shrink" href="/dictionaries/{{ d.id }}/categories" title="сгруппировать слова без категории по смыслу (векторы navec)">🗂 Предложить категории{% if no_category %} ({{ no_category }} без категории){% endif %}</a>
-  {% else %}<span class="shrink muted small">Словарь без категорий (настройки ниже)</span>{% endif %}
+  {% else %}<a class="btn secondary shrink" href="/dictionaries/{{ d.id }}/categories?all=1" title="разбить все слова на категории по смыслу; после применения режим «без категорий» выключится">🗂 Предложить категории</a>
+  <span class="shrink muted small">Сейчас словарь без категорий (настройки ниже)</span>{% endif %}
 </div>
 {% if dup_groups %}
 <div class="flash info">

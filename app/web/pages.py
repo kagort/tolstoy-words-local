@@ -544,8 +544,12 @@ def dictionary_categories(request: Request, dict_id: int, db: Session = Depends(
     if d is None:
         raise HTTPException(404)
     k = _int(request.query_params.get("k"))
-    sug = suggest_categories(db, dict_id, k=k if k and 2 <= k <= 20 else None)
-    return render(request, "dictionary_categories.html", d=d, sug=sug)
+    redo = bool(request.query_params.get("all"))  # все слова заново (существующие категории заменяются)
+    sug = suggest_categories(db, dict_id, k=k if k and 2 <= k <= 20 else None, only_empty=not redo)
+    from app.services.dictionaries import no_categories
+
+    return render(request, "dictionary_categories.html", d=d, sug=sug, redo=redo, no_cats=no_categories(d),
+                  n_with_cat=sum(1 for e in d.entries if e.category))
 
 
 @router.post("/dictionaries/{dict_id}/categories")
@@ -558,9 +562,14 @@ async def dictionary_categories_apply(request: Request, dict_id: int, db: Sessio
     form = await request.form()
     names = {int(k[5:]): str(v) for k, v in form.items() if k.startswith("name_") and k[5:].isdigit()}
     assign = {int(k[6:]): int(v) for k, v in form.items() if k.startswith("entry_") and k[6:].isdigit() and str(v).isdigit()}
-    n = apply_categories(db, dict_id, names, assign)
+    redo = form.get("all") == "1"
+    n = apply_categories(db, dict_id, names, assign, only_empty=not redo)
+    note = ""
+    if n and (d.settings or {}).get("no_categories"):  # категории назначены — словарь снова с категориями
+        d.settings = {**d.settings, "no_categories": False}
+        note = "; режим «без категорий» выключен"
     db.commit()
-    flash(request, f"Категории назначены: {n} слов", "success")
+    flash(request, f"Категории назначены: {n} слов{note}", "success")
     return redirect(f"/dictionaries/{dict_id}")
 
 

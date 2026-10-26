@@ -106,7 +106,7 @@ def test_no_categories_setting(client):
         assert from_params(s, {"dictionary_id": [str(dict_id)], "corpus_id": [str(client.corpus_id)], "unit": ["cat"]}).unit == ""
     page = client.get(f"/analysis?tab=freq&{base}&unit=cat").text
     assert "По категориям словаря" not in page and 'name="unit"' not in page
-    assert "Словарь без категорий" in client.get(f"/dictionaries/{dict_id}").text
+    assert "Сейчас словарь без категорий" in client.get(f"/dictionaries/{dict_id}").text
     assert "<th>Категория</th>" not in page
     csv = client.get(f"/export/dictionary/{dict_id}.csv").content.decode("utf-8-sig")
     assert csv.splitlines()[0] == "слово;часть речи;комментарий;лемма;режим"
@@ -125,3 +125,22 @@ def test_import_by_header_names():
     assert items[0] == {"surface": "запах", "category": None, "upos": "NOUN", "comment": "главное"}
     items = parse_dictionary_text("запах;ЗАПАХИ;NOUN\nвонь;ЗАПАХИ;\n")  # без заголовка — по порядку колонок
     assert items[0]["category"] == "ЗАПАХИ" and items[0]["upos"] == "NOUN"
+
+
+@needs_db
+def test_suggest_categories_in_flat_mode(client):
+    from app.db import SessionLocal
+    from app.models import Dictionary
+
+    with SessionLocal() as s:
+        d = s.query(Dictionary).filter_by(name="Ароматы").one()
+        dict_id, ids = d.id, [e.id for e in d.entries]
+        assert d.settings["no_categories"] is True  # после test_no_categories_setting
+    page = client.get(f"/dictionaries/{dict_id}").text
+    assert f"/dictionaries/{dict_id}/categories?all=1" in page
+    page = client.get(f"/dictionaries/{dict_id}/categories?all=1&k=2").text
+    assert "Все слова" in page and "режим выключится" in page and 'name="all" value="1"' in page
+    client.post(f"/dictionaries/{dict_id}/categories", data={"all": "1", "name_1": "НОВАЯ", **{f"entry_{i}": "1" for i in ids}})
+    with SessionLocal() as s:
+        d = s.get(Dictionary, dict_id)
+        assert {e.category for e in d.entries} == {"НОВАЯ"} and d.settings["no_categories"] is False
