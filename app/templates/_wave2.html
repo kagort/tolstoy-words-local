@@ -56,10 +56,32 @@
   {% if kw.words_b %}Значимо чаще в выборке: {{ kw.n_positive }} лемм, реже: {{ kw.n_negative }}.{% else %}Опорный корпус пуст — показаны просто самые частые леммы выборки.{% endif %}
   {% if not sel.stop %}<span class="help">Совет: выберите стоп-слова в панели выбора, чтобы убрать служебные слова.</span>{% endif %}</p>
 {% if kw.positive %}
-<div class="panel"><h3 style="margin-top:0">Облако ключевых слов (размер — G²)</h3><div class="kw-cloud">
-  {% set mx = (kw.positive|map(attribute='ll')|max) or 1 %}
-  {% for r in kw.positive[:60] %}<span style="font-size:{{ (12 + 26 * ((r.ll / mx) ** 0.5))|round(1) if kw.words_b else 14 }}px" title="G² {{ r.ll }}; {{ r.ipm_a }} ipm в выборке против {{ r.ipm_b }}">{{ r.lemma }}</span> {% endfor %}
-</div></div>
+<div class="panel"><div class="row" style="align-items:center;margin-bottom:6px">
+    <h3 style="margin:0">Облако ключевых слов</h3><div class="spacer"></div>
+    <div class="shrink small kw-size" role="group" aria-label="Размер слова в облаке">размер —
+      {% if kw.words_b %}<button type="button" class="link-btn" data-kw-size="g">значимость (G²)</button> ·{% endif %}
+      <button type="button" class="link-btn" data-kw-size="f">частота в выборке</button></div></div>
+  <div class="kw-cloud" id="kw-cloud">
+  {% set top = kw.positive[:60] %}
+  {% set mx = (top|map(attribute='ll')|max) or 1 %}{% set mf = (top|map(attribute='count_a')|max) or 1 %}
+  {% for r in top %}{% set g = (12 + 26 * ((r.ll / mx) ** 0.5))|round(1) %}{% set f = (12 + 26 * ((r.count_a / mf) ** 0.5))|round(1) %}<span data-g="{{ g }}" data-f="{{ f }}" style="font-size:{{ g if kw.words_b else f }}px" title="G² {{ r.ll }}; {{ r.count_a }} вхожд., {{ r.ipm_a }} ipm в выборке против {{ r.ipm_b }}">{{ r.lemma }}</span> {% endfor %}
+  </div>
+  <p class="help" style="margin-bottom:0">Значимость — насколько слово характерно для выборки по сравнению с опорным корпусом; частота — сколько раз слово встретилось в выборке (видны самые употребительные из ключевых).</p>
+</div>
+<script>
+(function () {
+  const cloud = document.getElementById('kw-cloud'), btns = document.querySelectorAll('[data-kw-size]');
+  function apply(mode) {
+    if (!document.querySelector('[data-kw-size="' + mode + '"]')) mode = btns[0].dataset.kwSize;
+    cloud.querySelectorAll('span').forEach(s => { s.style.fontSize = s.dataset[mode] + 'px'; });
+    btns.forEach(b => b.classList.toggle('on', b.dataset.kwSize === mode));
+    try { localStorage.setItem('qv-kw-size', mode); } catch (e) {}
+  }
+  btns.forEach(b => b.addEventListener('click', () => apply(b.dataset.kwSize)));
+  let saved = null; try { saved = localStorage.getItem('qv-kw-size'); } catch (e) {}
+  apply(saved || btns[0].dataset.kwSize);
+})();
+</script>
 {% endif %}
 <div class="grid cols-2">
   {% for block, title in [(kw.positive, 'Ключевые слова выборки (чаще, чем в опорном корпусе)'), (kw.negative, 'Отрицательные ключевые слова (реже, чем в опорном корпусе)')] %}

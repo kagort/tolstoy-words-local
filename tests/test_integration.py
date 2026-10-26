@@ -310,6 +310,9 @@ def test_selection_report_stopwords(client):
                        ("keywords", ""), ("keywords", f"&ref={corpus.id}"), ("map", f"&text_id={texts['Сирень']}&segments=20")):
         r = client.get(f"/analysis?tab={tab}&{base}{extra}&stop=ru")
         assert r.status_code == 200, (tab, extra)
+    cloud = client.get(f"/analysis?tab=keywords&{base}&min_count=2").text  # облако: переключатель размера G² / частота
+    if "kw-cloud" in cloud:
+        assert 'data-kw-size="f"' in cloud and 'data-f="' in cloud and 'data-g="' in cloud
     assert "chart-orbit" in client.get(f"/analysis?tab=colloc&{base}&entry_id={e_zapah.id}&min_count=1&pos=all").text
     assert "chart-map" in client.get(f"/analysis?tab=map&{base}&text_id={texts['Сирень']}").text
     assert client.get(f"/api/texts/{texts['Сирень']}/passage?from=1&to=5&dictionary_id={d.id}").json()["sentences"]

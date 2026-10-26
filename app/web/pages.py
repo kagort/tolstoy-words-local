@@ -1415,6 +1415,11 @@ def sentence_view(request: Request, sentence_id: int, token: int | None = None, 
     focus = token or (min(hit_tokens) if hit_tokens else None)
     roles = {t.idx: an.role(t.idx) for t in sent.tokens}
     rels = an.relations(focus) if focus else []
+    from app.services.unlink import is_unlinked, unlinked_pairs
+
+    pairs = unlinked_pairs(db, [sentence_id]).get(sentence_id)
+    unlinked = {r.related_idx for r in rels if is_unlinked(pairs, focus, r.related_idx)}
+    rels.sort(key=lambda r: r.related_idx in unlinked)  # убранные вручную — в конце, с кнопкой «вернуть»
     tree = [{"i": t.idx, "form": t.form, "lemma": t.lemma, "upos": t.upos, "head": t.head, "rel": t.deprel,
              "role": roles[t.idx].role} for t in sent.tokens]
     groups = [{"members": [sent.tok(m).form for m in g.members], "type": g.conj_type} for g in an.groups]
@@ -1430,10 +1435,32 @@ def sentence_view(request: Request, sentence_id: int, token: int | None = None, 
         select(Job.id).where(Job.kind == "deepparse", Job.status.in_(["queued", "running"]),
                              Job.params["sentence_ids"].contains([sentence_id]))))
     return render(request, "sentence.html", row=row, sent=sent, doc=doc, roles=roles, rels=rels, focus=focus,
-                  precise_pending=precise_pending,
+                  precise_pending=precise_pending, unlinked=unlinked,
                   tree_json=json.dumps(tree, ensure_ascii=False).replace("</", "<\\/"), groups=groups, hit_tokens=hit_tokens,
                   conllu=sent.to_conllu(sentence_id), prev_id=prev_id, next_id=next_id, context=context,
                   tree_children=tree_children)
+
+
+@router.post("/sentences/{sentence_id}/unlink")
+def sentence_unlink(request: Request, sentence_id: int, focus: int = Form(...), other: int = Form(...), undo: str = Form(""),
+                    db: Session = Depends(get_session)):
+    """Убрать связь двух слов предложения (или вернуть её — undo=1): ошибка разбора, например однородные сказуемые
+    при чужом подлежащем. Учитывается в профиле слова, коллокациях и при пересчёте вхождений."""
+    from app.services.unlink import relink, unlink
+
+    row = db.get(SentenceRow, sentence_id)
+    if row is None:
+        raise HTTPException(404)
+    a, b = sorted((focus, other))
+    if a < 1 or b > (db.scalar(select(func.max(TokenRow.idx)).where(TokenRow.sentence_id == sentence_id)) or 0) or a == b:
+        raise HTTPException(400)
+    if undo:
+        relink(db, sentence_id, focus, other)
+        flash(request, "Связь возвращена.")
+    else:
+        n = unlink(db, sentence_id, focus, other)
+        flash(request, "Связь убрана" + (f" (из сохранённых связей вхождений: {n})" if n else "") + ". Её можно вернуть.")
+    return redirect(f"/sentences/{sentence_id}?token={focus}#rels")
 
 
 @router.post("/sentences/{sentence_id}/precise")

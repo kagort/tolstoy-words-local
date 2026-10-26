@@ -220,6 +220,20 @@ class TokenRelation(Base):
     negated: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class RelationOverride(Base):
+    """Связь, убранная вручную на странице предложения: слова a и b не связаны (все типы связи, в обе стороны).
+    Хранится по номерам слов в предложении, поэтому переживает пересчёт вхождений и точный разбор."""
+
+    __tablename__ = "relation_overrides"
+    __table_args__ = (UniqueConstraint("sentence_id", "a_idx", "b_idx"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sentence_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("sentences.id", ondelete="CASCADE"), index=True)
+    a_idx: Mapped[int] = mapped_column(SmallInteger)  # a_idx < b_idx
+    b_idx: Mapped[int] = mapped_column(SmallInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Entity(Base):
     """Упоминание имени собственного (NER, Natasha/Slovnet): персона, место, организация или иное название."""
 
