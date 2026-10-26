@@ -420,6 +420,8 @@ def _quality(session: Session, d: Dictionary, ids: list[int], rows: list[dict]) 
 
 def _quotes(session: Session, dictionary_id: int, ids: list[int], top_rows: list[dict], n: int = 6) -> list[dict]:
     """По примеру на частое слово, из разных текстов; предпочтение — предложениям около 140 знаков."""
+    from app.services.labels import short_author
+
     out, used_texts = [], set()
     for r in top_rows:
         q = (select(Hit.sentence_id, Hit.text_id, SentenceRow.text, Hit.token_idx, TextDoc.title, TextDoc.author, TextDoc.year_from)
@@ -438,7 +440,7 @@ def _quotes(session: Session, dictionary_id: int, ids: list[int], top_rows: list
                               .where(TokenRow.sentence_id == pick.sentence_id, TokenRow.idx == pick.token_idx)).first()
         st, en = (tok.start_char, tok.end_char) if tok else (0, 0)
         out.append({"word": r["word"], "sentence_id": pick.sentence_id, "before": pick.text[:st], "kw": pick.text[st:en],
-                    "after": pick.text[en:], "source": f"{pick.author + ' · ' if pick.author else ''}«{pick.title}»"
+                    "after": pick.text[en:], "source": f"{short_author(pick.author) + ' · ' if pick.author else ''}«{pick.title}»"
                                                       f"{' · ' + str(pick.year_from) if pick.year_from else ''}"})
         if len(out) >= n:
             break

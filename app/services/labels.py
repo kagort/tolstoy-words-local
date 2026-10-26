@@ -1,4 +1,4 @@
-"""Короткие подписи для графиков: «Лев Николаевич Толстой» → «Толстой Л. Н.», длинные названия — с «…».
+"""Короткие подписи для графиков: «Лев Николаевич Толстой» → «Л. Н. Толстой», длинные названия — с «…».
 
 Полная подпись остаётся во всплывающей подсказке и в выгрузках; у текста можно задать своё короткое
 название (meta["short_title"], колонка «короткое» в таблице метаданных).
@@ -18,16 +18,30 @@ def clip(s: str, n: int) -> str:
 
 
 def short_author(author: str | None) -> str:
-    """«Имя Отчество Фамилия» → «Фамилия И. О.»; «Фамилия И.» и псевдонимы из одного слова — как есть; соавторы — каждый."""
+    """Инициалы и фамилия: «Лев Николаевич Толстой» и «Толстой Л. Н.» → «Л. Н. Толстой»; соавторы — каждый;
+    псевдонимы из одного слова и не-имена («Представитель США в ООН») — как есть; пометка в скобках
+    («(предположительно)») сокращается до «(?)», полная подпись — в подсказке и выгрузках."""
     if not author:
         return ""
+    author = author.strip()
     if "," in author:
         return clip(", ".join(short_author(a) for a in author.split(",") if a.strip()), AUTHOR_MAX)
-    words = [w for w in re.split(r"\s+", author.strip()) if w]
-    if len(words) < 2 or any(w.endswith(".") for w in words) or not all(w[:1].isupper() for w in words):
-        return clip(author.strip(), AUTHOR_MAX)
+    note = ""
+    m = re.match(r"^(.*?)\s*\(([^)]*)\)\s*$", author)
+    if m and m.group(1):
+        author, note = m.group(1).strip(), (" (?)" if "предполож" in m.group(2).lower() else "")
+    words = [w for w in re.split(r"\s+", author) if w]
+    if len(words) < 2 or not all(w[:1].isupper() for w in words):
+        return clip(author + note, AUTHOR_MAX)
+    initials = [w for w in words if re.fullmatch(r"[A-ZА-ЯЁ]\.(?:[A-ZА-ЯЁ]\.)*", w)]
+    if initials:  # уже с инициалами: «Толстой Л. Н.», «Л. Н. Толстой», «Л.Н. Толстой»
+        rest = [w for w in words if w not in initials]
+        if len(rest) != 1:
+            return clip(author + note, AUTHOR_MAX)
+        letters = [ch + "." for w in initials for ch in w.replace(".", "")]
+        return clip(" ".join(letters) + " " + rest[0] + note, AUTHOR_MAX)
     *names, last = words
-    return clip(f"{last} " + " ".join(f"{n[0]}." for n in names), AUTHOR_MAX)
+    return clip(" ".join(f"{n[0]}." for n in names) + f" {last}" + note, AUTHOR_MAX)
 
 
 def short_title(title: str | None, meta: dict | None = None) -> str:

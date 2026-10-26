@@ -50,7 +50,7 @@ def build(session: Session, sel, dictionary_id: int | None) -> dict:
             mattrs.append(st["lexical"]["mattr"])
     avg_len = round(n_words / n_sent, 1) if n_sent else 0
     out = {
-        "title": (f"«{texts[0].title}»" + (f", {texts[0].author}" if texts[0].author else "")) if single else sel.corpus_name,
+        "title": (f"«{texts[0].title}»" + (f", {short_author(texts[0].author)}" if texts[0].author else "")) if single else sel.corpus_name,
         "selection": sel.describe(), "generated": _now_local().strftime("%d.%m.%Y %H:%M"), "single": single,
         "tiles": [
             {"label": "текстов", "value": len(texts)},

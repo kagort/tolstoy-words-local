@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import TextDoc
 from app.services.keywords import keywords
+from app.services.labels import text_labels
 from app.services.textstats import get_stats
 
 METRICS = [
@@ -49,7 +50,7 @@ def compare(session: Session, text_ids: list[int], stop: frozenset[str] = frozen
         for r in radar_rows:
             lo, hi = min(r["values"]), max(r["values"])
             norm_vals.append(round((r["values"][i] - lo) / (hi - lo), 3) if hi > lo else 0.5)
-        radar["series"].append({"title": t["title"], "values": norm_vals})
+        radar["series"].append({"title": t["title"], "label": text_labels(t["title"], t["author"], None)[0], "values": norm_vals})
     # лексика: частотные знаменательные леммы из портрета (запас pool)
     pools = {}
     for t in ids:

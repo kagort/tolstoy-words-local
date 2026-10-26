@@ -284,8 +284,10 @@ def topics(session: Session, text_ids: list[int], k: int = 8, chunk_words: int =
     for rank, j in enumerate(order, start=1):
         top = np.argsort(-h_[j])[:12]
         topics_out.append({"id": rank, "words": [vocab[i] for i in top], "share": round(float(100 * weight[j] / weight.sum()), 1)})
-    titles = {t.id: (f"{t.author}, " if t.author else "") + f"«{t.title}»" for t in session.execute(
-        select(TextDoc.id, TextDoc.title, TextDoc.author).where(TextDoc.id.in_(set(owners))))}
+    from app.services.labels import text_labels
+
+    titles = {t.id: text_labels(t.title, t.author, None, t.meta)[0] for t in session.execute(  # подпись строки графика
+        select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.meta).where(TextDoc.id.in_(set(owners))))}
     by_text = []
     wn = w_ / np.maximum(w_.sum(1, keepdims=True), 1e-9)
     for tid in dict.fromkeys(owners):
