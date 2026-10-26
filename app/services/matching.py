@@ -10,12 +10,22 @@ from sqlalchemy import and_, delete, not_, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
-from app.models import PARSE_PRECISE, Dictionary, DictionaryEntry, Hit, Job, SentenceRow, TextDoc, TokenRow
+from app.models import (
+    PARSE_PRECISE,
+    Dictionary,
+    DictionaryEntry,
+    Hit,
+    Job,
+    SentenceRow,
+    TextDoc,
+    TokenRow,
+)
 from app.nlp.morph import word_forms
 from app.nlp.syntax import SYNTAX_VERSION, SentenceAnalysis
 from app.nlp.tree import Sentence, Token, parse_feats
 from app.services.ingest import _alloc_ids, _copy
 from app.services.jobs import set_progress
+from app.services.unlink import is_unlinked, unlinked_pairs
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +39,13 @@ REL_COLS = (
 )
 
 CHUNK = 500
+
+
+def relation_row(hit_id: int, dictionary_id: int, entry_id: int, text_id: int, rel) -> tuple:
+    """Строка token_relations (порядок REL_COLS) для связи вхождения."""
+    return (hit_id, dictionary_id, entry_id, text_id, rel.rel_type, rel.direction, rel.related_idx, rel.related_lemma,
+            rel.related_upos, rel.detail or None, rel.path or None, rel.source, rel.scope, rel.rule or None,
+            rel.confidence, rel.negated)
 
 
 def entry_token_filter(entry: DictionaryEntry, settings: dict):
@@ -163,6 +180,7 @@ def _match_entries(job_id: int | None, dictionary_id: int, entry_data: list, rea
             for start in range(0, len(rows), CHUNK):
                 chunk = rows[start : start + CHUNK]
                 sents = load_sentences(s, sorted({r.sentence_id for r in chunk}))
+                unlinked = unlinked_pairs(s, sents)  # связи, убранные вручную на странице предложения
                 analyses: dict[int, SentenceAnalysis] = {}
                 hit_ids = _alloc_ids(s, "dictionary_hits_id_seq", len(chunk))
                 hrows, rrows = [], []
@@ -179,10 +197,8 @@ def _match_entries(job_id: int | None, dictionary_id: int, entry_data: list, rea
                                   role.role, role.subtype[:64] or None, role.detail[:64] or None,
                                   an.group_of(r.idx) is not None, SYNTAX_VERSION))
                     for rel in an.relations(r.idx):
-                        rrows.append((hid, dictionary_id, entry_id, r.text_id, rel.rel_type, rel.direction,
-                                      rel.related_idx, rel.related_lemma, rel.related_upos, rel.detail or None,
-                                      rel.path or None, rel.source, rel.scope, rel.rule or None,
-                                      rel.confidence, rel.negated))
+                        if not is_unlinked(unlinked.get(r.sentence_id), r.idx, rel.related_idx):
+                            rrows.append(relation_row(hid, dictionary_id, entry_id, r.text_id, rel))
                 _copy(s, "dictionary_hits", HIT_COLS, hrows)
                 _copy(s, "token_relations", REL_COLS, rrows)
                 s.commit()

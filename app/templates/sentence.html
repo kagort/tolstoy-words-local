@@ -51,16 +51,22 @@
 <div class="panel">
   <h2 style="margin-top:0">«{{ sent.tok(focus).form }}» · {{ pos_label(sent.tok(focus).upos) }} — {{ role_label(roles[focus].role, sent.tok(focus).deprel) }}{{ ', ' ~ roles[focus].subtype if roles[focus].subtype }} {{ roles[focus].detail }}</h2>
   {% if rels %}
-  <table>
-    <tr><th>Тип связи</th><th>Слово</th><th>Подробности</th><th>Как получено</th><th class="num">Уверенность</th></tr>
-    {% for r in rels %}
-    <tr><td>{{ rel_label(r.rel_type) }}</td>
+  <table id="rels">
+    <tr><th>Тип связи</th><th>Слово</th><th>Подробности</th><th>Как получено</th><th class="num">Уверенность</th><th></th></tr>
+    {% for r in rels %}{% set off = r.related_idx in unlinked %}
+    <tr{% if off %} class="rel-off" title="связь убрана вручную: не учитывается в профиле слова и коллокациях"{% endif %}><td>{{ rel_label(r.rel_type) }}</td>
       <td><a href="?token={{ r.related_idx }}">{{ sent.tok(r.related_idx).form }}</a> <span class="muted small">({{ r.related_lemma }})</span>{% if r.negated %} <span class="badge warn">под отрицанием</span>{% endif %}</td>
       <td class="small">{{ r.detail }}</td>
       <td class="small">{{ SCOPE_LABELS.get(r.scope, r.scope) }}{% if r.rule %} <span class="muted">· правило: {{ r.rule }}</span>{% endif %}{% if r.source == 'enhanced' %} <span class="badge">восстановлено</span>{% endif %}</td>
-      <td class="num">{{ (r.confidence * 100)|round|int }}%</td></tr>
+      <td class="num">{{ (r.confidence * 100)|round|int }}%</td>
+      <td class="no-print"><form method="post" action="/sentences/{{ row.id }}/unlink" style="margin:0">
+        <input type="hidden" name="focus" value="{{ focus }}"><input type="hidden" name="other" value="{{ r.related_idx }}">
+        {% if off %}<input type="hidden" name="undo" value="1"><button class="link-btn small" type="submit">вернуть</button>
+        {% else %}<button class="link-btn small" type="submit" title="убрать связь «{{ sent.tok(focus).form }}» — «{{ sent.tok(r.related_idx).form }}» (все типы, в обе стороны)">✕ убрать</button>{% endif %}
+      </form></td></tr>
     {% endfor %}
   </table>
+  <p class="help">Ошибочную связь (например, однородные сказуемые при чужом подлежащем) можно убрать: она перестанет учитываться в профиле слова и коллокациях, в том числе после пересчёта вхождений.</p>
   {% else %}<p class="muted">Связей для этого слова не выделено.</p>{% endif %}
 </div>
 {% endif %}

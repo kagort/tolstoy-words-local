@@ -216,3 +216,9 @@ details.more > summary { cursor: pointer; color: var(--accent); font-size: 13px;
 .ent-dict-form { position: absolute; left: 0; z-index: 20; width: 340px; margin-top: 6px; padding: 12px 14px; background: var(--panel);
   border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); }
 .ent-dict.right .ent-dict-form { left: auto; right: 0; }
+
+/* связь, убранная вручную (страница предложения) */
+tr.rel-off td { color: var(--muted); }
+tr.rel-off td:not(:last-child) { text-decoration: line-through; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--muted); font: inherit; cursor: pointer; }
+.link-btn:hover { color: var(--err); }
