@@ -2,7 +2,15 @@
 {% block title %}Анализ{% endblock %}
 {% block head %}<script src="/static-vendor/plotly.min.js"></script>{% endblock %}
 {% block content %}
-<h1>Анализ</h1>
+{% set v2 = ui_mode(request) == 'v2' %}
+{% if v2 and dictionaries %}{% set cur_dict = (dictionaries|selectattr('id', 'equalto', dict_id)|first) %}
+<header class="an-head">
+  <div class="dv2-eyebrow">Анализ · корпус × словарь</div>
+  <h1>{{ corpus_name }} <span class="dv2-x">×</span> {{ cur_dict.name if cur_dict else '' }}</h1>
+  <div class="muted small">{{ n_texts }} {{ 'текст' if n_texts % 10 == 1 and n_texts % 100 != 11 else ('текста' if n_texts % 10 in [2, 3, 4] and n_texts % 100 not in [12, 13, 14] else 'текстов') }}{% if sel.filtered %} · {{ sel.describe() }}{% endif %}
+    · <a href="/dashboard?dictionary_id={{ dict_id }}&{{ sel.query(False) }}">дашборд этой выборки</a></div>
+</header>
+{% else %}<h1>Анализ</h1>{% endif %}
 {% if not dictionaries %}
 <div class="panel">Для анализа нужен словарь. <a href="/dictionaries">Создайте словарь</a> и загрузите <a href="/texts">тексты</a>.</div>
 {% else %}
@@ -144,7 +152,8 @@
 {% if ov.words and ov.groups %}
 <div class="panel"><div id="chart-ov" class="chart" style="min-height:420px"></div></div>
 {% if ov.words|length > 1 and ov.groups|length > 1 %}
-<div class="panel"><h3 style="margin-top:0">Тепловая карта: {{ 'категория' if ov.by == 'cat' else 'слово' }} × {{ ov.dim_label|lower }} ({{ mlabel }})</h3><div id="chart-ov-heat" class="chart" style="min-height:{{ 160 + 28 * ov.words|length }}px"></div></div>
+<div class="panel"><h3 style="margin-top:0">{% if v2 %}Отклонения от среднего: {{ 'категория' if ov.by == 'cat' else 'слово' }} × {{ ov.dim_label|lower }}{% else %}Тепловая карта: {{ 'категория' if ov.by == 'cat' else 'слово' }} × {{ ov.dim_label|lower }} ({{ mlabel }}){% endif %}</h3><div id="chart-ov-heat" class="chart" style="min-height:{{ 160 + 28 * ov.words|length }}px"></div>
+  {% if v2 %}<p class="help">Для каждого {{ 'категории' if ov.by == 'cat' else 'слова' }} — насколько показатель ({{ mlabel }}) в группе выше (красное) или ниже (синее) среднего по группам, в стандартных отклонениях; само значение — в подсказке.</p>{% endif %}</div>
 {% endif %}
 <div class="panel table-scroll">
   <table>
@@ -186,7 +195,9 @@
       <div class="help">Сумма вхождений всех слов категории{{ ' (только выбранных слов)' if freq_filtered }}. ipm — на миллион слов выборки или группы; доля — часть вхождений всех категорий.</div></div>
     <div class="shrink"><label>Столбцы по</label><select name="cat_dim" form="sel-form" onchange="this.form.submit()">{% for k, v in DIMENSIONS.items() %}<option value="{{ k }}" {{ 'selected' if cats.dim == k }}>{{ v|lower }}</option>{% endfor %}</select></div>
   </div>
-  <div id="chart-cats" class="chart" style="height:{{ 120 + 26 * cats.rows|length }}px"></div>
+  {% if v2 %}<div id="chart-cats" class="chart" style="min-height:460px"></div>
+  <p class="help">Площадь прямоугольника — число вхождений: крупные блоки — категории, внутри — слова. Цвет — категория (восемь самых частых в цвете, остальные серые).</p>
+  {% else %}<div id="chart-cats" class="chart" style="height:{{ 120 + 26 * cats.rows|length }}px"></div>{% endif %}
   <div class="table-scroll"><table>
     <tr><th>Категория</th><th class="num">Слов</th><th class="num">Вхождений</th><th class="num">ipm{{ term('ipm') }}</th><th class="num">Доля, %{{ term('share') }}</th>
       {% for g in cats.groups %}<th class="num small" title="{{ g.full }}">{{ g.label }}</th>{% endfor %}</tr>
@@ -388,6 +399,7 @@
   </div>
   <div class="panel"><h3 style="margin-top:0">Распределение длины предложений</h3><div id="chart-len" class="chart"></div></div>
 </div>
+{% if v2 and a.get('types') %}<div class="panel"><h3 style="margin-top:0">Типы предложений</h3><div id="chart-types" class="chart"></div></div>{% endif %}
 {% endif %}
 {% endif %}
 {% endblock %}
@@ -398,8 +410,13 @@
 (function () {
   const ov = {{ ov|tojson }}, metric = {{ ov_params.metric|tojson }};
   const ytitle = { ipm: 'ipm', count: 'вхождений', share: '% текстов группы' }[metric];
-  drawGroups('chart-ov', ov, metric, ytitle, { title: { text: `${ytitle} по группировке «${ov.dim_label}»`, font: { size: 14 } } },
-             { log: {{ 'true' if request.query_params.get('log') else 'false' }} });
+  const log = {{ 'true' if request.query_params.get('log') else 'false' }};
+  if (window.QV2) {
+    QV2.groups('chart-ov', ov, metric, ytitle, log);
+    if (ov.words.length > 1 && ov.groups.length > 1) QV2.devHeat('chart-ov-heat', ov, metric);
+    return;
+  }
+  drawGroups('chart-ov', ov, metric, ytitle, { title: { text: `${ytitle} по группировке «${ov.dim_label}»`, font: { size: 14 } } }, { log });
   if (ov.words.length > 1 && ov.groups.length > 1) {
     drawGroupHeat('chart-ov-heat', ov, metric);
   }
@@ -437,6 +454,15 @@
 {% if tab == 'freq' and freq %}
 (function () {
   const rows = {{ freq.rows[:40]|tojson }}.filter(r => r.count > 0);
+  if (window.QV2) {
+    const all = {{ freq.rows|tojson }}, idx = QV2.catIndex(all, 'category', 'count');
+    QV2.lollipop('chart-freq', rows.slice(0, 30).map(r => ({ label: r.word, value: r.ipm, color: {{ 'true' if no_cats else 'false' }} ? null : QV2.cat(idx[r.category]),
+      hover: `${r.ipm} ipm · ${r.count} вхожд. · доля ${r.share}%${r.category ? ' · ' + r.category : ''}` })),
+      {{ ('Выбранные слова: ipm (на миллион слов выборки)' if freq_filtered else 'ipm — на миллион слов выборки; первые 30 слов')|tojson }});
+    {% if cats and cats.has_categories %}QV2.treemap('chart-cats', all);{% endif %}
+    {% if heat.words and heat.texts|length > 1 %}const heat = {{ heat|tojson }}; drawHeat('chart-heat', heat.words, heat.texts, heat.texts_full, heat.z);{% endif %}
+    return;
+  }
   drawChart('chart-freq', [{ type: 'bar', x: rows.map(r => r.word), y: rows.map(r => r.ipm), text: rows.map(r => r.count + ' вхожд.'),
     customdata: rows.map(r => r.share),
     hovertemplate: '%{x}: %{y} ipm (%{text}; доля %{customdata}%)<extra></extra>', marker: { color: cssVar('--accent') } }],
@@ -465,6 +491,7 @@
 {% if tab == 'compare' and cmp %}
 (function () {
   const rows = {{ cmp.rows|tojson }}.filter(r => r.count_a + r.count_b > 0);
+  if (window.QV2) return QV2.scatterCompare('chart-cmp', rows, {{ corpus_name|tojson }}, {{ corpus_b_name|tojson }});
   drawChart('chart-cmp', [{ type: 'scatter', mode: 'markers+text', x: rows.map(r => r.log_ratio), y: rows.map(r => r.ll),
     text: rows.map(r => r.word), textposition: 'top center', marker: { size: 9, color: rows.map(r => r.significant ? cssVar('--err') : cssVar('--muted')) },
     hovertemplate: '%{text}<br>log-ratio %{x}<br>G² %{y}<extra></extra>' }],
@@ -475,6 +502,12 @@
 {% if tab == 'structure' and structure and structure.all.n %}
 (function () {
   const h = {{ structure.hits.get('hist', {})|tojson }}, a = {{ structure.all.get('hist', {})|tojson }};
+  if (window.QV2) {
+    QV2.lengthLines('chart-len', h, a, 'со словами словаря');
+    const ta = {{ structure.all.get('types', {})|tojson }}, th = {{ structure.hits.get('types', {})|tojson }};
+    if (document.getElementById('chart-types')) QV2.bars100('chart-types', [{ name: 'со словами словаря', values: th }, { name: 'все предложения', values: ta }], Object.keys(ta));
+    return;
+  }
   const keys = [...new Set([...Object.keys(h), ...Object.keys(a)].map(Number))].sort((x, y) => x - y);
   const lab = keys.map(k => k >= 100 ? '100+' : `${k}–${k + 4}`);
   drawChart('chart-len', [
