@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ site_title }}{% endblock %} · {{ site_title }}</title>
+  {# тема до отрисовки, без мигания: light | dark | (нет — как в системе) #}
+  <script>try { const t = localStorage.getItem('qv-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <link rel="stylesheet" href="/static/fonts.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="/static/app.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="/static/v2.css?v={{ asset_version }}">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 44'%3E%3Cpolyline points='27,6 12,22 27,38' fill='none' stroke='%233E4F94' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolyline points='41,6 26,22 41,38' fill='none' stroke='%233E4F94' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M43 22 L59 9 L59 35 Z' fill='%23A8732A'/%3E%3C/svg%3E">
+  {% block head %}{% endblock %}
+</head>
+<body class="v2">
+{% set p = request.url.path %}
+{% macro logo(size=40) -%}
+<svg class="logo" width="{{ size }}" height="{{ (size * 0.69)|round|int }}" viewBox="0 0 64 44" aria-hidden="true">
+  <polyline points="27,6 12,22 27,38" fill="none" stroke="var(--cat-1)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></polyline>
+  <polyline points="41,6 26,22 41,38" fill="none" stroke="var(--cat-1)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></polyline>
+  <path d="M43 22 L59 9 L59 35 Z" fill="var(--cat-2)"></path>
+  <circle cx="19" cy="15" r="2" fill="var(--text)"></circle>
+</svg>
+{%- endmacro %}
+{% set NAV = [
+  ('/texts', 'Тексты', 'M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7', ['/texts']),
+  ('/corpora', 'Корпуса', 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5M3 17.5l9 5 9-5', ['/corpora']),
+  ('/dictionaries', 'Словари', 'M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zM5 17a3 3 0 0 1 3-3h11', ['/dictionaries']),
+  ('/stopwords', 'Стоп-слова', 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM5.6 5.6l12.8 12.8', ['/stopwords']),
+  ('/analysis', 'Анализ', 'M4 20V10M10 20V4M16 20v-7M22 20H2', ['/analysis', '/sentences', '/dashboard']),
+  ('/check', 'Проверка текста', 'M4 12l5 5L20 6', ['/check']),
+  ('/jobs', 'Задачи', 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 3', ['/jobs']),
+  ('/help', 'Справка', 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5v.5', ['/help']),
+] %}
+<div class="app">
+  {% if user %}
+  <aside class="side" aria-label="Разделы">
+    <a class="side-brand" href="/">{{ logo(44) }}<span><span class="side-name">{{ site_title }}</span><span class="side-sub">корпусный анализ русских текстов</span></span></a>
+    <nav class="side-nav">
+      {% for href, label, icon, prefixes in NAV %}
+      {% set on = namespace(v=false) %}{% for pr in prefixes %}{% if p.startswith(pr) %}{% set on.v = true %}{% endif %}{% endfor %}
+      <a href="{{ href }}" class="{{ 'active' if on.v }}"{{ ' aria-current=page' if on.v }}>
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ icon }}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        <span>{{ label }}</span></a>
+      {% endfor %}
+    </nav>
+    <div class="side-foot">
+      <div class="theme-switch" role="group" aria-label="Тема">
+        <button type="button" data-theme-set="light" title="Светлая тема" aria-label="Светлая тема"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg></button>
+        <button type="button" data-theme-set="auto" title="Как в системе" aria-label="Тема как в системе"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v11H3zM8 20h8M12 16v4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+        <button type="button" data-theme-set="dark" title="Тёмная тема" aria-label="Тёмная тема"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path></svg></button>
+      </div>
+      <form method="post" action="/logout"><button class="link-btn" type="submit">Выйти ({{ user }})</button></form>
+      <a class="small" href="/ui/classic?next={{ p|urlencode }}" title="вернуть прежний вид программы (у вас; другие пользователи не затронуты)">Классический интерфейс</a>
+      <div class="small muted">версия {{ app_version }}</div>
+    </div>
+  </aside>
+  {% endif %}
+
+  <div class="page">
+    {% if user %}
+    <header class="mobile-top">
+      <a class="side-brand" href="/">{{ logo(32) }}<span class="side-name">{{ site_title }}</span></a>
+      <div class="spacer"></div>
+      <button type="button" class="icon-only" data-theme-cycle aria-label="Сменить тему"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path></svg></button>
+    </header>
+    {% endif %}
+    <main class="content">
+      {% for f in flashes %}<div class="flash {{ f.kind }}">{{ f.message }}</div>{% endfor %}
+      {% block content %}{% endblock %}
+    </main>
+    <footer class="content-foot muted small">{{ site_title }} · версия {{ app_version }}{% if user %} · <a href="/ui/classic?next={{ p|urlencode }}">классический интерфейс</a>{% endif %}</footer>
+  </div>
+</div>
+
+{% if user %}
+<nav class="bottom-nav" aria-label="Разделы">
+  {% for href, label, icon, prefixes in NAV if href in ('/texts', '/dictionaries', '/analysis', '/jobs', '/help') %}
+  {% set on = namespace(v=false) %}{% for pr in prefixes %}{% if p.startswith(pr) %}{% set on.v = true %}{% endif %}{% endfor %}
+  <a href="{{ href }}" class="{{ 'active' if on.v }}">
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ icon }}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    <span>{{ label }}</span></a>
+  {% endfor %}
+</nav>
+{% endif %}
+<script src="/static/app.js?v={{ asset_version }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

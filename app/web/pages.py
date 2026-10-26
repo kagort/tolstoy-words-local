@@ -74,6 +74,17 @@ def logout(request: Request):
     return redirect("/login")
 
 
+@router.get("/ui/{mode}")
+def ui_switch(mode: str, next: str = "/"):
+    """Переключить интерфейс у себя: v2 (новый) или classic (прежний). Выбор хранится в cookie на год."""
+    from app.web.deps import UI_MODES
+
+    resp = redirect(next if next.startswith("/") and not next.startswith("//") else "/")
+    if mode in UI_MODES:
+        resp.set_cookie("qv_ui", mode, max_age=365 * 24 * 3600, samesite="lax", httponly=True)
+    return resp
+
+
 # ------------------------------------------------------------------ главная
 
 

@@ -4,14 +4,30 @@ function cssVar(name) { return getComputedStyle(document.documentElement).getPro
 
 function plotLayout(extra) {
   const text = cssVar('--text'), muted = cssVar('--muted'), border = cssVar('--border');
-  return Object.assign({
+  const base = {
     paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
     font: { color: text, family: 'inherit', size: 13 },
     margin: { l: 60, r: 20, t: 30, b: 80 },
     xaxis: { gridcolor: border, linecolor: border, tickfont: { color: muted } },
     yaxis: { gridcolor: border, linecolor: border, tickfont: { color: muted } },
     legend: { orientation: 'h', y: 1.12 },
-  }, extra || {});
+  };
+  if (document.body && document.body.classList.contains('v2')) {
+    // новый интерфейс: тема графиков из токенов (docs/DESIGN_TOKENS.md, раздел 7)
+    const grid = cssVar('--grid') || border, surface = cssVar('--surface'), sans = cssVar('--font-sans') || 'inherit';
+    const cats = [1, 2, 3, 4, 5, 6, 7, 8].map(i => cssVar('--cat-' + i)).filter(Boolean);
+    const axis = { gridcolor: grid, linecolor: border, zerolinecolor: border, tickfont: { color: muted, size: 11 }, title: { font: { size: 12, color: muted } } };
+    Object.assign(base, {
+      font: { color: text, family: sans, size: 12 },
+      xaxis: Object.assign({}, axis), yaxis: Object.assign({}, axis),
+      hoverlabel: { bgcolor: surface, bordercolor: border, font: { family: sans, size: 12, color: text }, align: 'left' },
+    });
+    if (cats.length) base.colorway = cats;
+  }
+  // оси из extra дополняют оформление, а не заменяют его (иначе в тёмной теме сетка остаётся светлой)
+  const out = Object.assign({}, base, extra || {});
+  ['xaxis', 'yaxis'].forEach(k => { if (extra && extra[k]) out[k] = Object.assign({}, base[k], extra[k]); });
+  return out;
 }
 
 function drawChart(id, data, layout) {
@@ -486,3 +502,24 @@ function toast(text, action) {
   el.classList.add('show');
   clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 8000);
 }
+
+// ------------------------------------------------------------ новый интерфейс: тема (светлая / тёмная / как в системе)
+// Графики Plotly строятся с цветами текущей темы, поэтому после смены темы страница с графиками перезагружается.
+function currentTheme() { return document.documentElement.dataset.theme || 'auto'; }
+function markTheme() {
+  document.querySelectorAll('[data-theme-set]').forEach(b => b.classList.toggle('on', b.dataset.themeSet === currentTheme()));
+}
+function setTheme(t) {
+  try { if (t === 'auto') localStorage.removeItem('qv-theme'); else localStorage.setItem('qv-theme', t); } catch (e) {}
+  if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+  markTheme();
+  if (document.querySelector('.js-plotly-plot')) location.reload();
+}
+document.addEventListener('DOMContentLoaded', () => {
+  markTheme();
+  document.querySelectorAll('[data-theme-set]').forEach(b => b.addEventListener('click', () => setTheme(b.dataset.themeSet)));
+  document.querySelectorAll('[data-theme-cycle]').forEach(b => b.addEventListener('click', () => {
+    const order = ['auto', 'light', 'dark'];
+    setTheme(order[(order.indexOf(currentTheme()) + 1) % order.length]);
+  }));
+});
