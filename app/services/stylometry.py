@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import TextDoc, TokenRow
-from app.services.labels import short_title, unique
+from app.services.labels import short_author, short_title, unique
 
 MFW_CHOICES = (50, 100, 200, 300, 500)
 DISTANCES = {"cosine": "Cosine Delta (рекомендуется)", "burrows": "Delta Барроуза"}
@@ -38,7 +38,8 @@ def _units(session: Session, text_ids: list[int], unit: str, chunk: int,
         seq = list(session.scalars(q.order_by(TokenRow.sentence_id, TokenRow.idx)))
         seq = [w for w in seq if any(ch.isalpha() for ch in w)]
         short = short_title(t.title, t.meta)
-        base = {"text_id": tid, "title": t.title, "author": t.author or "—", "year": t.year_from, "stype": t.source_type}
+        base = {"text_id": tid, "title": t.title, "author": t.author or "—", "author_label": short_author(t.author) or "—",
+                "year": t.year_from, "stype": t.source_type}
         if unit == "chunk" and len(seq) >= chunk:
             for k in range(len(seq) // chunk):
                 units.append({**base, "label": f"{short} [{k + 1}]", "part": k + 1, "n_words": chunk})

@@ -48,12 +48,13 @@ document.addEventListener('DOMContentLoaded', function () {
   const order = st.dendro.order;
   const segs = st.dendro.segments.map(s => ({ type: 'scatter', mode: 'lines', x: [s[0], s[2]], y: [s[1], s[3]], line: { color: cssVar('--muted'), width: 1.4 }, hoverinfo: 'skip', showlegend: false }));
   segs.push({ type: 'scatter', mode: 'markers', x: order.map(() => 0), y: order.map((_, i) => i), marker: { size: 9, color: order.map(i => colorOf(st.units[i].author)) },
-    text: order.map(i => `${st.units[i].label} — ${st.units[i].author}`), hovertemplate: '%{text}<extra></extra>', showlegend: false });
+    text: order.map(i => `${st.units[i].label} — ${st.units[i].author_label || st.units[i].author}`), hovertemplate: '%{text}<extra></extra>', showlegend: false });
   drawChart('chart-dendro', segs, { xaxis: { title: 'расстояние', zeroline: false }, margin: { l: 220, r: 10, t: 10, b: 40 },
     yaxis: { tickvals: order.map((_, i) => i), ticktext: order.map(i => st.units[i].label), automargin: true, autorange: 'reversed' } });
   drawChart('chart-mds', authors.map(a => { const idx = st.units.map((u, i) => i).filter(i => st.units[i].author === a);
-    return { type: 'scatter', mode: st.units.length > 25 ? 'markers' : 'markers+text', name: a, x: idx.map(i => st.map[i].x), y: idx.map(i => st.map[i].y), text: idx.map(i => st.units[i].label),
-      textposition: 'top center', marker: { size: 10, color: colorOf(a) }, hovertemplate: '%{text}<extra>' + a + '</extra>' }; }),
+    const name = st.units[idx[0]].author_label || a;  // в легенде — инициалы и фамилия
+    return { type: 'scatter', mode: st.units.length > 25 ? 'markers' : 'markers+text', name, x: idx.map(i => st.map[i].x), y: idx.map(i => st.map[i].y), text: idx.map(i => st.units[i].label),
+      textposition: 'top center', marker: { size: 10, color: colorOf(a) }, hovertemplate: '%{text}<extra>' + name + '</extra>' }; }),
     { xaxis: { visible: false }, yaxis: { visible: false }, legend: { orientation: 'h', y: -0.05 }, margin: { l: 10, r: 10, t: 10, b: 10 } });
   if (document.getElementById('chart-dist')) {
     drawChart('chart-dist', [{ type: 'heatmap', z: st.matrix, x: st.units.map(u => u.label), y: st.units.map(u => u.label), colorscale: 'Blues',
@@ -101,7 +102,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const tc = {{ tc|tojson }};
   const names = tc.texts.map(t => t.title);
   drawChart('chart-radar', tc.radar.series.map(s => ({ type: 'scatterpolar', r: s.values.concat([s.values[0]]), theta: tc.radar.labels.concat([tc.radar.labels[0]]),
-    name: s.title, fill: 'toself', opacity: 0.55 })), { polar: { radialaxis: { range: [0, 1], showticklabels: false } }, legend: { orientation: 'h', y: -0.1 }, margin: { l: 60, r: 60, t: 30, b: 60 } });
+    name: s.label || s.title, fill: 'toself', opacity: 0.55 })), { polar: { radialaxis: { range: [0, 1], showticklabels: false } }, legend: { orientation: 'h', y: -0.1 }, margin: { l: 60, r: 60, t: 30, b: 60 } });
   drawChart('chart-jac', [{ type: 'heatmap', z: tc.jaccard, x: names, y: names, colorscale: 'Blues', reversescale: true, zmin: 0, zmax: 1, hovertemplate: '%{y} — %{x}: %{z}<extra></extra>' }],
     { yaxis: { automargin: true, autorange: 'reversed' }, xaxis: { automargin: true }, margin: { l: 160, r: 10, t: 10, b: 100 } });
   if (tc.delta) drawChart('chart-delta', [{ type: 'heatmap', z: tc.delta, x: names, y: names, colorscale: 'Blues', hovertemplate: '%{y} — %{x}: %{z}<extra></extra>' }],

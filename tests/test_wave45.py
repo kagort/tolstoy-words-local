@@ -116,7 +116,7 @@ def test_category_frequency(client, corpus):
         # закон (4) + порядок (4) + «закон и порядок» (2), но слово «закон» в «законе и порядке» — одно вхождение категории
         assert rows["ЗАКОН И ПОРЯДОК"]["count"] == 8
         assert abs(sum(r["share"] for r in cf["rows"]) - 100) < 0.5
-        assert [g["label"] for g in cf["groups"]] == ["Трамп Д.", "Блинкен Э."]
+        assert [g["label"] for g in cf["groups"]] == ["Д. Трамп", "Э. Блинкен"]
         only = A.category_frequency(s, corpus["dict_id"], ids, entry_ids=[corpus["entries"]["закон"].id])
         assert [r["count"] for r in only["rows"]] == [4]
     base = f"dictionary_id={corpus['dict_id']}&corpus_id={corpus['corpus_id']}"
