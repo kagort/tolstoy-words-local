@@ -408,12 +408,30 @@ async def dictionary_create(request: Request, name: str = Form(...), description
     return redirect(f"/dictionaries/{d.id}/cognates" if suggest else f"/dictionaries/{d.id}")
 
 
+DICT_SORTS = {"hits": "по числу вхождений", "abc": "по алфавиту", "added": "по порядку добавления"}
+
+
+def _entry_hits(db: Session, dict_id: int) -> dict[int, int]:
+    """Вхождения каждого слова словаря во всех текстах (засчитанные: без ложных и слов внутри имён)."""
+    return dict(db.execute(select(Hit.entry_id, func.count()).where(Hit.dictionary_id == dict_id, A.VALID).group_by(Hit.entry_id)).all())
+
+
+def _sorted_entries(entries, hits: dict[int, int], sort: str = "hits") -> list:
+    if sort == "abc":
+        return sorted(entries, key=lambda e: e.surface.lower())
+    if sort == "added":
+        return sorted(entries, key=lambda e: e.id)
+    return sorted(entries, key=lambda e: (-hits.get(e.id, 0), e.surface.lower()))  # частые сверху
+
+
 @router.get("/dictionaries/{dict_id}")
 def dictionary_detail(request: Request, dict_id: int, db: Session = Depends(get_session)):
     d = db.get(Dictionary, dict_id)
     if d is None:
         raise HTTPException(404)
-    hits = dict(db.execute(select(Hit.entry_id, func.count()).where(Hit.dictionary_id == dict_id, A.VALID).group_by(Hit.entry_id)).all())
+    hits = _entry_hits(db, dict_id)
+    sort = request.query_params.get("sort") if request.query_params.get("sort") in DICT_SORTS else "hits"
+    entries = _sorted_entries(d.entries, hits, sort)
     # вхождения внутри имён собственных (не считаются): «любовь» в «Любовь Андреевна»
     in_names = dict(db.execute(select(Hit.entry_id, func.count()).where(Hit.dictionary_id == dict_id, Hit.in_name,
                                                                          Hit.is_valid.is_(None)).group_by(Hit.entry_id)).all())
@@ -425,7 +443,7 @@ def dictionary_detail(request: Request, dict_id: int, db: Session = Depends(get_
 
     no_category = sum(1 for e in d.entries if not e.category)
     dup_groups = duplicate_groups(d)
-    return render(request, "dictionary_detail.html", d=d, hits=hits, in_names=in_names, opt_counts=opt_counts, pending=pending, stale=stale,
+    return render(request, "dictionary_detail.html", d=d, hits=hits, entries=entries, sort=sort, DICT_SORTS=DICT_SORTS, in_names=in_names, opt_counts=opt_counts, pending=pending, stale=stale,
                   no_category=no_category, has_categories=no_category < len(d.entries), dup_groups=dup_groups,
                   no_cats=bool((d.settings or {}).get("no_categories")),
                   all_corpora=list(db.scalars(select(Corpus).order_by(Corpus.name))), scope=set(scope_corpora(d)),
@@ -452,10 +470,21 @@ def entry_update(request: Request, dict_id: int, entry_id: int, option: str = Fo
 @router.post("/dictionaries/{dict_id}/entries/{entry_id}/delete")
 def entry_delete(request: Request, dict_id: int, entry_id: int, db: Session = Depends(get_session)):
     e = db.get(DictionaryEntry, entry_id)
+    anchor = ""
     if e is not None and e.dictionary_id == dict_id:
+        # после удаления страница открывается на соседнем слове, а не в начале списка
+        sort = request.query_params.get("sort") if request.query_params.get("sort") in DICT_SORTS else "hits"
+        ids = [x.id for x in _sorted_entries(db.get(Dictionary, dict_id).entries, _entry_hits(db, dict_id), sort)]
+        pos = ids.index(entry_id)
+        nxt = ids[pos + 1] if pos + 1 < len(ids) else (ids[pos - 1] if pos else None)
+        anchor = f"#e{nxt}" if nxt else ""
+        surface = e.surface
         db.delete(e)
         db.commit()
-    return redirect(f"/dictionaries/{dict_id}")
+        flash(request, f"«{surface}» удалено из словаря вместе с вхождениями", "success")
+        if sort != "hits":
+            anchor = f"?sort={sort}{anchor}"
+    return redirect(f"/dictionaries/{dict_id}{anchor}")
 
 
 @router.post("/dictionaries/{dict_id}/add")
@@ -544,8 +573,12 @@ def dictionary_categories(request: Request, dict_id: int, db: Session = Depends(
     if d is None:
         raise HTTPException(404)
     k = _int(request.query_params.get("k"))
-    sug = suggest_categories(db, dict_id, k=k if k and 2 <= k <= 20 else None)
-    return render(request, "dictionary_categories.html", d=d, sug=sug)
+    redo = bool(request.query_params.get("all"))  # все слова заново (существующие категории заменяются)
+    sug = suggest_categories(db, dict_id, k=k if k and 2 <= k <= 20 else None, only_empty=not redo)
+    from app.services.dictionaries import no_categories
+
+    return render(request, "dictionary_categories.html", d=d, sug=sug, redo=redo, no_cats=no_categories(d),
+                  n_with_cat=sum(1 for e in d.entries if e.category))
 
 
 @router.post("/dictionaries/{dict_id}/categories")
@@ -558,9 +591,14 @@ async def dictionary_categories_apply(request: Request, dict_id: int, db: Sessio
     form = await request.form()
     names = {int(k[5:]): str(v) for k, v in form.items() if k.startswith("name_") and k[5:].isdigit()}
     assign = {int(k[6:]): int(v) for k, v in form.items() if k.startswith("entry_") and k[6:].isdigit() and str(v).isdigit()}
-    n = apply_categories(db, dict_id, names, assign)
+    redo = form.get("all") == "1"
+    n = apply_categories(db, dict_id, names, assign, only_empty=not redo)
+    note = ""
+    if n and (d.settings or {}).get("no_categories"):  # категории назначены — словарь снова с категориями
+        d.settings = {**d.settings, "no_categories": False}
+        note = "; режим «без категорий» выключен"
     db.commit()
-    flash(request, f"Категории назначены: {n} слов", "success")
+    flash(request, f"Категории назначены: {n} слов{note}", "success")
     return redirect(f"/dictionaries/{dict_id}")
 
 

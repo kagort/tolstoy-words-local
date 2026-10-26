@@ -3,16 +3,23 @@
 {% block content %}
 <p><a href="/dictionaries/{{ d.id }}">← Словарь «{{ d.name }}»</a></p>
 <h1>Предложить категории</h1>
-<p class="help">Слова без категории ({{ sug.n }}) сгруппированы по смыслу: k-средние по векторам navec; однокоренные слова — в одной группе;
+{% if no_cats %}<div class="flash info">Словарь сейчас «без категорий». После «Применить» категории появятся в анализе, и этот режим выключится.</div>{% endif %}
+<p class="row" style="gap:8px">
+  {% if redo %}<span><strong>Все слова</strong> (существующие категории заменяются)</span> · <a href="/dictionaries/{{ d.id }}/categories">только слова без категории</a>
+  {% else %}<span><strong>Только слова без категории</strong></span>{% if n_with_cat %} · <a href="/dictionaries/{{ d.id }}/categories?all=1">все слова заново ({{ n_with_cat }} с категорией будут переразбиты)</a>{% endif %}{% endif %}
+</p>
+<p class="help">{{ 'Все слова' if redo else 'Слова без категории' }} ({{ sug.n }}) сгруппированы по смыслу: k-средние по векторам navec; однокоренные слова — в одной группе;
   слова, которых нет в navec, отнесены к группе по контекстам своих вхождений (помечены «по контексту»), иначе — в «ПРОЧЕЕ».
   Название группы — главное существительное группы; рядом — варианты (щелчок подставит). Поправьте названия, перенесите слова в другую группу
-  и нажмите «Применить». Уже назначенные категории не меняются.</p>
+  и нажмите «Применить». {{ 'Существующие категории будут заменены.' if redo else 'Уже назначенные категории не меняются.' }}</p>
 {% if sug.groups %}
 <form method="get" class="panel row">
+  {% if redo %}<input type="hidden" name="all" value="1">{% endif %}
   <div class="shrink"><label>Число групп</label><input type="number" name="k" min="2" max="20" value="{{ sug.k }}" style="width:90px"></div>
   <div class="shrink"><button type="submit" class="secondary">Пересчитать</button></div>
 </form>
 <form method="post" action="/dictionaries/{{ d.id }}/categories">
+  {% if redo %}<input type="hidden" name="all" value="1">{% endif %}
   <div class="grid cols-2">
   {% for g in sug.groups %}
     <div class="panel">

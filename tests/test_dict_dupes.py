@@ -106,7 +106,7 @@ def test_no_categories_setting(client):
         assert from_params(s, {"dictionary_id": [str(dict_id)], "corpus_id": [str(client.corpus_id)], "unit": ["cat"]}).unit == ""
     page = client.get(f"/analysis?tab=freq&{base}&unit=cat").text
     assert "По категориям словаря" not in page and 'name="unit"' not in page
-    assert "Словарь без категорий" in client.get(f"/dictionaries/{dict_id}").text
+    assert "Сейчас словарь без категорий" in client.get(f"/dictionaries/{dict_id}").text
     assert "<th>Категория</th>" not in page
     csv = client.get(f"/export/dictionary/{dict_id}.csv").content.decode("utf-8-sig")
     assert csv.splitlines()[0] == "слово;часть речи;комментарий;лемма;режим"
@@ -125,3 +125,66 @@ def test_import_by_header_names():
     assert items[0] == {"surface": "запах", "category": None, "upos": "NOUN", "comment": "главное"}
     items = parse_dictionary_text("запах;ЗАПАХИ;NOUN\nвонь;ЗАПАХИ;\n")  # без заголовка — по порядку колонок
     assert items[0]["category"] == "ЗАПАХИ" and items[0]["upos"] == "NOUN"
+
+
+@needs_db
+def test_suggest_categories_in_flat_mode(client):
+    from app.db import SessionLocal
+    from app.models import Dictionary
+
+    with SessionLocal() as s:
+        d = s.query(Dictionary).filter_by(name="Ароматы").one()
+        dict_id, ids = d.id, [e.id for e in d.entries]
+        assert d.settings["no_categories"] is True  # после test_no_categories_setting
+    page = client.get(f"/dictionaries/{dict_id}").text
+    assert f"/dictionaries/{dict_id}/categories?all=1" in page
+    page = client.get(f"/dictionaries/{dict_id}/categories?all=1&k=2").text
+    assert "Все слова" in page and "режим выключится" in page and 'name="all" value="1"' in page
+    client.post(f"/dictionaries/{dict_id}/categories", data={"all": "1", "name_1": "НОВАЯ", **{f"entry_{i}": "1" for i in ids}})
+    with SessionLocal() as s:
+        d = s.get(Dictionary, dict_id)
+        assert {e.category for e in d.entries} == {"НОВАЯ"} and d.settings["no_categories"] is False
+
+
+@needs_db
+def test_delete_entry_button(client):
+    from app.db import SessionLocal
+    from app.models import Dictionary, Hit
+
+    with SessionLocal() as s:
+        d = s.query(Dictionary).filter_by(name="Ароматы").one()
+        dict_id = d.id
+        e = next(e for e in d.entries if e.surface == "аромат")
+        eid = e.id
+    page = client.get(f"/dictionaries/{dict_id}").text
+    assert f'formaction="/dictionaries/{dict_id}/entries/{eid}/delete"' in page and "Удалить из словаря" in page
+    r = client.post(f"/dictionaries/{dict_id}/entries/{eid}/delete", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith(f"/dictionaries/{dict_id}")
+    assert "удалено из словаря" in client.get(r.headers["location"]).text
+    with SessionLocal() as s:
+        assert all(x.surface != "аромат" for x in s.get(Dictionary, dict_id).entries)
+        assert s.query(Hit).filter_by(entry_id=eid).count() == 0
+
+
+@needs_db
+def test_dictionary_sorted_by_hits(client):
+    import re
+
+    from app.db import SessionLocal
+    from app.models import Dictionary
+    from app.web.pages import _entry_hits
+
+    client.post("/dictionaries", data={"name": "Порядок", "words": "запах, сад, благоухание"})
+    from app.services.jobs import run_pending
+
+    run_pending()
+    with SessionLocal() as s:
+        d = s.query(Dictionary).filter_by(name="Порядок").one()
+        hits = _entry_hits(s, d.id)
+        expected = [e.surface for e in sorted(d.entries, key=lambda e: (-hits.get(e.id, 0), e.surface))]
+        dict_id = d.id
+    page = client.get(f"/dictionaries/{dict_id}").text
+    shown = re.findall(r'<tr id="e\d+"[^>]*>\s*<td><form[^>]*></form><strong>([^<]+)</strong>', page)
+    assert shown == expected and hits  # «сад» (3 вхождения) выше «благоухания» (2) и «запаха» (1)
+    abc = re.findall(r'<tr id="e\d+"[^>]*>\s*<td><form[^>]*></form><strong>([^<]+)</strong>', client.get(f"/dictionaries/{dict_id}?sort=abc").text)
+    assert abc == sorted(expected)
