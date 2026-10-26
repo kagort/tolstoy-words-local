@@ -266,6 +266,7 @@ def test_dictionary_scope(client, data):
 
 
 def test_dashboard(client, data):
+    client.cookies.set("qv_ui", "classic")  # прежний дашборд; дашборд v2 — tests/test_dashboard_v2.py
     r = client.get(f"/dashboard?corpus_id={data['corpus_id']}&dictionary_id={data['dict_id']}")
     assert r.status_code == 200 and "Частые слова словаря" in r.text and "Персонажи" in r.text
     r = client.get(f"/dashboard?texts={data['text_id']}")
@@ -277,3 +278,6 @@ def test_dashboard(client, data):
     assert "/static/" not in html.split("<body>", 1)[1]  # никаких внешних файлов приложения
     small = client.get(f"/export/dashboard.html?corpus_id={data['corpus_id']}&cdn=1").text
     assert len(small) < 600_000 and "cdn.jsdelivr.net/npm/plotly.js-dist-min@" in small
+    client.cookies.set("qv_ui", "v2")
+    r = client.get(f"/dashboard?texts={data['text_id']}")
+    assert "Корпус × словарь" in r.text and "Карта текста" in r.text and "/static/dash_v2.js" in r.text
