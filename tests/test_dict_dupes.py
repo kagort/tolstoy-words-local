@@ -103,6 +103,7 @@ def test_no_categories_setting(client):
     client.post(f"/dictionaries/{dict_id}/settings", data={"name": "Ароматы", "no_categories": "1", "merge_propn": "1"})
     with SessionLocal() as s:
         assert s.get(Dictionary, dict_id).settings["no_categories"] is True
+        assert all(e.category is None for e in s.get(Dictionary, dict_id).entries)  # названия категорий стёрты
         assert from_params(s, {"dictionary_id": [str(dict_id)], "corpus_id": [str(client.corpus_id)], "unit": ["cat"]}).unit == ""
     page = client.get(f"/analysis?tab=freq&{base}&unit=cat").text
     assert "По категориям словаря" not in page and 'name="unit"' not in page

@@ -17,7 +17,7 @@ from app.nlp.tree import norm
 from app.services.jobs import enqueue
 
 # count_names — считать слова словаря и внутри имён собственных («любовь» в «Любовь Андреевна»); по умолчанию нет;
-# no_categories — словарь без категорий: анализ показывает простой список слов (категории в записях сохраняются)
+# no_categories — словарь без категорий: анализ показывает простой список слов; категории записей стираются (clear_categories)
 DEFAULT_SETTINGS = {"include_participles": False, "include_gerunds": False, "merge_propn": True, "count_names": False,
                     "no_categories": False}
 # невидимые символы и знаки ударения, которые попадают в словари из Word и сайтов: «благоуха́ния», «духи\u200b»
@@ -39,6 +39,16 @@ def entry_key(e: DictionaryEntry) -> tuple:
 
 def no_categories(d: Dictionary | None) -> bool:
     return bool(d is not None and (d.settings or {}).get("no_categories"))
+
+
+def clear_categories(d: Dictionary) -> int:
+    """Режим «без категорий»: стирает категории у всех слов словаря. Возвращает, у скольких слов они были."""
+    n = 0
+    for e in d.entries:
+        if e.category:
+            e.category = None
+            n += 1
+    return n
 
 HEADER_WORDS = {"слово", "word", "лемма", "lemma", "токен", "token"}
 
@@ -196,7 +206,8 @@ def add_entries(session: Session, d: Dictionary, items: list[dict], skipped: lis
 
 
 def update_entry(session: Session, entry: DictionaryEntry, *, lemma: str | None = None, upos: str | None = None,
-                 match_mode: str | None = None, category: str | None = None) -> None:
+                 match_mode: str | None = None, category: str | None = None) -> bool:
+    """Возвращает True, если поменялся разбор или режим (тогда вхождения слова пересчитываются)."""
     changed = False
     if lemma is not None and lemma.strip() and lemma.strip() != entry.lemma:
         entry.lemma = lemma.strip()
@@ -215,6 +226,7 @@ def update_entry(session: Session, entry: DictionaryEntry, *, lemma: str | None 
     if changed:
         enqueue(session, "match", {"dictionary_id": entry.dictionary_id, "entry_ids": [entry.id]},
                 title=f"Пересчёт слова «{entry.surface}»")
+    return changed
 
 
 def option_counts(session: Session, entry: DictionaryEntry) -> dict[str, int]:
