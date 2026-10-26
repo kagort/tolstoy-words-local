@@ -11,6 +11,11 @@
 <select name="corpus_id" form="sel-form" onchange="selCorpusChanged(this)"><option value="">Все тексты</option>{% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if c.id == corpus_id }}>{{ c.name }}</option>{% endfor %}</select>
 {% endmacro %}
 
+{% if stale %}
+<div class="flash info">{% if stale_pending %}Идёт пересчёт вхождений словаря: пока он не закончится, связи в профиле слова, коллокациях и ролях — по прежней версии разбора.
+  {% else %}Вхождения словаря ({{ stale }}) посчитаны прежней версией синтаксического разбора: в профиле слова, коллокациях и ролях — старые связи (страница предложения уже показывает новые).
+  <form class="inline" method="post" action="/dictionaries/{{ dict_id }}/rematch"><button class="small" type="submit">Пересчитать вхождения</button></form>{% endif %}</div>
+{% endif %}
 {% if scope_out %}
 <div class="flash info">Словарь сопоставляется только с выбранными корпусами: {{ scope_out }} текстов выборки с ним не сопоставлены, их частоты — нули.
   {% if corpus_id %}<form class="inline" method="post" action="/dictionaries/{{ dict_id }}/scope/add"><input type="hidden" name="corpus_id" value="{{ corpus_id }}">
