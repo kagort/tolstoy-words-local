@@ -4,7 +4,7 @@
   Векторы обучены на новостных текстах, поэтому для архаичной лексики возможны неточности.</p>
 
 <div class="panel">
-  <h3 style="margin-top:0">1. Похожие по смыслу слова — кандидаты в словарь</h3>
+  <h3 style="margin-top:0">1. Похожие по смыслу слова — кандидаты в словарь{{ term('semantic') }}</h3>
   <div class="row">
     <div><label>Исходные слова (через запятую; пусто — {{ 'выбранные слова' if sel.words else 'весь словарь' }})</label>
       <input type="text" name="seed" form="sel-form" value="{{ seed_text }}" placeholder="например: запах, аромат"></div>
@@ -37,9 +37,9 @@
     {% else %}<p class="muted">Для карты нужно хотя бы 2 слова словаря, известных модели.</p>{% endif %}
   </div>
 
-  <div class="panel"><h3 style="margin-top:0">3. Употребления (значения) слова</h3>
+  <div class="panel"><h3 style="margin-top:0">3. Употребления (значения) слова{{ term('senses') }}</h3>
     <div class="row">
-      <div><label>Слово</label><select name="entry_id" form="sel-form">{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }} ({{ word_counts.get(e.id, 0) }})</option>{% endfor %}</select></div>
+      <div><label>Слово</label><select name="entry_id" form="sel-form">{% for e in entries %}{% set n = word_counts.get(e.id, 0) %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}{{ ' class=muted' if not n }}>{{ e.surface }} ({{ n }})</option>{% endfor %}</select></div>
       <div class="shrink"><label>Групп</label><select name="k" form="sel-form">{% for n in range(2, 9) %}<option {{ 'selected' if sense_k == n }}>{{ n }}</option>{% endfor %}</select></div>
       <div class="shrink"><button type="submit" form="sel-form" class="small">Показать</button></div>
     </div>
@@ -89,7 +89,7 @@ document.addEventListener('DOMContentLoaded', function () {
 {# ============================================================== ТЕМЫ #}
 {% if tab == 'topics' %}
 <div class="panel row">
-  <div class="shrink"><label>Число тем</label><select name="k" form="sel-form">{% for n in range(3, 21) %}<option {{ 'selected' if tp_k == n }}>{{ n }}</option>{% endfor %}</select></div>
+  <div class="shrink"><label>Число тем{{ term('topics') }}</label><select name="k" form="sel-form">{% for n in range(3, 21) %}<option {{ 'selected' if tp_k == n }}>{{ n }}</option>{% endfor %}</select></div>
   <div class="shrink"><button type="submit" form="sel-form">Построить</button></div>
   <div class="muted small">Темы находятся автоматически (неотрицательное матричное разложение, NMF) по фрагментам текстов выборки ~1000 слов; учитываются знаменательные леммы{{ ' без стоп-слов' if sel.stop }}.
     Название темы придумывает исследователь по её словам.</div>

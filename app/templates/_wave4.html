@@ -1,10 +1,10 @@
 {# ============================================================== АВТОРСТВО (СТИЛОМЕТРИЯ) #}
 {% if tab == 'stylo' and sty %}
 <div class="panel row">
-  <div class="shrink"><label>Единицы</label><select name="unit" form="sel-form"><option value="text" {{ 'selected' if sty.unit == 'text' }}>целые тексты</option><option value="chunk" {{ 'selected' if sty.unit == 'chunk' }}>фрагменты текстов</option></select></div>
+  <div class="shrink"><label>Единицы</label><select name="sunit" form="sel-form"><option value="text" {{ 'selected' if sty.unit == 'text' }}>целые тексты</option><option value="chunk" {{ 'selected' if sty.unit == 'chunk' }}>фрагменты текстов</option></select></div>
   <div class="shrink"><label>Размер фрагмента, слов</label><select name="chunk" form="sel-form">{% for c in [2000, 5000, 10000, 20000] %}<option {{ 'selected' if sty.chunk == c }}>{{ c }}</option>{% endfor %}</select></div>
-  <div class="shrink"><label>Самых частых слов (MFW)</label><select name="mfw" form="sel-form">{% for n in MFW_CHOICES %}<option {{ 'selected' if sty.mfw == n }}>{{ n }}</option>{% endfor %}</select></div>
-  <div><label>Расстояние</label><select name="kind" form="sel-form">{% for k, v in DISTANCES.items() %}<option value="{{ k }}" {{ 'selected' if sty.kind == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div class="shrink"><label>Самых частых слов (MFW){{ term('mfw') }}</label><select name="mfw" form="sel-form">{% for n in MFW_CHOICES %}<option {{ 'selected' if sty.mfw == n }}>{{ n }}</option>{% endfor %}</select></div>
+  <div><label>Расстояние{{ term('cosine_delta') }}</label><select name="kind" form="sel-form">{% for k, v in DISTANCES.items() %}<option value="{{ k }}" {{ 'selected' if sty.kind == k }}>{{ v }}</option>{% endfor %}</select></div>
   <div><label>Кто автор? — спорный текст</label><select name="target" form="sel-form"><option value="">— не выбран —</option>{% for t in sty_texts %}<option value="{{ t.id }}" {{ 'selected' if t.id == sty_target }}>{% if t.author %}{{ t.author }}, {% endif %}«{{ t.title }}»</option>{% endfor %}</select></div>
   <div class="shrink"><button type="submit" form="sel-form">Показать</button></div>
   {% if sty.matrix %}<div class="shrink">Скачать: <a href="/export/stylometry.xlsx{{ qs(request) }}">XLSX</a></div>{% endif %}
@@ -28,9 +28,9 @@
     Если отрыв мал (меньше ~0,05 для Cosine Delta), атрибуция ненадёжна. Метод выбирает только среди авторов, чьи тексты есть в выборке.</p></div>
 {% endif %}
 <div class="grid cols-2">
-  <div class="panel"><h3 style="margin-top:0">Дендрограмма (кластеры по стилю)</h3><div id="chart-dendro" class="chart" style="min-height:{{ 140 + 22 * sty.units|length }}px"></div>
+  <div class="panel"><h3 style="margin-top:0">Дендрограмма (кластеры по стилю){{ term('upgma') }}</h3><div id="chart-dendro" class="chart" style="min-height:{{ 140 + 22 * sty.units|length }}px"></div>
     <p class="help">Чем раньше (левее) соединяются ветви, тем ближе стиль. Цвет подписи — автор.</p></div>
-  <div class="panel"><h3 style="margin-top:0">Карта текстов</h3><div id="chart-mds" class="chart" style="min-height:440px"></div>
+  <div class="panel"><h3 style="margin-top:0">Карта текстов{{ term('mds') }}</h3><div id="chart-mds" class="chart" style="min-height:440px"></div>
     <p class="help">Расстояния между точками приближённо отражают стилистические расстояния (многомерное шкалирование). Цвет — автор.</p></div>
 </div>
 {% if sty.units|length <= 60 %}<div class="panel"><h3 style="margin-top:0">Матрица расстояний</h3><div id="chart-dist" class="chart" style="min-height:{{ 160 + 20 * sty.units|length }}px"></div></div>{% endif %}
@@ -48,12 +48,13 @@ document.addEventListener('DOMContentLoaded', function () {
   const order = st.dendro.order;
   const segs = st.dendro.segments.map(s => ({ type: 'scatter', mode: 'lines', x: [s[0], s[2]], y: [s[1], s[3]], line: { color: cssVar('--muted'), width: 1.4 }, hoverinfo: 'skip', showlegend: false }));
   segs.push({ type: 'scatter', mode: 'markers', x: order.map(() => 0), y: order.map((_, i) => i), marker: { size: 9, color: order.map(i => colorOf(st.units[i].author)) },
-    text: order.map(i => `${st.units[i].label} — ${st.units[i].author}`), hovertemplate: '%{text}<extra></extra>', showlegend: false });
+    text: order.map(i => `${st.units[i].label} — ${st.units[i].author_label || st.units[i].author}`), hovertemplate: '%{text}<extra></extra>', showlegend: false });
   drawChart('chart-dendro', segs, { xaxis: { title: 'расстояние', zeroline: false }, margin: { l: 220, r: 10, t: 10, b: 40 },
     yaxis: { tickvals: order.map((_, i) => i), ticktext: order.map(i => st.units[i].label), automargin: true, autorange: 'reversed' } });
   drawChart('chart-mds', authors.map(a => { const idx = st.units.map((u, i) => i).filter(i => st.units[i].author === a);
-    return { type: 'scatter', mode: st.units.length > 25 ? 'markers' : 'markers+text', name: a, x: idx.map(i => st.map[i].x), y: idx.map(i => st.map[i].y), text: idx.map(i => st.units[i].label),
-      textposition: 'top center', marker: { size: 10, color: colorOf(a) }, hovertemplate: '%{text}<extra>' + a + '</extra>' }; }),
+    const name = st.units[idx[0]].author_label || a;  // в легенде — инициалы и фамилия
+    return { type: 'scatter', mode: st.units.length > 25 ? 'markers' : 'markers+text', name, x: idx.map(i => st.map[i].x), y: idx.map(i => st.map[i].y), text: idx.map(i => st.units[i].label),
+      textposition: 'top center', marker: { size: 10, color: colorOf(a) }, hovertemplate: '%{text}<extra>' + name + '</extra>' }; }),
     { xaxis: { visible: false }, yaxis: { visible: false }, legend: { orientation: 'h', y: -0.05 }, margin: { l: 10, r: 10, t: 10, b: 10 } });
   if (document.getElementById('chart-dist')) {
     drawChart('chart-dist', [{ type: 'heatmap', z: st.matrix, x: st.units.map(u => u.label), y: st.units.map(u => u.label), colorscale: 'Blues',
@@ -93,7 +94,7 @@ document.addEventListener('DOMContentLoaded', function () {
 <div class="grid cols-2">
   <div class="panel"><h3 style="margin-top:0">Пересечение частотной лексики (Жаккар)</h3><div id="chart-jac" class="chart" style="min-height:{{ 160 + 40 * tc.texts|length }}px"></div>
     <p class="help">Доля общих слов среди 300 частотных знаменательных лемм двух текстов (1 — одинаковые).</p></div>
-  {% if tc.delta %}<div class="panel"><h3 style="margin-top:0">Стилометрическое расстояние (Cosine Delta)</h3><div id="chart-delta" class="chart" style="min-height:{{ 160 + 40 * tc.texts|length }}px"></div>
+  {% if tc.delta %}<div class="panel"><h3 style="margin-top:0">Стилометрическое расстояние (Cosine Delta){{ term('cosine_delta') }}</h3><div id="chart-delta" class="chart" style="min-height:{{ 160 + 40 * tc.texts|length }}px"></div>
     <p class="help">По 100 самым частым словам (см. вкладку «Авторство»): чем меньше, тем ближе стиль.</p></div>{% endif %}
 </div>
 <script>
@@ -101,7 +102,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const tc = {{ tc|tojson }};
   const names = tc.texts.map(t => t.title);
   drawChart('chart-radar', tc.radar.series.map(s => ({ type: 'scatterpolar', r: s.values.concat([s.values[0]]), theta: tc.radar.labels.concat([tc.radar.labels[0]]),
-    name: s.title, fill: 'toself', opacity: 0.55 })), { polar: { radialaxis: { range: [0, 1], showticklabels: false } }, legend: { orientation: 'h', y: -0.1 }, margin: { l: 60, r: 60, t: 30, b: 60 } });
+    name: s.label || s.title, fill: 'toself', opacity: 0.55 })), { polar: { radialaxis: { range: [0, 1], showticklabels: false } }, legend: { orientation: 'h', y: -0.1 }, margin: { l: 60, r: 60, t: 30, b: 60 } });
   drawChart('chart-jac', [{ type: 'heatmap', z: tc.jaccard, x: names, y: names, colorscale: 'Blues', reversescale: true, zmin: 0, zmax: 1, hovertemplate: '%{y} — %{x}: %{z}<extra></extra>' }],
     { yaxis: { automargin: true, autorange: 'reversed' }, xaxis: { automargin: true }, margin: { l: 160, r: 10, t: 10, b: 100 } });
   if (tc.delta) drawChart('chart-delta', [{ type: 'heatmap', z: tc.delta, x: names, y: names, colorscale: 'Blues', hovertemplate: '%{y} — %{x}: %{z}<extra></extra>' }],

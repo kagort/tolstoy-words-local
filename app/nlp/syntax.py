@@ -12,11 +12,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from app.nlp.tree import Sentence, base_rel
 
-SYNTAX_VERSION = "1.0"
+SYNTAX_VERSION = "1.2"  # 1.2: ряды раскрываются у всех связей; личный глагол не однороден деепричастию
 
 # ------------------------------------------------------------------ словари правил
 
@@ -56,8 +56,12 @@ PLACE_PREPS = {
 TIME_PREPS = {"до", "после", "через", "накануне", "спустя", "во время", "в течение"}
 CAUSE_PREPS = {"из-за", "благодаря", "вследствие", "ввиду", "от"}
 PURPOSE_PREPS = {"для", "ради"}
+# «ночью», «зимой»: творительный без предлога — обстоятельство времени, а не дополнение
+TIME_NOUNS = {"утро", "день", "вечер", "ночь", "зима", "весна", "лето", "осень", "рассвет", "закат", "сумерки", "полдень", "полночь"}
 
 ATTR_RELS = {"amod", "det", "nmod", "acl", "nummod", "appos"}
+HEAD_RELS = {"amod", "det", "nmod", "acl", "nummod"}  # определение → определяемое слово
+DEP_RELS = {"obj", "iobj", "obl", "advmod", "advcl"}  # зависимые глагола: дополнения и обстоятельства
 SUBJ_RELS = {"nsubj", "csubj"}
 OBJ_RELS = {"obj", "iobj"}
 SKIP_DEP_RELS = {"conj", "cc", "punct", "orphan", "fixed", "flat", "goeswith", "reparandum", "dep"}
@@ -89,6 +93,9 @@ ROLE_UD = {
 
 REL_UD = {
     "attribute": "amod, nmod, acl",
+    "head": "голова amod / nmod / acl",
+    "subject": "nsubj, csubj",
+    "object": "obj, iobj, obl",
     "predicate": "голова nsubj; cop, xcomp",
     "governor": "голова obj / iobj / obl",
     "subject_of_pred": "nsubj",
@@ -112,6 +119,9 @@ def rel_label_ud(rel_type: str) -> str:
 
 REL_LABELS = {
     "attribute": "определения",
+    "head": "определяемое слово",
+    "subject": "подлежащее при сказуемом",
+    "object": "дополнения при глаголе",
     "predicate": "сказуемое при подлежащем",
     "governor": "управляющее слово",
     "subject_of_pred": "субъект действия",
@@ -171,8 +181,58 @@ class Role:
 # ------------------------------------------------------------------ анализ предложения
 
 
+# связи, для которых ряд связанного слова раскрывается с проверкой decide_scope (сказуемое, управляющее и определяемое
+# слово); у остальных — общим правилом _expand_series, раскрывать не нужно — у однородных членов и предлогов
+CHECKED_EXPANSION = {"predicate", "governor", "head"}
+NO_EXPANSION = {"conj", "case"}
+
+
+# морфология иногда путает деепричастие и личную форму («пригибая», «вглядываясь» с пометкой VerbForm=Fin,
+# «простирал» с пометкой Conv), поэтому пометка сверяется с окончанием
+CONVERB_ENDINGS = ("ясь", "аясь", "вшись", "вши", "в")
+PAST_ENDINGS = ("л", "ла", "ло", "ли", "лся", "лась", "лось", "лись")
+
+
+def _looks_converb(form: str) -> bool:
+    f = form.lower()
+    return f.endswith(CONVERB_ENDINGS) or (f.endswith("я") and not f.endswith("ся"))
+
+
+def _is_converb(t) -> bool:
+    return t.feat("VerbForm") == "Conv" and not t.form.lower().endswith(PAST_ENDINGS)
+
+
+def _is_finite_verb(t) -> bool:
+    return t.upos in ("VERB", "AUX") and t.feat("VerbForm") == "Fin" and not _looks_converb(t.form)
+
+
+def repair_tree(sent: Sentence) -> Sentence:
+    """Исправление типичных ошибок разбора до анализа (само дерево в базе и на странице не меняется).
+
+    Личный глагол не бывает однородным деепричастию: «всё, опять оживая, устремилось, поднялось… и… послало» —
+    если «поднялось» и «послало» прикреплены через conj к «оживая», они переносятся в ряд сказуемого, которому
+    подчинено деепричастие («устремилось»).
+    """
+    moves = {}
+    for t in sent.tokens:
+        if t.deprel != "conj" or not t.head or not _is_finite_verb(t):
+            continue
+        h = sent.tok(t.head)
+        if not _is_converb(h) or base_rel(h.deprel) != "advcl" or not h.head:
+            continue
+        P = h.head
+        while P and sent.tok(P).deprel == "conj" and sent.tok(P).head:  # к вершине ряда сказуемых
+            P = sent.tok(P).head
+        if P and sent.tok(P).upos in ("VERB", "AUX", "ADJ", "NOUN", "PRON", "PROPN", "NUM"):
+            moves[t.idx] = P
+    if not moves:
+        return sent
+    return Sentence([replace(t, head=moves[t.idx]) if t.idx in moves else t for t in sent.tokens], sent.text)
+
+
 class SentenceAnalysis:
     def __init__(self, sent: Sentence) -> None:
+        sent = repair_tree(sent)
         self.s = sent
         self.groups = self._build_groups()
         self.group_by_member: dict[int, CoordGroup] = {}
@@ -303,6 +363,13 @@ class SentenceAnalysis:
         if drel in ("amod", "det"):
             if td.feat("Number") == "Plur" and tm.feat("Number") == "Sing" and tx.feat("Number") == "Sing":
                 return "shared", "agreement", 0.95
+            # не согласуется с членом x: «тёплой теснотой, кроликами» — «тёплой» не относится к «кроликами»
+            dc, xc = td.feat("Case"), tx.feat("Case")
+            if (dc and xc and dc != xc) or (td.feat("Number") == "Sing" and tx.feat("Number") == "Plur"):
+                return "private", "agreement", 0.9
+            dg, xg = td.feat("Gender"), tx.feat("Gender")
+            if td.feat("Number") == "Sing" and tx.feat("Number") == "Sing" and dg and xg and dg != xg:
+                return "private", "agreement", 0.9
         if drel == "nsubj" and tx.upos in ("VERB", "AUX", "ADJ"):
             ok = self._agrees(d, x)
             if ok is False:
@@ -420,6 +487,8 @@ class SentenceAnalysis:
         case = self.t(i).feat("Case") or ""
         detail = self.case_detail(i)
         if not prep:
+            if case == "Ins" and self.lemma(i) in TIME_NOUNS:
+                return Role("adverbial", "времени", detail)
             if case in ("Ins", "Dat", "Gen", "Acc"):
                 return Role("object", "косвенное", detail)
             return Role("adverbial", "", detail)
@@ -473,6 +542,20 @@ class SentenceAnalysis:
                     detail = r
                 add("attribute", "down", d, detail=detail.strip(), path=full, source=src, scope=scope, rule=rule, confidence=conf)
 
+        # 1б. определяемое слово (для определения): «тёплой теснотой» → «теснота»
+        if role.role == "attribute" and base_rel(s.tok(h).deprel) in HEAD_RELS and s.tok(h).head:
+            H = s.tok(h).head
+            add("head", "up", H, detail=role.subtype, path=s.tok(h).deprel, source="enhanced" if via else "basic",
+                scope="shared" if via else "direct", rule="conj_inherit" if via else "")
+            gh = self.group_of(H)
+            if gh:  # общее определение однородного ряда: «домашними снадобьями и фруктами»
+                for Q in gh.members:
+                    if Q == H:
+                        continue
+                    scope, rule, conf = self.decide_scope(h, H, Q)
+                    if scope in ("shared", "uncertain"):
+                        add("head", "up", Q, detail=role.subtype, path="conj", source="enhanced", scope=scope, rule=rule, confidence=conf)
+
         # 2. сказуемое при подлежащем
         if role.role == "subject":
             P = s.tok(h).head
@@ -521,6 +604,10 @@ class SentenceAnalysis:
                 if r in ("advmod", "advcl") or (r == "obl" and self.role(d).role == "adverbial"):
                     add("adverbial", "up", d, detail=self.role(d).subtype + (" " + self.case_detail(d) if r == "obl" else ""), path=r)
 
+        # 5б. зависимые глагола / сказуемого: подлежащее, дополнения, обстоятельства
+        if T.upos in ("VERB", "AUX") or role.role == "predicate":
+            self._add_dependents(i, add)
+
         # 6. однородные члены
         if g:
             for m in g.members:
@@ -533,11 +620,57 @@ class SentenceAnalysis:
         if preps:
             out.append(Relation("case", "down", preps[0], cd, s.tok(preps[0]).upos, detail=cd, path="case"))
 
+        self._expand_series(i, out)
         if g and i in g.negated:
             for r in out:
                 if r.rel_type != "conj":
                     r.negated = True
         return out
+
+    def _expand_series(self, i: int, out: list[Relation]) -> None:
+        """Общее правило: если связанное слово — вершина однородного ряда, связь получают и остальные члены ряда.
+        «роскошный, сладостный фимиам» → у «фимиам» определения «роскошный» и «сладостный»; «Мать и отец ели суп» →
+        у «суп» субъект действия «мать» и «отец»; «шёл быстро и уверенно» → у подлежащего оба обстоятельства."""
+        own = self.group_of(i)
+        have = {(r.rel_type, r.related_idx) for r in out}
+        for r in list(out):
+            if r.rel_type in NO_EXPANSION or r.rel_type in CHECKED_EXPANSION:
+                continue
+            g2 = self.group_of(r.related_idx)
+            if not g2 or g2.head != r.related_idx or g2 is own:
+                continue
+            for m in g2.members:
+                if m == r.related_idx or m == i or (r.rel_type, m) in have:
+                    continue
+                tm = self.s.tok(m)
+                out.append(Relation(r.rel_type, r.direction, m, tm.lemma.lower(), tm.upos, detail=r.detail,
+                                    path=(r.path + ">conj")[:64], source="enhanced",
+                                    scope="shared" if r.scope == "direct" else r.scope, rule="conj_expand",
+                                    confidence=r.confidence, negated=m in g2.negated))
+                have.add((r.rel_type, m))
+
+    def _add_dependents(self, i: int, add) -> None:
+        """«Пахнет тёплой теснотой, кроликами…» → подлежащее, дополнения (с однородными членами), обстоятельства."""
+        s = self.s
+        subj = self._find_subject(i)
+        if subj:
+            S, rule = subj
+            inherited = rule in ("conj_inherit", "control", "gerund")
+            add("subject", "down", S, path="nsubj", source="enhanced" if rule else "basic",
+                scope="shared" if inherited else "direct", rule=rule)
+        for d, scope, rule, conf, src in self.deps_for(i, DEP_RELS):
+            td = s.tok(d)
+            if td.upos == "PART" or td.lemma.lower() in RELATIVE_PRON:
+                continue
+            drole = self.role(d)
+            if drole.role == "object":
+                rt, detail = "object", f"{drole.subtype} {self.case_detail(d)}".strip()
+            elif drole.role == "adverbial":
+                rt = "adverbial"
+                detail = (drole.subtype + (" " + self.case_detail(d) if self.rel(d) == "obl" else "")).strip()
+            else:
+                continue
+            add(rt, "down", d, detail=detail, path=td.deprel, source=src, scope=scope, rule=rule, confidence=conf)
 
     def _add_predicate(self, out, P, i, via, add) -> None:
         s = self.s

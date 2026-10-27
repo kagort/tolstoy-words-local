@@ -156,6 +156,8 @@ class DictionaryEntry(Base):
     verified: Mapped[bool] = mapped_column(Boolean, default=False)
     ambiguous: Mapped[bool] = mapped_column(Boolean, default=False)
     options: Mapped[list] = mapped_column(JSONB, default=list)
+    # словосочетание: {"slots": [...], "head": k} (см. app/services/phrases.py); None — одно слово
+    phrase: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
 
     dictionary: Mapped[Dictionary] = relationship(back_populates="entries")
 
@@ -184,6 +186,8 @@ class Hit(Base):
     role_detail: Mapped[str | None] = mapped_column(String(64))
     in_coord_group: Mapped[bool] = mapped_column(Boolean, default=False)
     is_valid: Mapped[bool | None] = mapped_column(Boolean)
+    # слово внутри имени собственного («Любовь Андреевна» для слова «любовь»): не считается, пока не отмечено ✓
+    in_name: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     syntax_version: Mapped[str] = mapped_column(String(16))
 
 
@@ -216,6 +220,20 @@ class TokenRelation(Base):
     negated: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class RelationOverride(Base):
+    """Связь, убранная вручную на странице предложения: слова a и b не связаны (все типы связи, в обе стороны).
+    Хранится по номерам слов в предложении, поэтому переживает пересчёт вхождений и точный разбор."""
+
+    __tablename__ = "relation_overrides"
+    __table_args__ = (UniqueConstraint("sentence_id", "a_idx", "b_idx"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sentence_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("sentences.id", ondelete="CASCADE"), index=True)
+    a_idx: Mapped[int] = mapped_column(SmallInteger)  # a_idx < b_idx
+    b_idx: Mapped[int] = mapped_column(SmallInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Entity(Base):
     """Упоминание имени собственного (NER, Natasha/Slovnet): персона, место, организация или иное название."""
 
@@ -241,6 +259,33 @@ class EntityOverride(Base):
     etype: Mapped[str | None] = mapped_column(String(8))
     canonical: Mapped[str | None] = mapped_column(Text)
     hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
+
+class EntityAlias(Base):
+    """Вариант имени персонажа → каноническое имя; text_id — только в этом тексте (иначе во всех)."""
+
+    __tablename__ = "entity_aliases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    norm: Mapped[str] = mapped_column(Text, index=True)
+    canonical: Mapped[str] = mapped_column(Text)
+    text_id: Mapped[int | None] = mapped_column(ForeignKey("texts.id", ondelete="CASCADE"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Place(Base):
+    """Координаты места для географической карты (ключ — начальная форма имени, как в entities.norm)."""
+
+    __tablename__ = "places"
+
+    norm: Mapped[str] = mapped_column(Text, primary_key=True)
+    lat: Mapped[float | None] = mapped_column(Float)
+    lon: Mapped[float | None] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(16), default="auto", server_default="auto")  # auto | manual | none
+    label: Mapped[str | None] = mapped_column(Text)  # что нашлось в справочнике: «Москва, Россия»
+    country: Mapped[str | None] = mapped_column(String(8))
+    kind: Mapped[str | None] = mapped_column(String(16))  # вид, заданный пользователем (гора, река, вымышленное…)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class StopList(Base):
@@ -273,3 +318,5 @@ class Job(Base):
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # скорость выполнения для оценки оставшегося времени: {"t", "p", "rate"} (см. services/jobs.set_progress)
+    eta: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)

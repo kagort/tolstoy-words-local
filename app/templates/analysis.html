@@ -2,7 +2,15 @@
 {% block title %}Анализ{% endblock %}
 {% block head %}<script src="/static-vendor/plotly.min.js"></script>{% endblock %}
 {% block content %}
-<h1>Анализ</h1>
+{% set v2 = ui_mode(request) == 'v2' %}
+{% if v2 and dictionaries %}{% set cur_dict = (dictionaries|selectattr('id', 'equalto', dict_id)|first) %}
+<header class="an-head">
+  <div class="dv2-eyebrow">Анализ · корпус × словарь</div>
+  <h1>{{ corpus_name }} <span class="dv2-x">×</span> {{ cur_dict.name if cur_dict else '' }}</h1>
+  <div class="muted small">{{ n_texts }} {{ 'текст' if n_texts % 10 == 1 and n_texts % 100 != 11 else ('текста' if n_texts % 10 in [2, 3, 4] and n_texts % 100 not in [12, 13, 14] else 'текстов') }}{% if sel.filtered %} · {{ sel.describe() }}{% endif %}
+    · <a href="/dashboard?dictionary_id={{ dict_id }}&{{ sel.query(False) }}">дашборд этой выборки</a></div>
+</header>
+{% else %}<h1>Анализ</h1>{% endif %}
 {% if not dictionaries %}
 <div class="panel">Для анализа нужен словарь. <a href="/dictionaries">Создайте словарь</a> и загрузите <a href="/texts">тексты</a>.</div>
 {% else %}
@@ -11,15 +19,32 @@
 <select name="corpus_id" form="sel-form" onchange="selCorpusChanged(this)"><option value="">Все тексты</option>{% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if c.id == corpus_id }}>{{ c.name }}</option>{% endfor %}</select>
 {% endmacro %}
 
+{% if stale %}
+<div class="flash info">{% if stale_pending %}Идёт пересчёт вхождений словаря: пока он не закончится, связи в профиле слова, коллокациях и ролях — по прежней версии разбора.
+  {% else %}Вхождения словаря ({{ stale }}) посчитаны прежней версией синтаксического разбора: в профиле слова, коллокациях и ролях — старые связи (страница предложения уже показывает новые).
+  <form class="inline" method="post" action="/dictionaries/{{ dict_id }}/rematch"><button class="small" type="submit">Пересчитать вхождения</button></form>{% endif %}</div>
+{% endif %}
+{% if scope_out %}
+<div class="flash info">Словарь сопоставляется только с выбранными корпусами: {{ scope_out }} текстов выборки с ним не сопоставлены, их частоты — нули.
+  {% if corpus_id %}<form class="inline" method="post" action="/dictionaries/{{ dict_id }}/scope/add"><input type="hidden" name="corpus_id" value="{{ corpus_id }}">
+    <input type="hidden" name="back" value="{{ request.url.path }}?{{ request.url.query }}"><button class="small" type="submit">Сопоставить с этим корпусом</button></form>{% endif %}
+  <a href="/dictionaries/{{ dict_id }}">Настройки словаря</a></div>
+{% endif %}
 <form method="get" action="/analysis" id="sel-form" class="panel sel-panel">
   <input type="hidden" name="tab" value="{{ tab }}">
   <div class="row">
     <div><label>Словарь</label><select name="dictionary_id" onchange="selDictChanged(this)">{% for d in dictionaries %}<option value="{{ d.id }}" {{ 'selected' if d.id == dict_id }}>{{ d.name }}</option>{% endfor %}</select></div>
     {% if tab != 'compare' %}<div>{{ corpus_select() }}</div>{% endif %}
-    <div><label title="скрывают служебные слова в связях профиля и отчёта; данные не удаляются">Стоп-слова <a href="/stopwords" class="small">(списки)</a></label>
+    <div><label title="скрывают служебные слова в связях профиля и отчёта; данные не удаляются">Стоп-слова{{ term('stopwords') }} <a href="/stopwords" class="small">(списки)</a></label>
       <select name="stop">{% for o in stop_options %}<option value="{{ o.value }}" {{ 'selected' if o.value == sel.stop }}>{{ o.label }}</option>{% endfor %}</select></div>
+    {% if not no_cats %}<div class="shrink sel-opts"><label>Графики{{ term('unit') }}</label>
+      <select name="unit" title="строки графиков обзора, тепловых карт и карты текста — слова или суммы по категориям словаря">
+        <option value="" {{ 'selected' if not sel.unit }}>по словам</option><option value="cat" {{ 'selected' if sel.unit == 'cat' }}>по категориям</option></select></div>{% endif %}
+    <div class="shrink sel-opts"><label>Имена собственные{{ term('noprop') }}</label>
+      <label class="check" title="убирает имена людей, мест и организаций из ключевых слов, TF-IDF, тем, семантики, коллокаций и стилометрии (данные не удаляются){{ '; сейчас исключено лемм: ' ~ sel.names|length if sel.noprop }}"><input type="checkbox" name="noprop" value="1" {{ 'checked' if sel.noprop }}> не учитывать</label></div>
     <div class="shrink"><button type="submit">Применить</button></div>
     <div class="shrink"><button type="submit" class="secondary" onclick="this.form.tab.value='report'" title="сводная страница по выбранным словам и выборке текстов">📋 Построить отчёт</button></div>
+    <div class="shrink"><button type="submit" class="secondary" formaction="/dashboard" title="обзор выборки на одной странице; можно скачать одним HTML-файлом">📊 Дашборд</button></div>
   </div>
 
   <details class="sel-block" id="sel-texts" {{ 'open' if sel.filtered and tab != 'report' }}>
@@ -91,7 +116,7 @@
 </form>
 
 <div class="tabs">
-  {% for key, label in [('overview', 'Обзор'), ('report', '📋 Отчёт'), ('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('colloc', 'Коллокации'), ('keywords', 'Ключевые слова'), ('map', 'Карта текста'), ('entities', 'Имена'), ('semantic', 'Семантика'), ('topics', 'Темы'), ('stylo', 'Авторство'), ('textcmp', 'Сравнение текстов'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
+  {% for key, label in [('overview', 'Обзор'), ('report', '📋 Отчёт'), ('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('colloc', 'Коллокации'), ('keywords', 'Ключевые слова'), ('map', 'Карта текста'), ('entities', 'Имена'), ('geo', 'География'), ('semantic', 'Семантика'), ('topics', 'Темы'), ('stylo', 'Авторство'), ('textcmp', 'Сравнение текстов'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
   <a class="{{ 'active' if tab == key }}" href="/analysis?tab={{ key }}&dictionary_id={{ dict_id }}&{{ sel.query() }}{% if entry_id and key in ('profile','conc','structure','compare','colloc','semantic') %}&entry_id={{ entry_id }}{% endif %}">{{ label }}</a>
   {% endfor %}
 </div>
@@ -111,9 +136,14 @@
       <option value="count" {{ 'selected' if p.metric == 'count' }}>число вхождений</option>
       <option value="share" {{ 'selected' if p.metric == 'share' }}>% текстов группы, где слово встречается</option>
     </select></div>
+  <div class="shrink"><label class="check" title="логарифмическая шкала: одно очень частое слово не сплющивает остальные"><input type="checkbox" name="log" value="1" form="sel-form" {{ 'checked' if request.query_params.get('log') }}> лог. шкала</label></div>
   <div class="shrink"><button type="submit" form="sel-form">Показать</button></div>
 </div>
-{% if not sel.words %}<p class="help">Показаны 5 самых частых слов. Другие слова — в блоке «Слова словаря» выше.</p>{% endif %}
+{% if ov.by == 'cat' %}<p class="help">Строки — категории словаря{{ ' выбранных слов' if sel.words else ' (самые частые; категория ФОРМУЛЫ пересекается с отдельными словами)' }}. Переключатель «Графики» — в панели выше.</p>
+{% elif not sel.words %}<p class="help">Показаны 5 самых частых слов. Другие слова — в блоке «Слова словаря» выше{% if entries|length > 50 and not no_cats %}; в словаре {{ entries|length }} слов — удобнее смотреть <a href="/analysis{{ qs(request, unit='cat') }}">по категориям</a>{% endif %}.</p>{% endif %}
+{% if ov.hidden_groups %}<div class="flash info">Показаны {{ ov.groups|length - 1 }} групп с наибольшим числом вхождений, остальные {{ ov.hidden_groups }} — строкой «остальные».
+  <a href="/analysis{{ qs(request, gtop='all') }}">Показать все группы</a>{% if ov.dim == 'text' %} · или <a href="/analysis{{ qs(request, dim='author', gtop=None) }}">сгруппировать по авторам</a>{% endif %}.</div>
+{% elif request.query_params.get('gtop') == 'all' and ov.groups|length > 30 %}<p class="help"><a href="/analysis{{ qs(request, gtop=None) }}">Свернуть до 30 групп</a></p>{% endif %}
 {% set mlabel = {'ipm': 'ipm', 'count': 'вхождений', 'share': '% текстов'}[p.metric] %}
 <div class="row" style="margin-bottom:10px">
   <div class="muted">Выборка: {{ ov.n_texts }} текстов, {{ "{:,}".format(ov.corpus_words).replace(",", " ") }} слов; групп: {{ ov.groups|length }}.</div>
@@ -122,14 +152,15 @@
 {% if ov.words and ov.groups %}
 <div class="panel"><div id="chart-ov" class="chart" style="min-height:420px"></div></div>
 {% if ov.words|length > 1 and ov.groups|length > 1 %}
-<div class="panel"><h3 style="margin-top:0">Тепловая карта: слово × {{ ov.dim_label|lower }} ({{ mlabel }})</h3><div id="chart-ov-heat" class="chart" style="min-height:{{ 160 + 28 * ov.words|length }}px"></div></div>
+<div class="panel"><h3 style="margin-top:0">{% if v2 %}Отклонения от среднего: {{ 'категория' if ov.by == 'cat' else 'слово' }} × {{ ov.dim_label|lower }}{% else %}Тепловая карта: {{ 'категория' if ov.by == 'cat' else 'слово' }} × {{ ov.dim_label|lower }} ({{ mlabel }}){% endif %}</h3><div id="chart-ov-heat" class="chart" style="min-height:{{ 160 + 28 * ov.words|length }}px"></div>
+  {% if v2 %}<p class="help">Для каждого {{ 'категории' if ov.by == 'cat' else 'слова' }} — насколько показатель ({{ mlabel }}) в группе выше (красное) или ниже (синее) среднего по группам, в стандартных отклонениях; само значение — в подсказке.</p>{% endif %}</div>
 {% endif %}
 <div class="panel table-scroll">
   <table>
     <tr><th>{{ ov.dim_label }}</th><th class="num">Слов</th><th class="num">Текстов</th>
       {% for w in ov.words %}<th class="num">{{ w.word }}</th>{% endfor %}<th class="num">Σ выбранных</th></tr>
     {% for g in ov.groups %}{% set gi = loop.index0 %}
-    <tr><td>{{ g.label }}</td><td class="num">{{ g.n_words }}</td><td class="num">{{ g.n_texts }}</td>
+    <tr><td title="{{ g.full }}">{{ g.full }}</td><td class="num">{{ g.n_words }}</td><td class="num">{{ g.n_texts }}</td>
       {% for w in ov.words %}<td class="num" title="вхождений: {{ w.count[gi] }}; ipm: {{ w.ipm[gi] }}; текстов со словом: {{ w.share[gi] }}%">{{ w[p.metric][gi] }}</td>{% endfor %}
       <td class="num"><strong>{{ ov.total[p.metric][gi] }}</strong></td></tr>
     {% endfor %}
@@ -142,6 +173,7 @@
 {% include "_report.html" %}
 {% include "_wave2.html" %}
 {% include "_entities.html" %}
+{% include "_geo.html" %}
 {% include "_semantic.html" %}
 {% include "_wave4.html" %}
 
@@ -156,6 +188,25 @@
   <div class="shrink">Скачать таблицу: <a href="/export/frequency.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/frequency.csv{{ qs(request) }}">CSV</a> · <a href="/export/frequency.json{{ qs(request) }}">JSON</a></div>
 </div>
 <div class="panel"><div id="chart-freq" class="chart"></div></div>
+{% if cats and cats.has_categories %}
+<div class="panel">
+  <div class="row" style="align-items:flex-end">
+    <div><h2 style="margin-top:0">По категориям словаря{{ term('category') }}</h2>
+      <div class="help">Сумма вхождений всех слов категории{{ ' (только выбранных слов)' if freq_filtered }}. ipm — на миллион слов выборки или группы; доля — часть вхождений всех категорий.</div></div>
+    <div class="shrink"><label>Столбцы по</label><select name="cat_dim" form="sel-form" onchange="this.form.submit()">{% for k, v in DIMENSIONS.items() %}<option value="{{ k }}" {{ 'selected' if cats.dim == k }}>{{ v|lower }}</option>{% endfor %}</select></div>
+  </div>
+  {% if v2 %}<div id="chart-cats" class="chart" style="min-height:460px"></div>
+  <p class="help">Площадь прямоугольника — число вхождений: крупные блоки — категории, внутри — слова. Цвет — категория (восемь самых частых в цвете, остальные серые).</p>
+  {% else %}<div id="chart-cats" class="chart" style="height:{{ 120 + 26 * cats.rows|length }}px"></div>{% endif %}
+  <div class="table-scroll"><table>
+    <tr><th>Категория</th><th class="num">Слов</th><th class="num">Вхождений</th><th class="num">ipm{{ term('ipm') }}</th><th class="num">Доля, %{{ term('share') }}</th>
+      {% for g in cats.groups %}<th class="num small" title="{{ g.full }}">{{ g.label }}</th>{% endfor %}</tr>
+    {% for r in cats.rows %}<tr><td><strong>{{ r.category }}</strong></td><td class="num">{{ r.entries }}</td><td class="num">{{ r.count }}</td>
+      <td class="num">{{ r.ipm }}</td><td class="num">{{ r.share }}</td>
+      {% for v in r.groups_ipm %}<td class="num small">{{ v }}</td>{% endfor %}</tr>{% endfor %}
+  </table></div>
+</div>
+{% endif %}
 <div class="panel row" style="align-items:center">
   <div class="muted small">Отметьте слова флажками (они же отмечаются в блоке «Слова словаря»), затем:</div>
   <div class="shrink">
@@ -168,12 +219,12 @@
 <div class="panel table-scroll">
   <table>
     <tr><th><input type="checkbox" title="отметить все" onchange="document.querySelectorAll('.freq-check').forEach(c => { c.checked = this.checked; syncWord(c); })"></th>
-      <th>Слово</th><th>Лемма</th><th>Категория</th><th class="num">Вхождений</th><th class="num">ipm</th><th class="num">Предложений</th><th class="num">Текстов</th>
-      <th class="num" title="какую часть всех вхождений слов этой таблицы составляет слово">Доля, %</th>
-      <th class="num" title="Мера неравномерности Грайса: 0 — равномерно по текстам, ближе к 1 — сосредоточено в немногих">DP</th><th>Перейти</th><th>Все предложения со словом</th></tr>
+      <th>Слово</th><th>Лемма</th>{% if not no_cats %}<th>Категория</th>{% endif %}<th class="num">Вхождений</th><th class="num">ipm{{ term('ipm') }}</th><th class="num">Предложений</th><th class="num">Текстов</th>
+      <th class="num" title="какую часть всех вхождений слов этой таблицы составляет слово">Доля, %{{ term('share') }}</th>
+      <th class="num" title="Мера неравномерности Грайса: 0 — равномерно по текстам, ближе к 1 — сосредоточено в немногих">DP{{ term('dp') }}</th><th>Перейти</th><th>Все предложения со словом</th></tr>
     {% for r in freq.rows %}
     <tr><td><input type="checkbox" class="freq-check" value="{{ r.entry_id }}" {{ 'checked' if r.entry_id in sel.words }} onchange="syncWord(this)"></td>
-      <td><strong>{{ r.word }}</strong></td><td>{{ r.lemma }} <span class="muted small">{{ pos_label(r.upos) }}</span></td><td>{{ r.category }}</td>
+      <td><strong>{{ r.word }}</strong></td><td>{{ r.lemma }} <span class="muted small">{{ pos_label(r.upos) }}</span></td>{% if not no_cats %}<td>{{ r.category }}</td>{% endif %}
       <td class="num">{{ r.count }}</td><td class="num">{{ r.ipm }}</td><td class="num">{{ r.sentences }}</td><td class="num">{{ r.texts }}</td>
       <td class="num">{{ r.share }}</td>
       <td class="num">{{ r.dp if r.dp is not none else '' }}</td>
@@ -186,24 +237,40 @@
   </table>
 </div>
 {% if heat.words and heat.texts|length > 1 %}
-<div class="panel"><h3 style="margin-top:0">Частота по текстам (ipm)</h3><div id="chart-heat" class="chart" style="min-height:{{ 160 + 26 * heat.words|length }}px"></div></div>
+<div class="panel"><h3 style="margin-top:0">Частота {{ 'категорий' if heat.by == 'cat' else 'слов' }} по текстам (ipm)</h3><div id="chart-heat" class="chart" style="min-height:{{ 160 + 26 * heat.words|length }}px"></div>
+  <p class="help">Строки упорядочены по сходству: похожие стоят рядом и видны блоками.</p></div>
 {% endif %}
 {% endif %}
 
 {# ============================================================== КОНКОРДАНС #}
 {% if tab == 'conc' and conc %}
-<div class="panel row">
-  <div><label>Слово</label><select name="entry_id" form="sel-form"><option value="">{{ 'выбранные слова (' ~ sel.words|length ~ ')' if sel.words else 'все слова словаря' }}</option>{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
-  <div><label>Роль слова в предложении</label><select name="role" form="sel-form"><option value="">любая</option>{% for k in ROLE_LABELS %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('role') == k }}>{{ role_label(k) }}</option>{% endfor %}</select></div>
-  <div><label>Тип связи</label><select name="rel_type" form="sel-form"><option value="">любой</option>{% for k in REL_LABELS %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('rel_type') == k }}>{{ rel_label(k) }}</option>{% endfor %}</select></div>
-  {% if request.query_params.get('near') %}<div class="shrink"><label>Рядом (±{{ request.query_params.get('window', 3) }} сл.)</label>
-    <input type="text" name="near" form="sel-form" value="{{ request.query_params.get('near') }}" style="width:140px"><input type="hidden" name="window" form="sel-form" value="{{ request.query_params.get('window', 3) }}"></div>{% endif %}
-  <div><label>Связанное слово (лемма)</label><input type="text" name="related" form="sel-form" value="{{ request.query_params.get('related', '') }}" placeholder="например: сладкий"></div>
-  <div class="shrink"><label class="check"><input type="checkbox" name="invalid" form="sel-form" value="1" {{ 'checked' if request.query_params.get('invalid') }}> показать ложные</label></div>
-  <div class="shrink"><button type="submit" form="sel-form">Найти</button></div>
+{% set more_open = request.query_params.get('phrase') or request.query_params.get('near') or request.query_params.get('related') or request.query_params.get('phrase_any') or request.query_params.get('invalid') or request.query_params.get('names') %}
+<div class="panel">
+  <div class="fgrid">
+    <div><label>Слово</label><select name="entry_id" form="sel-form"><option value="">{{ 'выбранные слова (' ~ sel.words|length ~ ')' if sel.words else 'все слова словаря' }}</option>{% for e in entries %}{% set n = word_counts.get(e.id, 0) %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}{{ ' class=muted' if not n }}>{{ e.surface }} ({{ n }})</option>{% endfor %}</select></div>
+    <div><label>Роль слова в предложении</label><select name="role" form="sel-form"><option value="">любая</option>{% for k in ROLE_LABELS %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('role') == k }}>{{ role_label(k) }}</option>{% endfor %}</select></div>
+    <div><label>Тип связи</label><select name="rel_type" form="sel-form"><option value="">любой</option>{% for k in REL_LABELS %}<option value="{{ k }}" {{ 'selected' if request.query_params.get('rel_type') == k }}>{{ rel_label(k) }}</option>{% endfor %}</select></div>
+    <div class="act"><button type="submit" form="sel-form">Найти</button></div>
+  </div>
+  <details class="more" {{ 'open' if more_open }}><summary>Дополнительно: словосочетание, соседние и связанные слова, ложные вхождения</summary>
+    <div class="fgrid">
+      <div><label>Словосочетание {{ term('phrase') }}</label>
+        <input type="text" name="phrase" form="sel-form" value="{{ request.query_params.get('phrase', '') }}" placeholder="здравый смысл; закон * порядок"></div>
+      <div><label>Рядом со словом (лемма, окно)</label><div class="pair">
+        <input type="text" name="near" form="sel-form" value="{{ request.query_params.get('near', '') }}" placeholder="лемма">
+        <select name="window" form="sel-form" title="окно, слов">{% for w in (1, 2, 3, 5, 10) %}<option value="{{ w }}" {{ 'selected' if (request.query_params.get('window') or '3') == w|string }}>±{{ w }}</option>{% endfor %}</select></div></div>
+      <div><label>Связанное слово (лемма)</label><input type="text" name="related" form="sel-form" value="{{ request.query_params.get('related', '') }}" placeholder="например: сладкий"></div>
+      <div class="act"></div>
+    </div>
+    <div class="fopts">
+      <label class="check"><input type="checkbox" name="phrase_any" form="sel-form" value="1" {{ 'checked' if request.query_params.get('phrase_any') }}> словосочетание в любом порядке</label>
+      <label class="check"><input type="checkbox" name="invalid" form="sel-form" value="1" {{ 'checked' if request.query_params.get('invalid') }}> показать ложные</label>
+      <label class="check" title="вхождения внутри имён собственных («Любовь Андреевна» для слова «любовь») — не считаются, пока не отмечены ✓"><input type="checkbox" name="names" form="sel-form" value="1" {{ 'checked' if request.query_params.get('names') }}> только в именах</label>
+    </div>
+  </details>
 </div>
 <div class="row" style="margin-bottom:6px">
-  <div class="muted">Найдено: {{ conc.total }}. Наведите курсор на строку — появится окно с соседними предложениями; ID или выделенное слово открывают разбор предложения 🌳.</div>
+  <div class="muted">Найдено: {{ conc.total }}{% if conc.phrase_sentences is not none %} (предложений со словосочетанием: {{ conc.phrase_sentences }}){% endif %}. Наведите курсор на строку — появится окно с соседними предложениями; ID или выделенное слово открывают разбор предложения 🌳.</div>
   <form class="shrink" method="get" action="/go/sentence" style="display:flex;gap:6px;align-items:center"><input type="text" name="id" placeholder="ID предложения" style="width:150px"><button class="small secondary" type="submit">Открыть разбор</button></form>
   <div class="shrink">Скачать: <a href="/export/concordance.xlsx{{ qs(request, page=None) }}">XLSX</a> · <a href="/export/concordance.csv{{ qs(request, page=None) }}">CSV</a> · <a href="/export/hits.conllu{{ qs(request, page=None) }}">CoNLL-U</a></div>
 </div>
@@ -211,11 +278,11 @@
   <table class="kwic">
     <tr><th>ID</th><th class="num">Левый контекст</th><th>Слово</th><th>Правый контекст</th><th>Член предложения (связь UD)</th><th>Источник</th><th></th></tr>
     {% for i in conc['items'] %}
-    <tr class="{{ 'invalid' if i.is_valid == false }}" data-ctx="{{ i.sentence_id }}" data-start="{{ i.start }}" data-end="{{ i.end }}">
+    <tr class="{{ 'invalid' if i.is_valid == false or (i.in_name and i.is_valid is none) }}" data-ctx="{{ i.sentence_id }}" data-start="{{ i.start }}" data-end="{{ i.end }}">
       <td class="small"><a href="/sentences/{{ i.sentence_id }}" title="открыть разбор предложения">🌳&nbsp;{{ i.sentence_id }}</a><div class="muted">№&nbsp;{{ i.sentence_no }}</div></td>
       <td class="left">{{ i.left }}</td>
-      <td class="kw"><a href="/sentences/{{ i.sentence_id }}" title="открыть разбор предложения">{{ i.kw }}</a><div class="muted small" style="font-weight:normal">{{ i.upos }}</div></td>
-      <td class="right">{{ i.right }}</td>
+      <td class="kw"><a href="/sentences/{{ i.sentence_id }}" title="открыть разбор предложения">{{ i.kw }}</a><div class="muted small" style="font-weight:normal">{% if i.in_name %}<span class="badge warn" title="внутри имени собственного: не считается, пока не отмечено ✓">в имени</span> {% endif %}{{ i.upos }}{% if i.word|lower != i.kw|lower and ' ' in i.word %} · «{{ i.word }}»{% endif %}</div></td>
+      <td class="right">{{ i.right }}{% if i.phrase %}<div class="small"><span class="badge">{{ i.phrase|join(' · ') }}</span></div>{% endif %}</td>
       <td class="small"><span class="role-{{ i.role }}">{{ role_label(i.role, i.deprel) }}</span><div class="muted">{{ i.role_subtype }}</div></td>
       <td class="small muted">{{ i.source }}</td>
       <td class="num">
@@ -235,7 +302,7 @@
 {# ============================================================== ПРОФИЛЬ #}
 {% if tab == 'profile' %}
 <div class="panel row">
-  <div><label>Слово</label><select name="entry_id" form="sel-form">{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
+  <div><label>Слово</label><select name="entry_id" form="sel-form">{% for e in entries %}{% set n = word_counts.get(e.id, 0) %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}{{ ' class=muted' if not n }}>{{ e.surface }} ({{ n }})</option>{% endfor %}</select></div>
   <div class="shrink"><label class="check"><input type="checkbox" name="uncertain" form="sel-form" value="1" {{ 'checked' if request.query_params.get('uncertain') }}> учитывать спорные связи через однородные ряды</label></div>
   <div class="shrink"><label class="check"><input type="checkbox" name="negated" form="sel-form" value="1" {{ 'checked' if request.query_params.get('negated') }}> учитывать члены под отрицанием («не запах, а…»)</label></div>
   <div class="shrink"><button type="submit" form="sel-form">Показать</button></div>
@@ -257,13 +324,17 @@
   {% for rt, block in profile.relations.items() %}
   <div class="panel">
     <h3 style="margin-top:0">{{ block.label|capitalize }} <span class="muted small">— {{ block.total }} связей, {{ block.distinct }} разных слов</span></h3>
-    <table>
-      <tr><th>Слово</th><th class="num">Частота</th><th class="num">Текстов</th>{% if rt != 'case' %}<th class="num">logDice</th>{% endif %}</tr>
-      {% for x in block['items'] %}
+    {% macro rel_rows(items, rt, sq, entry_id) %}{% for x in items %}
       <tr><td><a href="/analysis?tab=conc&{{ sq }}&entry_id={{ entry_id }}&rel_type={{ rt }}&related={{ x.lemma|urlencode }}">{{ x.lemma }}</a></td>
         <td class="num">{{ x.count }}</td><td class="num">{{ x.texts }}</td>{% if rt != 'case' %}<td class="num">{{ x.logdice }}</td>{% endif %}</tr>
-      {% endfor %}
+      {% endfor %}{% endmacro %}
+    <table>
+      <tr><th>Слово</th><th class="num">Частота</th><th class="num">Текстов</th>{% if rt != 'case' %}<th class="num">logDice{{ term('logdice') }}</th>{% endif %}</tr>
+      {{ rel_rows(block['items'][:PROFILE_TOP], rt, sq, entry_id) }}
     </table>
+    {% if block['items']|length > PROFILE_TOP %}<details class="small"><summary>ещё {{ block['items']|length - PROFILE_TOP }} {{ 'слово' if (block['items']|length - PROFILE_TOP) % 10 == 1 and (block['items']|length - PROFILE_TOP) % 100 != 11 else 'слов' }} (реже)</summary>
+      <table>{{ rel_rows(block['items'][PROFILE_TOP:], rt, sq, entry_id) }}</table></details>{% endif %}
+    {% if block.stopped %}<p class="help">Скрыто стоп-словами: {{ block.stopped }} (список — в панели выбора).</p>{% endif %}
   </div>
   {% endfor %}
 </div>
@@ -275,7 +346,7 @@
 <div class="panel row">
   <div>{{ corpus_select('Корпус A') }}</div>
   <div><label>Корпус B</label><select name="corpus_b" form="sel-form"><option value="">Все тексты</option>{% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if c.id == corpus_b }}>{{ c.name }}</option>{% endfor %}</select></div>
-  <div><label>Сравнить связи слова</label><select name="entry_id" form="sel-form"><option value="">—</option>{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
+  <div><label>Сравнить связи слова</label><select name="entry_id" form="sel-form"><option value="">—</option>{% for e in entries %}{% set n = word_counts.get(e.id, 0) %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}{{ ' class=muted' if not n }}>{{ e.surface }} ({{ n }})</option>{% endfor %}</select></div>
   <div><label>Тип связи</label><select name="rel_type" form="sel-form">{% for k in REL_LABELS %}<option value="{{ k }}" {{ 'selected' if (request.query_params.get('rel_type') or 'attribute') == k }}>{{ rel_label(k) }}</option>{% endfor %}</select></div>
   <div class="shrink"><button type="submit" form="sel-form">Сравнить</button></div>
 </div>
@@ -288,7 +359,7 @@
 <div class="panel"><div id="chart-cmp" class="chart"></div></div>
 <div class="panel table-scroll">
   <table>
-    <tr><th>Слово</th><th class="num">A</th><th class="num">B</th><th class="num">ipm A</th><th class="num">ipm B</th><th class="num">G²</th><th class="num">Log-ratio</th><th></th></tr>
+    <tr><th>Слово</th><th class="num">A</th><th class="num">B</th><th class="num">ipm A</th><th class="num">ipm B</th><th class="num">G²{{ term('g2') }}</th><th class="num">Log-ratio{{ term('logratio') }}</th><th></th></tr>
     {% for r in cmp.rows %}
     <tr><td>{{ r.word }}</td><td class="num">{{ r.count_a }}</td><td class="num">{{ r.count_b }}</td><td class="num">{{ r.ipm_a }}</td><td class="num">{{ r.ipm_b }}</td>
       <td class="num">{{ r.ll }}</td><td class="num">{{ r.log_ratio }}</td><td>{% if r.significant %}<span class="badge warn">значимо</span>{% endif %}</td></tr>
@@ -313,7 +384,7 @@
 {# ============================================================== СТРУКТУРА #}
 {% if tab == 'structure' and structure %}
 <div class="panel row">
-  <div><label>Предложения со словом</label><select name="entry_id" form="sel-form"><option value="">{{ 'любым из выбранных слов (' ~ sel.words|length ~ ')' if sel.words else 'любым словом словаря' }}</option>{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }}</option>{% endfor %}</select></div>
+  <div><label>Предложения со словом</label><select name="entry_id" form="sel-form"><option value="">{{ 'любым из выбранных слов (' ~ sel.words|length ~ ')' if sel.words else 'любым словом словаря' }}</option>{% for e in entries %}{% set n = word_counts.get(e.id, 0) %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}{{ ' class=muted' if not n }}>{{ e.surface }} ({{ n }})</option>{% endfor %}</select></div>
   <div class="shrink"><button type="submit" form="sel-form">Показать</button></div>
   <div class="shrink">Скачать: <a href="/export/structure.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/structure.csv{{ qs(request) }}">CSV</a></div>
 </div>
@@ -332,6 +403,7 @@
   </div>
   <div class="panel"><h3 style="margin-top:0">Распределение длины предложений</h3><div id="chart-len" class="chart"></div></div>
 </div>
+{% if v2 and a.get('types') %}<div class="panel"><h3 style="margin-top:0">Типы предложений</h3><div id="chart-types" class="chart"></div></div>{% endif %}
 {% endif %}
 {% endif %}
 {% endblock %}
@@ -341,17 +413,16 @@
 {% if tab == 'overview' and ov and ov.words and ov.groups %}
 (function () {
   const ov = {{ ov|tojson }}, metric = {{ ov_params.metric|tojson }};
-  const labels = ov.groups.map(g => g.label);
   const ytitle = { ipm: 'ipm', count: 'вхождений', share: '% текстов группы' }[metric];
-  const isPeriod = ov.dim === 'period';
-  const traces = ov.words.map(w => isPeriod
-    ? { type: 'scatter', mode: 'lines+markers', name: w.word, x: labels, y: w[metric] }
-    : { type: 'bar', name: w.word, x: labels, y: w[metric] });
-  drawChart('chart-ov', traces, { barmode: 'group', yaxis: { title: ytitle }, xaxis: { automargin: true },
-    title: { text: `${ytitle} по группировке «${ov.dim_label}»`, font: { size: 14 } }, margin: { l: 60, r: 20, t: 50, b: 140 } });
+  const log = {{ 'true' if request.query_params.get('log') else 'false' }};
+  if (window.QV2) {
+    QV2.groups('chart-ov', ov, metric, ytitle, log);
+    if (ov.words.length > 1 && ov.groups.length > 1) QV2.devHeat('chart-ov-heat', ov, metric);
+    return;
+  }
+  drawGroups('chart-ov', ov, metric, ytitle, { title: { text: `${ytitle} по группировке «${ov.dim_label}»`, font: { size: 14 } } }, { log });
   if (ov.words.length > 1 && ov.groups.length > 1) {
-    drawChart('chart-ov-heat', [{ type: 'heatmap', z: ov.words.map(w => w[metric]), x: labels, y: ov.words.map(w => w.word),
-      colorscale: 'Blues', reversescale: true, hovertemplate: '%{y} — %{x}: %{z}<extra></extra>' }], { margin: { l: 110, r: 20, t: 10, b: 140 } });
+    drawGroupHeat('chart-ov-heat', ov, metric);
   }
 })();
 {% endif %}
@@ -363,12 +434,7 @@
     hovertemplate: '%{x}: %{y} ipm (%{text})<extra></extra>', marker: { color: cssVar('--accent') } }],
     { title: { text: 'ipm выбранных слов', font: { size: 14 } }, yaxis: { title: 'ipm' }, margin: { l: 60, r: 20, t: 40, b: 90 } });
   for (const [dim, ov] of Object.entries(rep.overviews)) {
-    const labels = ov.groups.map(g => g.label);
-    const traces = ov.words.map(w => dim === 'period'
-      ? { type: 'scatter', mode: 'lines+markers', name: w.word, x: labels, y: w.ipm }
-      : { type: 'bar', name: w.word, x: labels, y: w.ipm });
-    drawChart('rep-ov-' + dim, traces, { barmode: 'group', yaxis: { title: 'ipm' }, xaxis: { automargin: true, tickangle: labels.length > 4 ? -30 : 0 },
-      legend: { orientation: 'h', y: 1.18 }, margin: { l: 55, r: 10, t: 40, b: 40 } });
+    drawGroups('rep-ov-' + dim, Object.assign({ dim }, ov), 'ipm', 'ipm', { legend: { orientation: 'h', y: 1.18 } });
   }
   const rm = rep.role_matrix;
   if (rm.roles.length) {
@@ -392,14 +458,29 @@
 {% if tab == 'freq' and freq %}
 (function () {
   const rows = {{ freq.rows[:40]|tojson }}.filter(r => r.count > 0);
+  if (window.QV2) {
+    const all = {{ freq.rows|tojson }}, idx = QV2.catIndex(all, 'category', 'count');
+    QV2.lollipop('chart-freq', rows.slice(0, 30).map(r => ({ label: r.word, value: r.ipm, color: {{ 'true' if no_cats else 'false' }} ? null : QV2.cat(idx[r.category]),
+      hover: `${r.ipm} ipm · ${r.count} вхожд. · доля ${r.share}%${r.category ? ' · ' + r.category : ''}` })),
+      {{ ('Выбранные слова: ipm (на миллион слов выборки)' if freq_filtered else 'ipm — на миллион слов выборки; первые 30 слов')|tojson }});
+    {% if cats and cats.has_categories %}QV2.treemap('chart-cats', all);{% endif %}
+    {% if heat.words and heat.texts|length > 1 %}const heat = {{ heat|tojson }}; drawHeat('chart-heat', heat.words, heat.texts, heat.texts_full, heat.z);{% endif %}
+    return;
+  }
   drawChart('chart-freq', [{ type: 'bar', x: rows.map(r => r.word), y: rows.map(r => r.ipm), text: rows.map(r => r.count + ' вхожд.'),
     customdata: rows.map(r => r.share),
     hovertemplate: '%{x}: %{y} ipm (%{text}; доля %{customdata}%)<extra></extra>', marker: { color: cssVar('--accent') } }],
     { title: { text: {{ ('Выбранные слова: частота на миллион слов выборки (ipm)' if freq_filtered else 'Частота на миллион слов выборки (ipm)')|tojson }}, font: { size: 14 } }, yaxis: { title: 'ipm' } });
+  {% if cats and cats.has_categories %}
+  const cats = {{ cats|tojson }};
+  drawChart('chart-cats', [{ type: 'bar', orientation: 'h', y: cats.rows.map(r => r.category), x: cats.rows.map(r => r.ipm),
+    text: cats.rows.map(r => r.share + '%'), textposition: 'auto', customdata: cats.rows.map(r => r.count),
+    hovertemplate: '%{y}: %{x} ipm (%{customdata} вхожд., доля %{text})<extra></extra>', marker: { color: cssVar('--accent') } }],
+    { xaxis: { title: 'ipm' }, yaxis: { automargin: true, autorange: 'reversed' }, margin: { l: 20, r: 20, t: 10, b: 40 } });
+  {% endif %}
   {% if heat.words and heat.texts|length > 1 %}
   const heat = {{ heat|tojson }};
-  drawChart('chart-heat', [{ type: 'heatmap', z: heat.z, x: heat.texts, y: heat.words, colorscale: 'Blues', reversescale: true, hovertemplate: '%{y} — %{x}: %{z} ipm<extra></extra>' }],
-    { margin: { l: 110, r: 20, t: 10, b: 160 } });
+  drawHeat('chart-heat', heat.words, heat.texts, heat.texts_full, heat.z);
   {% endif %}
 })();
 {% endif %}
@@ -414,6 +495,7 @@
 {% if tab == 'compare' and cmp %}
 (function () {
   const rows = {{ cmp.rows|tojson }}.filter(r => r.count_a + r.count_b > 0);
+  if (window.QV2) return QV2.scatterCompare('chart-cmp', rows, {{ corpus_name|tojson }}, {{ corpus_b_name|tojson }});
   drawChart('chart-cmp', [{ type: 'scatter', mode: 'markers+text', x: rows.map(r => r.log_ratio), y: rows.map(r => r.ll),
     text: rows.map(r => r.word), textposition: 'top center', marker: { size: 9, color: rows.map(r => r.significant ? cssVar('--err') : cssVar('--muted')) },
     hovertemplate: '%{text}<br>log-ratio %{x}<br>G² %{y}<extra></extra>' }],
@@ -424,6 +506,12 @@
 {% if tab == 'structure' and structure and structure.all.n %}
 (function () {
   const h = {{ structure.hits.get('hist', {})|tojson }}, a = {{ structure.all.get('hist', {})|tojson }};
+  if (window.QV2) {
+    QV2.lengthLines('chart-len', h, a, 'со словами словаря');
+    const ta = {{ structure.all.get('types', {})|tojson }}, th = {{ structure.hits.get('types', {})|tojson }};
+    if (document.getElementById('chart-types')) QV2.bars100('chart-types', [{ name: 'со словами словаря', values: th }, { name: 'все предложения', values: ta }], Object.keys(ta));
+    return;
+  }
   const keys = [...new Set([...Object.keys(h), ...Object.keys(a)].map(Number))].sort((x, y) => x - y);
   const lab = keys.map(k => k >= 100 ? '100+' : `${k}–${k + 4}`);
   drawChart('chart-len', [

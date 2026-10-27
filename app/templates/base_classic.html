@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ site_title }}{% endblock %} · {{ site_title }}</title>
+  <link rel="stylesheet" href="/static/app.css?v={{ asset_version }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/">📚 {{ site_title }}</a>
+    {% if user %}
+    {% set p = request.url.path %}
+    <nav>
+      <a href="/texts" class="{{ 'active' if p.startswith('/texts') }}">Тексты</a>
+      <a href="/corpora" class="{{ 'active' if p.startswith('/corpora') }}">Корпуса</a>
+      <a href="/dictionaries" class="{{ 'active' if p.startswith('/dictionaries') }}">Словари</a>
+      <a href="/stopwords" class="{{ 'active' if p.startswith('/stopwords') }}">Стоп-слова</a>
+      <a href="/analysis" class="{{ 'active' if p.startswith('/analysis') or p.startswith('/sentences') }}">Анализ</a>
+      <a href="/check" class="{{ 'active' if p.startswith('/check') }}">Проверка текста</a>
+      <a href="/jobs" class="{{ 'active' if p.startswith('/jobs') }}">Задачи</a>
+      <a href="/help" class="{{ 'active' if p.startswith('/help') }}">Справка</a>
+    </nav>
+    <div class="spacer"></div>
+    <form class="inline" method="post" action="/logout"><button class="secondary small" type="submit">Выйти ({{ user }})</button></form>
+    {% endif %}
+  </div>
+</header>
+<main class="wrap">
+  {% for f in flashes %}<div class="flash {{ f.kind }}">{{ f.message }}</div>{% endfor %}
+  {% block content %}{% endblock %}
+</main>
+<footer class="wrap muted small" style="padding-bottom:24px">{{ site_title }} · версия {{ app_version }}{% if user %} · <a href="/ui/v2?next={{ request.url.path|urlencode }}">новый интерфейс</a>{% endif %}</footer>
+<script src="/static/app.js?v={{ asset_version }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

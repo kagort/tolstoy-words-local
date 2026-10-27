@@ -40,7 +40,9 @@ tr:hover td { background: color-mix(in srgb, var(--accent-soft) 40%, transparent
 .table-scroll { overflow-x: auto; }
 form.inline { display: inline; }
 label { display: block; font-size: 13px; color: var(--muted); margin: 8px 0 3px; }
-label.check { display: flex; gap: 6px; align-items: center; color: var(--text); font-size: 14px; }
+label.check { display: flex; gap: 6px; align-items: flex-start; color: var(--text); font-size: 14px; }
+/* флажок — на уровне первой строки подписи, а не посередине длинного (многострочного) текста */
+label.check > input[type=checkbox], label.check > input[type=radio] { flex-shrink: 0; margin: 0.3em 0 0; }
 input[type=text], input[type=search], input[type=password], input[type=number], select, textarea {
   width: 100%; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); font: inherit; }
 textarea { min-height: 90px; }
@@ -149,3 +151,80 @@ td.sorted { font-weight: 700; }
 .kw-cloud span { display: inline-block; margin: 0 8px 2px 0; color: var(--accent); }
 mark { background: #ffe58a; color: inherit; padding: 0 2px; border-radius: 3px; }
 .badge.deleting { background: var(--err-soft); color: var(--err); }
+option.muted { color: var(--muted); }
+
+/* база знаний и подсказки к метрикам */
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.term-q { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin-left: 3px;
+  border-radius: 50%; border: 1px solid var(--muted); color: var(--muted); font-size: 10px; font-weight: 700; line-height: 1;
+  vertical-align: middle; cursor: help; text-decoration: none; }
+.term-q:hover, .term-q:focus { border-color: var(--accent); color: var(--accent); text-decoration: none; outline: none; }
+.term-pop { position: absolute; z-index: 50; max-width: 340px; padding: 10px 12px; background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.15); font-size: 13px; font-weight: normal;
+  line-height: 1.45; text-align: left; white-space: normal; }
+.term-pop strong { display: block; margin-bottom: 4px; }
+.term-pop a { display: inline-block; margin-top: 6px; }
+.term-list { line-height: 1.9; }
+.help-result { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.help-layout { display: grid; grid-template-columns: 260px 1fr; gap: 20px; align-items: start; }
+.help-toc { position: sticky; top: 70px; max-height: calc(100vh - 90px); overflow: auto; }
+.help-toc .strong a { font-weight: 700; color: var(--text); }
+.help-toc .toc-l3 { padding-left: 12px; }
+.help-toc hr { border: 0; border-top: 1px solid var(--border); }
+.help-article { max-width: 860px; }
+.help-article h3 { scroll-margin-top: 70px; }
+.help-article h2 { scroll-margin-top: 70px; }
+.help-article table { border-collapse: collapse; margin: 10px 0; }
+.help-article th, .help-article td { border: 1px solid var(--border); padding: 4px 8px; font-size: 14px; }
+.help-article code { font-family: var(--mono); font-size: 13px; background: var(--accent-soft); padding: 0 4px; border-radius: 4px; }
+.help-article pre { background: var(--accent-soft); padding: 10px; overflow: auto; border-radius: 6px; }
+.help-article pre code { background: none; padding: 0; }
+.help-article :target { background: var(--kw); }
+@media (max-width: 800px) { .help-layout { grid-template-columns: 1fr; } .help-toc { position: static; max-height: none; } }
+/* колонка параметров выборки: флажки по высоте полей, ширина не зависит от текста */
+.sel-opts .check { display: flex; align-items: center; gap: 6px; min-height: 38px; margin: 0; white-space: nowrap; }
+button.link { background: none; border: 0; padding: 0 2px; color: var(--muted); cursor: pointer; font-size: 11px; box-shadow: none; }
+button.link:hover { color: var(--err); }
+/* сетка полей панели вкладки: подписи на одной линии, поля одной высоты, кнопка — по нижнему краю */
+.fgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(90px, auto); gap: 10px 14px; align-items: end; }
+.fgrid label:not(.check) { margin-top: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fgrid > * { min-width: 0; }
+.fgrid .pair { display: flex; gap: 6px; }
+.fgrid .pair > :first-child { flex: 1; min-width: 0; }
+.fgrid .pair select { width: auto; }
+.fopts { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 10px; }
+.fopts label.check { margin: 0; }
+details.more { margin-top: 10px; }
+details.more > summary { cursor: pointer; color: var(--accent); font-size: 13px; margin-bottom: 8px; }
+@media (max-width: 760px) { .fgrid { grid-template-columns: 1fr 1fr; } .fgrid .act:empty { display: none; } }
+/* указатель имён */
+.ent-actions { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 10px 0 6px; }
+.ent-buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ent-buttons .pair { display: flex; gap: 6px; align-items: center; }
+.ent-buttons .pair input, .ent-buttons .pair select { width: auto; max-width: 240px; }
+.ent-hints { margin: 10px 0; padding: 8px 12px; border: 1px dashed var(--border); border-radius: 8px; }
+.icon-btn { background: none; border: 0; padding: 0 4px; cursor: pointer; font-size: 15px; filter: grayscale(0.4); }
+.icon-btn:hover { filter: none; }
+.inline-details { display: inline-block; vertical-align: top; }
+.noise-flag { font-weight: 600; }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); opacity: 0; pointer-events: none;
+  background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.25);
+  transition: all .2s; z-index: 50; display: flex; gap: 10px; align-items: center; }
+.toast.show { opacity: 1; transform: translateX(-50%); pointer-events: auto; }
+.toast button.secondary { color: var(--bg); border-color: var(--bg); }
+.ent-dict { position: relative; }
+.ent-dict > summary { list-style: none; }
+.ent-dict > summary::-webkit-details-marker { display: none; }
+.ent-dict-form { position: absolute; left: 0; z-index: 20; width: 340px; margin-top: 6px; padding: 12px 14px; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); }
+.ent-dict.right .ent-dict-form { left: auto; right: 0; }
+
+/* связь, убранная вручную (страница предложения) */
+tr.rel-off td { color: var(--muted); }
+tr.rel-off td:not(:last-child) { text-decoration: line-through; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--muted); font: inherit; cursor: pointer; }
+.link-btn:hover { color: var(--err); }
+.kw-size .link-btn { font-size: inherit; text-decoration: underline dotted; }
+.kw-size .link-btn.on { color: var(--text); font-weight: 600; text-decoration: none; }
+.sel-opts .check > input, .fopts label.check > input { margin-top: 0; }
+.fopts label.check { align-items: center; }

@@ -1,0 +1,154 @@
+{# Тело дашборда v2 — общее для страницы приложения и автономного HTML-файла. Переменная: dash (services/dashboard_v2.py).
+   Над каждым графиком — вывод одной фразой (say). Без словаря или без данных показывается прежний дашборд. #}
+{% set v = dash.v2 %}
+{% if not v %}{% include "_dashboard_body.html" %}{% else %}
+{% set SECTIONS = [
+  ('cov', 'Покрытие словаря', v.coverage, ''),
+  ('core', 'Ядро и периферия', v.core, 'нужно не меньше трёх текстов'),
+  ('prof', 'Профиль категорий по ' ~ ('авторам' if v.group_kind == 'author' else 'текстам'), v.profile,
+     'словарь без категорий' if not v.has_cats else 'нужно хотя бы два автора или текста'),
+  ('dist', 'Характерные слова ' ~ ('авторов' if v.group_kind == 'author' else 'текстов'), v.distinct, 'нужно хотя бы два автора или текста'),
+  ('time', 'Во времени', v.time, 'нужны тексты не меньше чем из трёх десятилетий'),
+  ('syn', 'Синтаксические роли', v.syntax, 'нет данных разбора'),
+  ('net', 'Совместная встречаемость', v.network, 'слова словаря редко встречаются в одном предложении'),
+  ('names', 'Персонажи и места', v.names, 'имена не извлечены или не встречаются рядом со словами словаря'),
+  ('qual', 'Качество данных', v.quality, ''),
+] %}
+<div class="dv2">
+  <aside class="dv2-toc no-print" aria-label="Разделы дашборда">
+    <div class="dv2-toc-title">Разделы</div>
+    {% for key, title, data, why in SECTIONS %}
+      {% if data %}<a href="#s-{{ key }}">{{ loop.index }}. {{ title }}</a>
+      {% else %}<span class="off" title="{{ why }}">{{ loop.index }}. {{ title }}</span>{% endif %}
+    {% endfor %}
+    {% if dash.textmap %}<a href="#s-map">Карта текста</a>{% endif %}
+    {% if v.quotes %}<a href="#s-quotes">Цитаты</a>{% endif %}
+    {% if not dash.single %}<a href="#s-texts">Тексты выборки</a>{% endif %}
+  </aside>
+
+  <div class="dv2-main">
+    <header class="dv2-head">
+      <div class="dv2-eyebrow">Корпус × словарь</div>
+      <h1>{{ dash.title }} <span class="dv2-x">×</span> {{ dash.dictionary.name }}</h1>
+      <div class="muted small">Выборка: {{ dash.selection }}{% if dash.years %} · годы: {{ dash.years }}{% endif %} · сформировано {{ dash.generated }}</div>
+    </header>
+
+    <div class="stat-tiles dv2-kpi">
+      {% for t in dash.tiles[:4] %}<div class="tile"><div class="tile-num">{{ t.value }}</div><div class="tile-label">{{ t.label }}</div></div>{% endfor %}
+      <div class="tile"><div class="tile-num">{{ v.coverage.found }}<span class="dv2-of">/{{ v.coverage.entries }}</span></div><div class="tile-label">слов словаря найдено</div></div>
+      <div class="tile"><div class="tile-num">{{ v.coverage.pct|round(2)|string|replace('.', ',') }}&thinsp;%</div><div class="tile-label">слов выборки — из словаря ({{ dash.dictionary.hits }} вхождений)</div></div>
+    </div>
+
+    {# 1. Покрытие #}
+    <section class="dv2-sec panel" id="s-cov">
+      <h2><span class="dv2-n">1</span>Покрытие словаря</h2>
+      <p class="dv2-say">{{ v.coverage.say }}</p>
+      <div class="dv2-meter" title="найдено {{ v.coverage.found }} из {{ v.coverage.entries }}">
+        <span style="width:{{ (100 * v.coverage.found / (v.coverage.entries or 1))|round(1) }}%"></span><i class="nodata"></i>
+      </div>
+      <div class="dv2-legend small"><span><b class="sw" style="background:var(--cat-1)"></b>найдено: {{ v.coverage.found }}</span>
+        <span><b class="sw nodata"></b>нет вхождений: {{ v.coverage.n_dead }}</span>
+        {% if v.coverage.n_rare %}<span class="muted">встречаются 1–2 раза: {{ v.coverage.n_rare }}</span>{% endif %}</div>
+      <h3>{{ 'Категории' if v.has_cats else 'Самые частые слова' }} по числу вхождений</h3>
+      <div id="dv2-cov" class="chart"></div>
+      {% if v.coverage.dead %}<details class="small"><summary>Слова без вхождений ({{ v.coverage.n_dead }})</summary>
+        <p class="dv2-chips">{% for w in v.coverage.dead %}<span class="chip">{{ w }}</span>{% endfor %}{% if v.coverage.n_dead > v.coverage.dead|length %} …{% endif %}</p></details>{% endif %}
+    </section>
+
+    {% if dash.textmap %}<section class="dv2-sec panel" id="s-map">
+      <h2><span class="dv2-n">↳</span>Карта текста</h2>
+      <p class="dv2-say">Где в тексте сгущаются слова словаря: ipm по 50 отрезкам от начала к концу.</p>
+      <div id="dv2-map" class="chart"></div>
+    </section>{% endif %}
+
+    {# 2. Ядро и периферия #}
+    {% if v.core %}<section class="dv2-sec panel" id="s-core">
+      <h2><span class="dv2-n">2</span>Ядро и периферия</h2>
+      <p class="dv2-say">{{ v.core.say }}</p>
+      <div id="dv2-core" class="chart"></div>
+      <p class="muted small">Каждая точка — слово словаря. Правее — чаще; выше — равномернее по текстам (DP, мера Грайса). Пунктир — медиана частоты и DP = 0,5.</p>
+    </section>{% endif %}
+
+    {# 3. Профиль категорий #}
+    {% if v.profile %}<section class="dv2-sec panel" id="s-prof">
+      <h2><span class="dv2-n">3</span>Профиль категорий по {{ 'авторам' if v.group_kind == 'author' else 'текстам' }}</h2>
+      <p class="dv2-say">{{ v.profile.say }}</p>
+      <div id="dv2-prof" class="chart"></div>
+      <p class="muted small">{% if v.profile.form == 'radar' %}Доля каждой категории среди вхождений словаря в группе, %; пунктир — среднее по группам.
+        {% elif v.profile.form == 'heatmap' %}Отклонение ipm категории в группе от среднего по группам (z-оценка): красное — выше среднего, синее — ниже.
+        {% else %}Доля каждой категории среди вхождений словаря, %.{% endif %}</p>
+    </section>{% endif %}
+
+    {# 4. Характерные слова #}
+    {% if v.distinct %}<section class="dv2-sec panel" id="s-dist">
+      <h2><span class="dv2-n">4</span>Характерные слова {{ 'авторов' if v.group_kind == 'author' else 'текстов' }}</h2>
+      <p class="dv2-say">{{ v.distinct.say }}</p>
+      <label class="small dv2-pick">{{ 'Автор' if v.group_kind == 'author' else 'Текст' }}
+        <select onchange="dv2Distinct(window.DASH_V2.distinct, this.value)">{% for g in v.distinct.groups %}<option>{{ g }}</option>{% endfor %}</select></label>
+      <div id="dv2-dist" class="chart"></div>
+      <p class="muted small">log-ratio: +1 — вдвое чаще, чем в остальных группах, −1 — вдвое реже. Бледные точки — различие незначимо (G² &lt; {{ v.distinct.sig|string|replace('.', ',') }}).</p>
+      {% if v.distinct.pair %}<h3>{{ v.distinct.pair.a }} ↔ {{ v.distinct.pair.b }}</h3><div id="dv2-pair" class="chart"></div>
+        <p class="muted small">У диагонали — слова, одинаково частые у обоих; дальше от неё — характерные для одного.</p>{% endif %}
+    </section>{% endif %}
+
+    {# 5. Время #}
+    {% if v.time %}<section class="dv2-sec panel" id="s-time">
+      <h2><span class="dv2-n">5</span>Во времени</h2>
+      <p class="dv2-say">{{ v.time.say }}</p>
+      <div id="dv2-time" class="chart"></div>
+      <p class="muted small">ipm по десятилетиям (год создания текста). Текстов в десятилетиях: {% for p in v.time.periods %}{{ p }} — {{ v.time.n_texts[loop.index0] }}{% if not loop.last %}; {% endif %}{% endfor %}.</p>
+    </section>{% endif %}
+
+    {# 6. Синтаксис #}
+    {% if v.syntax %}<section class="dv2-sec panel" id="s-syn">
+      <h2><span class="dv2-n">6</span>Синтаксические роли</h2>
+      <p class="dv2-say">{{ v.syntax.say }}</p>
+      <div id="dv2-syn" class="chart"></div>
+      <p class="muted small">Чем слова словаря бывают в предложении — по {{ v.syntax.by }}, доля вхождений.</p>
+    </section>{% endif %}
+
+    {# 7. Сеть #}
+    {% if v.network %}<section class="dv2-sec panel" id="s-net">
+      <h2><span class="dv2-n">7</span>Совместная встречаемость</h2>
+      <p class="dv2-say">{{ v.network.say }}</p>
+      <div id="dv2-net" class="chart"></div>
+      <p class="muted small">Слова соединены, если не меньше двух раз встретились в одном предложении; толщина линии — сколько раз, размер круга — частота.</p>
+    </section>{% endif %}
+
+    {# 8. Персонажи и места #}
+    {% if v.names %}<section class="dv2-sec panel" id="s-names">
+      <h2><span class="dv2-n">8</span>Персонажи и места</h2>
+      {% if v.names.say %}<p class="dv2-say">{{ v.names.say }}</p>{% endif %}
+      {% if v.names.persons %}<h3>Персонажи × {{ 'категории' if v.has_cats else 'слова' }} (в одном предложении)</h3><div id="dv2-per" class="chart"></div>{% endif %}
+      {% if v.names.places %}<h3>Места: цвет — категория, чаще всего встречающаяся рядом</h3><div id="dv2-geo" class="chart"></div>{% endif %}
+    </section>{% endif %}
+
+    {# 9. Качество #}
+    <section class="dv2-sec panel" id="s-qual">
+      <h2><span class="dv2-n">9</span>Качество данных</h2>
+      <p class="dv2-say">{{ v.quality.say }}</p>
+      <ul class="dv2-check">{% for i in v.quality['items'] %}
+        <li class="{{ 'ok' if i.ok else 'bad' }}"><span class="mark" aria-hidden="true">{{ '✓' if i.ok else '!' }}</span>{{ i.text }}
+          <span class="muted small">— {% if i.href and not standalone %}<a href="{{ i.href }}">{{ i.hint }}</a>{% else %}{{ i.hint }}{% endif %}</span></li>{% endfor %}</ul>
+    </section>
+
+    {% if v.quotes %}<section class="dv2-sec panel" id="s-quotes">
+      <h2>Цитаты</h2>
+      <p class="dv2-say">Как звучат самые частые слова словаря — по примеру из разных текстов.</p>
+      <div class="dv2-quotes">{% for q in v.quotes %}
+        <figure><blockquote>{{ q.before }}<mark>{{ q.kw }}</mark>{{ q.after }}</blockquote><figcaption>{{ q.source }}</figcaption></figure>{% endfor %}</div>
+    </section>{% endif %}
+
+    {% if not dash.single %}<section class="dv2-sec panel table-scroll" id="s-texts"><h2>Тексты выборки</h2>
+      <table><tr><th>Название</th><th>Автор</th><th class="num">Год</th><th class="num">Слов</th></tr>
+        {% for t in dash.texts %}<tr><td>{{ t.title }}</td><td>{{ t.author }}</td><td class="num">{{ t.year }}</td><td class="num">{{ t.words }}</td></tr>{% endfor %}</table>
+      {% if dash.n_texts_hidden %}<p class="muted small">… и ещё {{ dash.n_texts_hidden }} текстов.</p>{% endif %}</section>{% endif %}
+    <p class="muted small">{% if standalone %}Quotverba {{ app_version }}. {% endif %} Справочник мест — GeoNames (CC BY 4.0), контуры карты — Natural Earth.</p>
+  </div>
+</div>
+<script>
+window.DASH_V2 = {{ v|tojson }};
+window.DASH_V2.textmap = {{ (dash.textmap or none)|tojson }};
+document.addEventListener('DOMContentLoaded', function () { drawDashV2(window.DASH_V2); });
+</script>
+{% endif %}

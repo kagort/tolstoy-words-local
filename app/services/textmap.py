@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from types import SimpleNamespace
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -15,7 +16,7 @@ SEGMENT_CHOICES = (10, 20, 50, 100)
 
 
 def text_map(session: Session, text_id: int, dictionary_id: int, entry_ids: list[int] | None = None,
-             segments: int = 50, top: int = 15) -> dict:
+             segments: int = 50, top: int = 15, by: str = "word") -> dict:
     """Плотность вхождений по равным (по числу слов) отрезкам текста.
 
     Возвращает: строки «слово × отрезок» (вхождения и ipm), строку «все слова словаря», строки категорий,
@@ -48,9 +49,22 @@ def text_map(session: Session, text_id: int, dictionary_id: int, entry_ids: list
             continue
         per_entry[eid][seg_of[sid]] += 1
         points[eid].append(round(100 * (start_of[sid] + tidx) / total, 2))
-    chosen = [e for e in (entry_ids or []) if e in entries]
-    if not chosen:
-        chosen = sorted(per_entry, key=lambda e: -sum(per_entry[e]))[:top]
+    if by == "cat":  # строки — категории словаря (выбранных слов или все): вхождения слов категории складываются
+        cat_of = {e: (entries[e].category or "без категории") for e in per_entry}
+        scope = [e for e in per_entry if not entry_ids or e in set(entry_ids)]
+        per_cat: dict[str, list[int]] = defaultdict(lambda: [0] * segments)
+        cat_points: dict[str, list[float]] = defaultdict(list)
+        for e in scope:
+            for k in range(segments):
+                per_cat[cat_of[e]][k] += per_entry[e][k]
+            cat_points[cat_of[e]] += points[e]
+        per_entry, points = per_cat, {c: sorted(v) for c, v in cat_points.items()}
+        entries = {c: SimpleNamespace(surface=c, category=None) for c in per_cat}  # подпись строки = категория
+        chosen = sorted(per_cat, key=lambda c: -sum(per_cat[c]))[: max(top, 30)]
+    else:
+        chosen = [e for e in (entry_ids or []) if e in entries]
+        if not chosen:
+            chosen = sorted(per_entry, key=lambda e: -sum(per_entry[e]))[:top]
 
     def row(label, counts, kind="word"):
         return {"label": label, "kind": kind, "count": counts, "total": sum(counts),
@@ -63,8 +77,12 @@ def text_map(session: Session, text_id: int, dictionary_id: int, entry_ids: list
     all_counts = [sum(per_entry[e][k] for e in per_entry) for k in range(segments)]
     summary = [row("все слова словаря", all_counts, "all")]
     cats = defaultdict(lambda: [0] * segments)
+    from app.models import Dictionary
+    from app.services.dictionaries import no_categories
+
+    flat = no_categories(session.get(Dictionary, dictionary_id))  # словарь «без категорий» — без строк категорий
     for e, counts in per_entry.items():
-        if entries[e].category:
+        if entries[e].category and not flat:
             for k in range(segments):
                 cats[entries[e].category][k] += counts[k]
     summary += [row(f"категория «{c}»", v, "category") for c, v in sorted(cats.items())]
@@ -75,7 +93,7 @@ def text_map(session: Session, text_id: int, dictionary_id: int, entry_ids: list
         "points": [{"label": entries[e].surface, "x": points.get(e, [])} for e in chosen],
         "peaks": [{"segment": k + 1, "from": seg_from[k], "to": seg_to[k], "ipm": summary[0]["ipm"][k],
                    "count": summary[0]["count"][k]} for k in peaks if summary[0]["count"][k]],
-        "n_words": total,
+        "n_words": total, "by": by,
     }
 
 

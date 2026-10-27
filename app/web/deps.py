@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup
 
 from app import __version__
 from app.config import settings
@@ -37,15 +38,27 @@ def _asset_version() -> str:
     import hashlib
 
     h = hashlib.md5(__version__.encode())
-    for name in ("app.js", "app.css"):
+    for name in ("app.js", "app.css", "v2.css", "fonts.css"):
         f = TEMPLATES_DIR.parent / "static" / name
         if f.exists():
             h.update(f.read_bytes())
     return h.hexdigest()[:10]
 
 
+UI_MODES = ("v2", "classic")
+
+
+def ui_mode(request: Request | None) -> str:
+    """Какой интерфейс показывать: выбор пользователя (cookie qv_ui), иначе настройка UI_DEFAULT."""
+    choice = request.cookies.get("qv_ui") if request is not None else None
+    if choice in UI_MODES:
+        return choice
+    return settings.ui_default if settings.ui_default in UI_MODES else "v2"
+
+
 templates.env.globals.update(
     asset_version=_asset_version(),
+    ui_mode=ui_mode,
     site_title=settings.site_title,
     app_version=__version__,
     ROLE_LABELS=ROLE_LABELS,
@@ -59,7 +72,14 @@ templates.env.globals.update(
     pos_label=pos_label,
     role_label=role_label_ud,
     rel_label=rel_label_ud,
+    term=lambda tid: Markup(_term_html(tid)),
 )
+
+
+def _term_html(tid: str) -> str:
+    from app.services.help import term_html
+
+    return term_html(tid)
 
 
 def flash(request: Request, message: str, kind: str = "info") -> None:

@@ -224,6 +224,58 @@ def test_phase_verb_compound_predicate():
     assert lemmas(an, 1, "predicate") == {"начать", "усиливаться"}
 
 
+INS_SG_F = "Case=Ins|Gender=Fem|Number=Sing"
+INS_PL = "Case=Ins|Number=Plur"
+DEMIAN = sentence_from_rows([  # Гессе, «Демиан»: разбор Stanza
+    ("Пахнет", "пахнуть", "VERB", "Number=Sing|Person=3|Tense=Pres|VerbForm=Fin", 0, "root"),
+    ("теплой", "тёплый", "ADJ", INS_SG_F, 3, "amod"),
+    ("теснотой", "теснота", "NOUN", INS_SG_F, 1, "iobj"),
+    (",", ",", "PUNCT", "", 5, "punct"),
+    ("кроликами", "кролик", "NOUN", INS_PL, 3, "conj"),
+    ("и", "и", "CCONJ", "", 7, "cc"),
+    ("служанками", "служанка", "NOUN", INS_PL, 3, "conj"),
+    (",", ",", "PUNCT", "", 10, "punct"),
+    ("домашними", "домашний", "ADJ", INS_PL, 10, "amod"),
+    ("снадобьями", "снадобье", "NOUN", INS_PL, 3, "conj"),
+    ("и", "и", "CCONJ", "", 13, "cc"),
+    ("сушеными", "сушёный", "ADJ", INS_PL, 13, "amod"),
+    ("фруктами", "фрукт", "NOUN", INS_PL, 3, "conj"),
+    (".", ".", "PUNCT", "", 1, "punct"),
+])
+
+
+def test_verb_profile_has_all_dependents():
+    """У глагола в профиле — все зависимые, а не только однородные сказуемые."""
+    an = SentenceAnalysis(DEMIAN)
+    assert rels(an, 1, "object") == {("теснота", "direct"), ("кролик", "shared"), ("служанка", "shared"),
+                                     ("снадобье", "shared"), ("фрукт", "shared")}
+    assert lemmas(an, 2, "head") == {"теснота"}
+    assert lemmas(an, 9, "head") == {"снадобье"}  # внутри ряда — только своё слово
+    assert lemmas(an, 13, "governor") == {"пахнуть"}
+    assert lemmas(an, 10, "attribute") == {"домашний"}
+    # «теплой» (ед. ч.) не согласуется с «кроликами» (мн. ч.) — не общее определение ряда
+    assert lemmas(an, 3, "attribute") == {"тёплый"}
+    assert not lemmas(an, 5, "attribute")
+
+
+def test_verb_subject_adverbials_and_shared_head():
+    s = sentence_from_rows([
+        ("Ночью", "ночь", "NOUN", "Case=Ins|Gender=Fem|Number=Sing", 4, "obl"),
+        ("сильно", "сильно", "ADV", "", 4, "advmod"),
+        ("не", "не", "PART", "", 4, "advmod"),
+        ("пахли", "пахнуть", "VERB", "Number=Plur|Tense=Past|VerbForm=Fin", 0, "root"),
+        ("белые", "белый", "ADJ", "Case=Nom|Number=Plur", 6, "amod"),
+        ("сирень", "сирень", "NOUN", "Case=Nom|Gender=Fem|Number=Sing", 4, "nsubj"),
+        ("и", "и", "CCONJ", "", 8, "cc"),
+        ("жасмин", "жасмин", "NOUN", M_SG_NOM, 6, "conj"),
+        (".", ".", "PUNCT", "", 4, "punct"),
+    ])
+    an = SentenceAnalysis(s)
+    assert rels(an, 4, "subject") == {("сирень", "direct"), ("жасмин", "shared")}
+    assert lemmas(an, 4, "adverbial") == {"ночь", "сильно"}  # частица «не» — не обстоятельство
+    assert lemmas(an, 5, "head") == {"сирень", "жасмин"}  # «белые» мн. ч. — общее определение ряда
+
+
 def test_sanitize_tree_fixes_cycles_and_roots():
     words = [
         Parsed("запах", "запах", "NOUN", head=1, deprel="conj"),  # петля
@@ -322,3 +374,76 @@ def test_stylometry_math_and_ai_features():
                      ("роль", "роль", "NOUN", {}), (".", ".", "PUNCT", {})]}]
     f = features(s)
     assert f["n_words"] == 7 and f["markers"] > 0 and f["commas"] > 0
+
+
+# ---------------------------------------------------------------- 1.2: ряды у всех связей, деепричастие ≠ личный глагол
+
+ACC_M = "Case=Acc|Gender=Masc|Number=Sing"
+PAST_N = "Gender=Neut|Number=Sing|Tense=Past|VerbForm=Fin"
+
+# «Всё, опять оживая, устремилось, поднялось навстречу ему и торжественно, до неба послало ему свой роскошный,
+# сладостный фимиам» — разбор Stanza у пользователя: «поднялось» и «послало» прикреплены к деепричастию «оживая»
+FIMIAM = sentence_from_rows([
+    ("Всё", "всё", "PRON", "Case=Nom|Gender=Neut|Number=Sing", 6, "nsubj"),     # 1
+    (",", ",", "PUNCT", "", 4, "punct"),                                          # 2
+    ("опять", "опять", "ADV", "", 4, "advmod"),                                   # 3
+    ("оживая", "оживать", "VERB", "Aspect=Imp|Tense=Pres|VerbForm=Conv", 6, "advcl"),  # 4
+    (",", ",", "PUNCT", "", 4, "punct"),                                          # 5
+    ("устремилось", "устремиться", "VERB", PAST_N, 0, "root"),                    # 6
+    (",", ",", "PUNCT", "", 8, "punct"),                                          # 7
+    ("поднялось", "подняться", "VERB", PAST_N, 4, "conj"),                        # 8
+    ("навстречу", "навстречу", "ADV", "", 8, "advmod"),                           # 9
+    ("ему", "он", "PRON", "Case=Dat|Gender=Masc|Number=Sing", 9, "iobj"),         # 10
+    ("и", "и", "CCONJ", "", 16, "cc"),                                            # 11
+    ("торжественно", "торжественно", "ADV", "", 9, "conj"),                       # 12
+    (",", ",", "PUNCT", "", 15, "punct"),                                         # 13
+    ("до", "до", "ADP", "", 15, "case"),                                          # 14
+    ("неба", "небо", "NOUN", "Case=Gen|Gender=Neut|Number=Sing", 16, "obl"),      # 15
+    ("послало", "послать", "VERB", PAST_N, 4, "conj"),                            # 16
+    ("ему", "он", "PRON", "Case=Dat|Gender=Masc|Number=Sing", 16, "iobj"),        # 17
+    ("свой", "свой", "DET", ACC_M, 22, "det"),                                    # 18
+    ("роскошный", "роскошный", "ADJ", ACC_M, 22, "amod"),                         # 19
+    (",", ",", "PUNCT", "", 21, "punct"),                                         # 20
+    ("сладостный", "сладостный", "ADJ", ACC_M, 19, "conj"),                       # 21
+    ("фимиам", "фимиам", "NOUN", ACC_M, 16, "obj"),                               # 22
+])
+
+
+def test_attribute_series_expanded():
+    an = SentenceAnalysis(FIMIAM)
+    assert rels(an, 22, "attribute") >= {("свой", "direct"), ("роскошный", "direct"), ("сладостный", "shared")}
+
+
+def test_finite_verb_not_homogeneous_with_converb():
+    an = SentenceAnalysis(FIMIAM)
+    groups = [sorted(g.members) for g in an.groups]
+    assert [6, 8, 16] in groups and not any(4 in g for g in groups)
+    for i in (6, 8, 16):
+        assert an.role(i).role == "predicate", i
+    assert an.role(4).role == "adverbial"
+    assert lemmas(an, 1, "predicate") == {"устремиться", "подняться", "послать"}
+    assert FIMIAM.tok(8).head == 4  # исходное дерево не меняется (страница предложения показывает разбор как есть)
+
+
+def test_subject_of_pred_series_expanded():
+    s = sentence_from_rows([
+        ("Мать", "мать", "NOUN", "Case=Nom|Gender=Fem|Number=Sing", 4, "nsubj"),
+        ("и", "и", "CCONJ", "", 3, "cc"),
+        ("отец", "отец", "NOUN", M_SG_NOM, 1, "conj"),
+        ("ели", "есть", "VERB", "Number=Plur|Tense=Past|VerbForm=Fin", 0, "root"),
+        ("суп", "суп", "NOUN", ACC_M, 4, "obj"),
+    ])
+    an = SentenceAnalysis(s)
+    assert lemmas(an, 5, "subject_of_pred") == {"мать", "отец"}
+
+
+def test_subject_adverbials_series_expanded():
+    s = sentence_from_rows([
+        ("Он", "он", "PRON", M_SG_NOM, 2, "nsubj"),
+        ("шёл", "идти", "VERB", PAST_M, 0, "root"),
+        ("быстро", "быстро", "ADV", "", 2, "advmod"),
+        ("и", "и", "CCONJ", "", 5, "cc"),
+        ("уверенно", "уверенно", "ADV", "", 3, "conj"),
+    ])
+    an = SentenceAnalysis(s)
+    assert lemmas(an, 1, "adverbial") == {"быстро", "уверенно"}

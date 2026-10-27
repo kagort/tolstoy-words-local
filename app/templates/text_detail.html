@@ -10,6 +10,8 @@
     <h2 style="margin-top:0">Сведения</h2>
     <form method="post" action="/texts/{{ doc.id }}/edit">
       <label>Название</label><input type="text" name="title" value="{{ doc.title }}" required>
+      <label>Короткое название <span class="muted small">(для подписей на графиках; если пусто — название сокращается само)</span></label>
+      <input type="text" name="short_title" maxlength="60" value="{{ (doc.meta or {}).get('short_title', '') }}">
       <div class="row">
         <div><label>Автор</label><input type="text" name="author" value="{{ doc.author or '' }}"></div>
         <div><label>Год(ы)</label><input type="text" name="years" value="{{ doc.years }}"></div>
@@ -41,7 +43,8 @@
       <tr><td>Загружен</td><td class="num">{{ doc.created_at.strftime('%d.%m.%Y %H:%M') if doc.created_at }}</td></tr>
     </table>
     <p class="row">
-      {% if doc.status == 'ready' %}<a class="btn" href="/texts/{{ doc.id }}/stats">📊 Статистический портрет</a>{% endif %}
+      {% if doc.status == 'ready' %}<a class="btn" href="/texts/{{ doc.id }}/stats">📊 Статистический портрет</a>
+        <a class="btn secondary" href="/dashboard?texts={{ doc.id }}" title="обзор текста на одной странице: словарь, ключевые слова, персонажи, места">Дашборд</a>{% endif %}
       <a class="btn secondary" href="/export/text/{{ doc.id }}.conllu">Скачать разметку (CoNLL-U)</a>
       {% if levels and levels.fast and doc.status == 'ready' %}
       <form class="inline shrink" method="post" action="/texts/{{ doc.id }}/precise" title="разобрать основным парсером все предложения — точнее портрет и структура, но долго">

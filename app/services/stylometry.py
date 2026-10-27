@@ -15,31 +15,40 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import TextDoc, TokenRow
+from app.services.labels import short_author, short_title, unique
 
 MFW_CHOICES = (50, 100, 200, 300, 500)
 DISTANCES = {"cosine": "Cosine Delta (рекомендуется)", "burrows": "Delta Барроуза"}
 MIN_WORDS = 5000  # меньше — результаты ненадёжны
 
 
-def _units(session: Session, text_ids: list[int], unit: str, chunk: int) -> tuple[list[dict], list[list[str]]]:
-    meta = {t.id: t for t in session.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.year_from, TextDoc.source_type)
-                                              .where(TextDoc.id.in_(text_ids or [-1])))}
+def _units(session: Session, text_ids: list[int], unit: str, chunk: int,
+           exclude: frozenset[str] = frozenset()) -> tuple[list[dict], list[list[str]]]:
+    """exclude — леммы, которые не учитываются (имена собственные: одни и те же герои сближают тексты не по стилю)."""
+    meta = {t.id: t for t in session.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.year_from, TextDoc.source_type,
+                                                     TextDoc.meta).where(TextDoc.id.in_(text_ids or [-1])))}
     units, words = [], []
     for tid in text_ids:
         t = meta.get(tid)
         if t is None:
             continue
-        seq = list(session.scalars(select(TokenRow.form_norm).where(TokenRow.text_id == tid, TokenRow.upos != "PUNCT")
-                                   .order_by(TokenRow.sentence_id, TokenRow.idx)))
+        q = select(TokenRow.form_norm).where(TokenRow.text_id == tid, TokenRow.upos != "PUNCT")
+        if exclude:
+            q = q.where(TokenRow.upos != "PROPN", TokenRow.lemma_norm.not_in(list(exclude)))
+        seq = list(session.scalars(q.order_by(TokenRow.sentence_id, TokenRow.idx)))
         seq = [w for w in seq if any(ch.isalpha() for ch in w)]
-        base = {"text_id": tid, "title": t.title, "author": t.author or "—", "year": t.year_from, "stype": t.source_type}
+        short = short_title(t.title, t.meta)
+        base = {"text_id": tid, "title": t.title, "author": t.author or "—", "author_label": short_author(t.author) or "—",
+                "year": t.year_from, "stype": t.source_type}
         if unit == "chunk" and len(seq) >= chunk:
             for k in range(len(seq) // chunk):
-                units.append({**base, "label": f"{t.title} [{k + 1}]", "part": k + 1, "n_words": chunk})
+                units.append({**base, "label": f"{short} [{k + 1}]", "part": k + 1, "n_words": chunk})
                 words.append(seq[k * chunk : (k + 1) * chunk])
         else:
-            units.append({**base, "label": t.title, "part": None, "n_words": len(seq)})
+            units.append({**base, "label": short, "part": None, "n_words": len(seq)})
             words.append(seq)
+    for u, lab in zip(units, unique([u["label"] for u in units])):  # одинаковые подписи слились бы на осях графиков
+        u["label"] = lab
     return units, words
 
 
@@ -130,11 +139,11 @@ def mds2(d: np.ndarray) -> np.ndarray:
 
 
 def analyze(session: Session, text_ids: list[int], *, mfw: int = 100, kind: str = "cosine", unit: str = "text",
-            chunk: int = 5000, target: int | None = None) -> dict:
+            chunk: int = 5000, target: int | None = None, exclude: frozenset[str] = frozenset()) -> dict:
     """Расстояния между текстами (фрагментами), дендрограмма, карта и, если задан target, ранжирование авторов."""
     mfw = mfw if mfw in MFW_CHOICES else 100
     kind = kind if kind in DISTANCES else "cosine"
-    units, words = _units(session, text_ids, unit, chunk)
+    units, words = _units(session, text_ids, unit, chunk, exclude)
     out = {"units": units, "mfw": mfw, "kind": kind, "unit": unit, "chunk": chunk, "features": [], "small": [],
            "matrix": [], "dendro": None, "map": [], "ranking": None}
     if len(units) < 3:

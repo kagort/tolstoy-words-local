@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     admin_password: str = ""
     upload_max_mb: int = 50
     site_title: str = "Quotverba"
+    # интерфейс по умолчанию: v2 — новый (боковое меню, токены DESIGN_TOKENS.md), classic — прежний (откат: UI_DEFAULT=classic);
+    # каждый пользователь может переключить у себя (ссылка внизу страницы, cookie qv_ui)
+    ui_default: str = "v2"
+    # часовой пояс для дат на страницах и в выгрузках (база хранит время с поясом, показывается в этом)
+    timezone: str = "Europe/Moscow"
 
     # NLP
     nlp_backend: str = "stanza"  # stanza | natasha

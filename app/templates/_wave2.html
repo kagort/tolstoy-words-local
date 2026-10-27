@@ -2,8 +2,8 @@
 {% if tab == 'colloc' %}
 {% set p = col_params %}
 <div class="panel row">
-  <div><label>Слово</label><select name="entry_id" form="sel-form">{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}>{{ e.surface }} ({{ word_counts.get(e.id, 0) }})</option>{% endfor %}</select></div>
-  <div><label>Коллокаты</label><select name="mode" form="sel-form">{% for k, v in COLLOC_MODES.items() %}<option value="{{ k }}" {{ 'selected' if p.mode == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div><label>Слово</label><select name="entry_id" form="sel-form">{% for e in entries %}{% set n = word_counts.get(e.id, 0) %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}{{ ' class=muted' if not n }}>{{ e.surface }} ({{ n }})</option>{% endfor %}</select></div>
+  <div><label>Коллокаты{{ term('collocation') }}</label><select name="mode" form="sel-form">{% for k, v in COLLOC_MODES.items() %}<option value="{{ k }}" {{ 'selected' if p.mode == k }}>{{ v }}</option>{% endfor %}</select></div>
   <div class="shrink"><label>Окно, слов</label><select name="window" form="sel-form">{% for w in [1, 2, 3, 4, 5, 7, 10] %}<option {{ 'selected' if p.window == w }}>{{ w }}</option>{% endfor %}</select></div>
   <div><label>Части речи коллокатов</label><select name="pos" form="sel-form">{% for k, v in POS_GROUPS.items() %}<option value="{{ k }}" {{ 'selected' if p.pos == k }}>{{ v[0] }}</option>{% endfor %}</select></div>
   <div class="shrink"><label>Мин. частота</label><select name="min_count" form="sel-form">{% for m in [1, 2, 3, 5, 10] %}<option {{ 'selected' if p.min_count == m }}>{{ m }}</option>{% endfor %}</select></div>
@@ -28,7 +28,7 @@
 <div class="panel table-scroll">
   <table>
     <tr><th>Коллокат</th>{% if col.mode == 'syntax' %}<th>Связь</th>{% endif %}<th>Ч. р.</th>
-      {% for k, v in MEASURES.items() %}<th class="num" title="{{ MEASURE_HELP[k] }}">{{ v }}</th>{% endfor %}<th class="num" title="частота коллоката в выборке">f(колл.)</th><th></th></tr>
+      {% for k, v in MEASURES.items() %}<th class="num" title="{{ MEASURE_HELP[k] }}">{{ v }}{{ term({'count': 'collocation', 'dp_fwd': 'deltap', 'dp_bwd': 'deltap'}.get(k, k)) }}</th>{% endfor %}<th class="num" title="частота коллоката в выборке">f(колл.)</th><th></th></tr>
     {% for r in col.rows %}
     <tr><td><strong>{{ r.lemma }}</strong></td>{% if col.mode == 'syntax' %}<td class="small">{{ r.rel_label }}</td>{% endif %}<td class="small muted">{{ r.pos }}</td>
       {% for k in MEASURES %}<td class="num {{ 'sorted' if k == p.sort }}">{{ r[k] if r[k] is not none else '—' }}</td>{% endfor %}
@@ -45,7 +45,7 @@
 {# ============================================================== КЛЮЧЕВЫЕ СЛОВА #}
 {% if tab == 'keywords' and kw %}
 <div class="panel row">
-  <div><label>Сравнить выборку с (опорный корпус)</label>
+  <div><label>Сравнить выборку с (опорный корпус){{ term('keyness') }}</label>
     <select name="ref" form="sel-form"><option value="">все остальные тексты базы</option>{% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if kw_ref == c.id|string }}>корпус «{{ c.name }}»</option>{% endfor %}</select></div>
   <div><label>Части речи</label><select name="pos" form="sel-form">{% for k, v in POS_GROUPS.items() %}<option value="{{ k }}" {{ 'selected' if kw_pos == k }}>{{ v[0] }}</option>{% endfor %}</select></div>
   <div class="shrink"><label>Мин. частота</label><select name="min_count" form="sel-form">{% for m in [2, 3, 5, 10, 20] %}<option {{ 'selected' if kw_min == m }}>{{ m }}</option>{% endfor %}</select></div>
@@ -56,16 +56,38 @@
   {% if kw.words_b %}Значимо чаще в выборке: {{ kw.n_positive }} лемм, реже: {{ kw.n_negative }}.{% else %}Опорный корпус пуст — показаны просто самые частые леммы выборки.{% endif %}
   {% if not sel.stop %}<span class="help">Совет: выберите стоп-слова в панели выбора, чтобы убрать служебные слова.</span>{% endif %}</p>
 {% if kw.positive %}
-<div class="panel"><h3 style="margin-top:0">Облако ключевых слов (размер — G²)</h3><div class="kw-cloud">
-  {% set mx = (kw.positive|map(attribute='ll')|max) or 1 %}
-  {% for r in kw.positive[:60] %}<span style="font-size:{{ (12 + 26 * ((r.ll / mx) ** 0.5))|round(1) if kw.words_b else 14 }}px" title="G² {{ r.ll }}; {{ r.ipm_a }} ipm в выборке против {{ r.ipm_b }}">{{ r.lemma }}</span> {% endfor %}
-</div></div>
+<div class="panel"><div class="row" style="align-items:center;margin-bottom:6px">
+    <h3 style="margin:0">Облако ключевых слов</h3><div class="spacer"></div>
+    <div class="shrink small kw-size" role="group" aria-label="Размер слова в облаке">размер —
+      {% if kw.words_b %}<button type="button" class="link-btn" data-kw-size="g">значимость (G²)</button> ·{% endif %}
+      <button type="button" class="link-btn" data-kw-size="f">частота в выборке</button></div></div>
+  <div class="kw-cloud" id="kw-cloud">
+  {% set top = kw.positive[:60] %}
+  {% set mx = (top|map(attribute='ll')|max) or 1 %}{% set mf = (top|map(attribute='count_a')|max) or 1 %}
+  {% for r in top %}{% set g = (12 + 26 * ((r.ll / mx) ** 0.5))|round(1) %}{% set f = (12 + 26 * ((r.count_a / mf) ** 0.5))|round(1) %}<span data-g="{{ g }}" data-f="{{ f }}" style="font-size:{{ g if kw.words_b else f }}px" title="G² {{ r.ll }}; {{ r.count_a }} вхожд., {{ r.ipm_a }} ipm в выборке против {{ r.ipm_b }}">{{ r.lemma }}</span> {% endfor %}
+  </div>
+  <p class="help" style="margin-bottom:0">Значимость — насколько слово характерно для выборки по сравнению с опорным корпусом; частота — сколько раз слово встретилось в выборке (видны самые употребительные из ключевых).</p>
+</div>
+<script>
+(function () {
+  const cloud = document.getElementById('kw-cloud'), btns = document.querySelectorAll('[data-kw-size]');
+  function apply(mode) {
+    if (!document.querySelector('[data-kw-size="' + mode + '"]')) mode = btns[0].dataset.kwSize;
+    cloud.querySelectorAll('span').forEach(s => { s.style.fontSize = s.dataset[mode] + 'px'; });
+    btns.forEach(b => b.classList.toggle('on', b.dataset.kwSize === mode));
+    try { localStorage.setItem('qv-kw-size', mode); } catch (e) {}
+  }
+  btns.forEach(b => b.addEventListener('click', () => apply(b.dataset.kwSize)));
+  let saved = null; try { saved = localStorage.getItem('qv-kw-size'); } catch (e) {}
+  apply(saved || btns[0].dataset.kwSize);
+})();
+</script>
 {% endif %}
 <div class="grid cols-2">
   {% for block, title in [(kw.positive, 'Ключевые слова выборки (чаще, чем в опорном корпусе)'), (kw.negative, 'Отрицательные ключевые слова (реже, чем в опорном корпусе)')] %}
   {% if block or loop.first %}
   <div class="panel table-scroll"><h3 style="margin-top:0">{{ title }}</h3>
-    <table><tr><th>Лемма</th><th>Ч. р.</th><th class="num">Выборка</th><th class="num">Опорный</th><th class="num">ipm</th><th class="num">ipm опорн.</th><th class="num">G²</th><th class="num">Log-ratio</th></tr>
+    <table><tr><th>Лемма</th><th>Ч. р.</th><th class="num">Выборка</th><th class="num">Опорный</th><th class="num">ipm</th><th class="num">ipm опорн.</th><th class="num">G²{{ term('g2') }}</th><th class="num">Log-ratio{{ term('logratio') }}</th></tr>
       {% for r in block[:60] %}<tr class="{{ '' if r.significant or not kw.words_b else 'muted' }}"><td><strong>{{ r.lemma }}</strong></td><td class="small muted">{{ r.pos }}</td><td class="num">{{ r.count_a }}</td><td class="num">{{ r.count_b }}</td>
         <td class="num">{{ r.ipm_a }}</td><td class="num">{{ r.ipm_b }}</td><td class="num">{{ r.ll }}</td><td class="num">{{ r.log_ratio if r.log_ratio is not none else '' }}</td></tr>{% endfor %}
     </table></div>
@@ -73,7 +95,7 @@
   {% endfor %}
 </div>
 <p class="help">G² ≥ 3,84 — различие значимо (p &lt; 0,05), ≥ 10,83 — p &lt; 0,001; незначимые строки показаны бледно. Log-ratio: +1 — вдвое чаще в выборке. Сравниваются леммы (ступень 1 — предварительный разбор), без знаков препинания.</p>
-<div class="panel table-scroll"><h3 style="margin-top:0">TF-IDF: самые характерные слова каждого текста</h3>
+<div class="panel table-scroll"><h3 style="margin-top:0">TF-IDF: самые характерные слова каждого текста{{ term('tfidf') }}</h3>
   {% if tfidf.too_many %}<p class="muted">В выборке больше {{ MAX_TFIDF_TEXTS }} текстов — отметьте нужные тексты в панели «Выборка».</p>
   {% else %}
   <table><tr><th>Текст</th><th>Характерные леммы (по убыванию TF-IDF)</th></tr>
@@ -96,14 +118,14 @@
 {% if tm and tm.summary[0].total %}
 <p class="muted">Текст разбит на {{ tm.segments }} равных по числу слов отрезков (по ~{{ (tm.n_words / tm.segments)|round|int }} слов). Цвет — плотность вхождений (ipm, на миллион слов отрезка).
   {% if not sel.words %}Показаны {{ tm.rows|length }} самых частых слов — свои слова выберите в блоке «Слова словаря».{% endif %} <strong>Щёлкните по клетке</strong> — ниже появится текст этого отрезка с подсвеченными словами.</p>
-<div class="panel"><h3 style="margin-top:0">Карта словаря по тексту</h3><div id="chart-map" class="chart" style="min-height:{{ 140 + 26 * (tm.rows|length + tm.summary|length) }}px"></div></div>
+<div class="panel"><h3 style="margin-top:0">Карта словаря по тексту{{ term('textmap') }}</h3><div id="chart-map" class="chart" style="min-height:{{ 140 + 26 * (tm.rows|length + tm.summary|length) }}px"></div></div>
 {% if tm.peaks %}<div class="panel"><strong>Самые «плотные» места:</strong>
   {% for pk in tm.peaks %}<a href="#" class="chip" onclick="showPassage({{ pk.from }}, {{ pk.to }}, {{ pk.segment }}); return false;">отрезок {{ pk.segment }} (предл. {{ pk.from }}–{{ pk.to }}): {{ pk.count }} вхожд., {{ pk.ipm }} ipm</a>{% endfor %}</div>{% endif %}
 <div class="panel" id="passage-box" style="display:none"><h3 style="margin-top:0" id="passage-title"></h3><div id="passage"></div></div>
 <div class="panel"><h3 style="margin-top:0">Лексическая дисперсия: где в тексте встречается каждое слово</h3><div id="chart-disp" class="chart" style="min-height:{{ 120 + 30 * tm.points|length }}px"></div></div>
 <div class="panel table-scroll"><h3 style="margin-top:0">Равномерность распределения по тексту</h3>
   <table><tr><th>Слово</th><th class="num">Вхождений</th><th class="num" title="в скольких отрезках из {{ tm.segments }} встречается">Отрезков со словом</th>
-    <th class="num" title="DP Грайса: 0 — равномерно, ближе к 1 — сосредоточено в немногих местах">DP</th><th class="num" title="D Жуйяна: 1 — равномерно, 0 — всё в одном месте">D Жуйяна</th></tr>
+    <th class="num" title="DP Грайса: 0 — равномерно, ближе к 1 — сосредоточено в немногих местах">DP{{ term('dp') }}</th><th class="num" title="D Жуйяна: 1 — равномерно, 0 — всё в одном месте">D Жуйяна{{ term('juilland') }}</th></tr>
     {% for r in tm.summary + tm.rows %}<tr><td>{% if r.kind != 'word' %}<em>{{ r.label }}</em>{% else %}<strong>{{ r.label }}</strong>{% endif %}</td><td class="num">{{ r.total }}</td><td class="num">{{ r.range }}</td>
       <td class="num">{{ r.dp if r.dp is not none else '' }}</td><td class="num">{{ r.d if r.d is not none else '' }}</td></tr>{% endfor %}
   </table></div>

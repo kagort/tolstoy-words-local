@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ dash.title|striptags }} — дашборд Quotverba</title>
+<style>
+{{ css|safe }}
+body { padding: 20px 0; }
+.dash { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
+</style>
+<script>window.PlotlyGeoAssets = { topojson: { world_110m: {{ topojson|safe }} } };</script>
+{% if cdn %}<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@{{ plotly_version }}/plotly.min.js"></script>
+{% else %}<script>{{ plotly|safe }}</script>{% endif %}
+<script>{{ appjs|safe }}</script>
+</head>
+<body>
+{% include "_dashboard_body.html" %}
+</body>
+</html>

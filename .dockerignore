@@ -6,7 +6,12 @@ __pycache__
 .env
 data
 legacy
-docs
+docs/*
+# статьи базы знаний и файлы к ним (страница «Справка»)
+!docs/USER_GUIDE.md
+!docs/POLITICAL_DISCOURSE.md
+!docs/HISTORICAL_SOURCES.md
+!docs/dictionaries
 tests
 backups
 .idea

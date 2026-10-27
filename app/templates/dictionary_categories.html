@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Категории — {{ d.name }}{% endblock %}
+{% block content %}
+<p><a href="/dictionaries/{{ d.id }}">← Словарь «{{ d.name }}»</a></p>
+<h1>Предложить категории</h1>
+{% if no_cats %}<div class="flash info">Словарь сейчас «без категорий». После «Применить» категории появятся в анализе, и этот режим выключится.</div>{% endif %}
+<p class="row" style="gap:8px">
+  {% if redo %}<span><strong>Все слова</strong> (существующие категории заменяются)</span> · <a href="/dictionaries/{{ d.id }}/categories">только слова без категории</a>
+  {% else %}<span><strong>Только слова без категории</strong></span>{% if n_with_cat %} · <a href="/dictionaries/{{ d.id }}/categories?all=1">все слова заново ({{ n_with_cat }} с категорией будут переразбиты)</a>{% endif %}{% endif %}
+</p>
+<p class="help">{{ 'Все слова' if redo else 'Слова без категории' }} ({{ sug.n }}) сгруппированы по смыслу: k-средние по векторам navec; однокоренные слова — в одной группе;
+  слова, которых нет в navec, отнесены к группе по контекстам своих вхождений (помечены «по контексту»), иначе — в «ПРОЧЕЕ».
+  Название группы — главное существительное группы; рядом — варианты (щелчок подставит). Поправьте названия, перенесите слова в другую группу
+  и нажмите «Применить». {{ 'Существующие категории будут заменены.' if redo else 'Уже назначенные категории не меняются.' }}</p>
+{% if sug.groups %}
+<form method="get" class="panel row">
+  {% if redo %}<input type="hidden" name="all" value="1">{% endif %}
+  <div class="shrink"><label>Число групп</label><input type="number" name="k" min="2" max="20" value="{{ sug.k }}" style="width:90px"></div>
+  <div class="shrink"><button type="submit" class="secondary">Пересчитать</button></div>
+</form>
+<form method="post" action="/dictionaries/{{ d.id }}/categories">
+  {% if redo %}<input type="hidden" name="all" value="1">{% endif %}
+  <div class="grid cols-2">
+  {% for g in sug.groups %}
+    <div class="panel">
+      <label>Категория {{ g.id }} ({{ g.entries|length }} слов)</label>
+      <input type="text" name="name_{{ g.id }}" id="cat-name-{{ g.id }}" value="{{ g.name }}">
+      {% if g.alt %}<div class="small muted" style="margin-top:4px">варианты: {% for a in g.alt %}<a href="#" onclick="document.getElementById('cat-name-{{ g.id }}').value = {{ a|tojson }}; return false;">{{ a }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+      <table style="margin-top:8px">
+      {% for e in g.entries %}
+        <tr><td>{{ e.surface }}{% if e.context %} <span class="badge" title="нет в navec — отнесено по контекстам вхождений">по контексту</span>{% endif %}</td>
+          <td style="width:150px"><select name="entry_{{ e.id }}" aria-label="группа">{% for g2 in sug.groups %}<option value="{{ g2.id }}" {{ 'selected' if g2.id == g.id }}>→ {{ g2.id }}. {{ g2.name|truncate(18) }}</option>{% endfor %}<option value="">без категории</option></select></td></tr>
+      {% endfor %}
+      </table>
+    </div>
+  {% endfor %}
+  </div>
+  <p><button type="submit">Применить</button></p>
+</form>
+{% else %}<div class="panel muted">{% if sug.n < 2 %}Слов без категории меньше двух — группировать нечего.{% else %}Мало слов с векторами navec для группировки.{% endif %}</div>{% endif %}
+{% endblock %}

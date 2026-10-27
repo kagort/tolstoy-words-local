@@ -7,18 +7,22 @@ import json
 import re
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import get_session
-from app.models import Corpus, Dictionary, DictionaryEntry, Hit, Job, SentenceRow, TextDoc, TokenRelation, TokenRow
+from app.models import Corpus, Dictionary, DictionaryEntry, Entity, Hit, Job, SentenceRow, TextDoc, TokenRelation, TokenRow
 from app.nlp.normalize import normalize_text
-from app.nlp.syntax import SentenceAnalysis
+from app.nlp.syntax import SYNTAX_VERSION, SentenceAnalysis
 from app.services import analytics as A
 from app.services.dictionaries import (
+    DEFAULT_SETTINGS,
     add_entries,
+    scope_corpora,
+    scope_text_ids,
+    sync_scope,
     create_dictionary,
     option_counts,
     parse_dictionary_file,
@@ -29,7 +33,7 @@ from app.services.metadata import parse_years
 from app.services.jobs import enqueue
 from app.services.stopwords import options as stop_options
 from app.services.matching import load_sentences
-from app.web.deps import flash, render
+from app.web.deps import flash, render, ui_mode
 
 router = APIRouter()
 
@@ -68,6 +72,17 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
 def logout(request: Request):
     request.session.clear()
     return redirect("/login")
+
+
+@router.get("/ui/{mode}")
+def ui_switch(mode: str, next: str = "/"):
+    """Переключить интерфейс у себя: v2 (новый) или classic (прежний). Выбор хранится в cookie на год."""
+    from app.web.deps import UI_MODES
+
+    resp = redirect(next if next.startswith("/") and not next.startswith("//") else "/")
+    if mode in UI_MODES:
+        resp.set_cookie("qv_ui", mode, max_age=365 * 24 * 3600, samesite="lax", httponly=True)
+    return resp
 
 
 # ------------------------------------------------------------------ главная
@@ -229,15 +244,19 @@ def text_stats(request: Request, text_id: int, refresh: int = 0, stop: str = "",
 @router.post("/texts/{text_id}/edit")
 def text_edit(request: Request, text_id: int, title: str = Form(...), author: str = Form(""), years: str = Form(""),
               genre: str = Form(""), source_type: str = Form("natural"), generator: str = Form(""),
-              corpus_ids: list[str] = Form([]), db: Session = Depends(get_session)):
+              short_title: str = Form(""), corpus_ids: list[str] = Form([]), db: Session = Depends(get_session)):
     doc = db.get(TextDoc, text_id)
     if doc is None:
         raise HTTPException(404)
     doc.title, doc.author, doc.genre = title.strip(), author.strip() or None, genre.strip() or None
+    meta = {k: v for k, v in (doc.meta or {}).items() if k != "short_title"}
+    doc.meta = {**meta, "short_title": short_title.strip()[:60]} if short_title.strip() else meta
     doc.year_from, doc.year_to = parse_years(years)
     doc.source_type, doc.generator = source_type, generator.strip() or None
     ids = [int(c) for c in corpus_ids if c.isdigit()]
     doc.corpora = list(db.scalars(select(Corpus).where(Corpus.id.in_(ids)))) if ids else []
+    db.flush()
+    sync_scope(db, [text_id])  # словари для выбранных корпусов: текст вошёл в область — сопоставить, вышел — убрать вхождения
     db.commit()
     flash(request, "Сведения о тексте сохранены", "success")
     return redirect(f"/texts/{text_id}")
@@ -327,7 +346,10 @@ def corpus_update(request: Request, corpus_id: int, name: str = Form(...), descr
         raise HTTPException(404)
     c.name, c.description = name.strip(), description.strip() or None
     ids = [int(t) for t in text_ids if t.isdigit()]
+    before = {t.id for t in c.texts}
     c.texts = list(db.scalars(select(TextDoc).where(TextDoc.id.in_(ids)))) if ids else []
+    db.flush()
+    sync_scope(db, sorted(before ^ set(ids)))
     db.commit()
     flash(request, "Корпус сохранён", "success")
     return redirect(f"/corpora/{corpus_id}")
@@ -364,7 +386,7 @@ def dictionaries_list(request: Request, db: Session = Depends(get_session)):
 async def dictionary_create(request: Request, name: str = Form(...), description: str = Form(""),
                             words: str = Form(""), file: UploadFile | None = File(None),
                             include_participles: str | None = Form(None), include_gerunds: str | None = Form(None),
-                            db: Session = Depends(get_session)):
+                            suggest: str | None = Form(None), db: Session = Depends(get_session)):
     items = []
     if file is not None and file.filename:
         items += parse_dictionary_file(file.filename, await file.read())
@@ -376,11 +398,30 @@ async def dictionary_create(request: Request, name: str = Form(...), description
     if db.scalar(select(Dictionary).where(Dictionary.name == name.strip())):
         flash(request, "Словарь с таким названием уже есть", "error")
         return redirect("/dictionaries")
+    skipped: list = []
     d = create_dictionary(db, name, items, description.strip() or None,
-                          {"include_participles": bool(include_participles), "include_gerunds": bool(include_gerunds)})
+                          {"include_participles": bool(include_participles), "include_gerunds": bool(include_gerunds)},
+                          skipped=skipped)
     db.commit()
-    flash(request, f"Словарь создан: {len(d.entries)} слов. Проверьте разборы неоднозначных слов (подсвечены).", "success")
-    return redirect(f"/dictionaries/{d.id}")
+    flash(request, f"Словарь создан: {len(d.entries)} слов. Проверьте разборы неоднозначных слов (подсвечены)."
+          + _skipped_note(skipped), "success")
+    return redirect(f"/dictionaries/{d.id}/cognates" if suggest else f"/dictionaries/{d.id}")
+
+
+DICT_SORTS = {"hits": "по числу вхождений", "abc": "по алфавиту", "added": "по порядку добавления"}
+
+
+def _entry_hits(db: Session, dict_id: int) -> dict[int, int]:
+    """Вхождения каждого слова словаря во всех текстах (засчитанные: без ложных и слов внутри имён)."""
+    return dict(db.execute(select(Hit.entry_id, func.count()).where(Hit.dictionary_id == dict_id, A.VALID).group_by(Hit.entry_id)).all())
+
+
+def _sorted_entries(entries, hits: dict[int, int], sort: str = "hits") -> list:
+    if sort == "abc":
+        return sorted(entries, key=lambda e: e.surface.lower())
+    if sort == "added":
+        return sorted(entries, key=lambda e: e.id)
+    return sorted(entries, key=lambda e: (-hits.get(e.id, 0), e.surface.lower()))  # частые сверху
 
 
 @router.get("/dictionaries/{dict_id}")
@@ -388,10 +429,25 @@ def dictionary_detail(request: Request, dict_id: int, db: Session = Depends(get_
     d = db.get(Dictionary, dict_id)
     if d is None:
         raise HTTPException(404)
-    hits = dict(db.execute(select(Hit.entry_id, func.count()).where(Hit.dictionary_id == dict_id).group_by(Hit.entry_id)).all())
+    hits = _entry_hits(db, dict_id)
+    sort = request.query_params.get("sort") if request.query_params.get("sort") in DICT_SORTS else "hits"
+    entries = _sorted_entries(d.entries, hits, sort)
+    # вхождения внутри имён собственных (не считаются): «любовь» в «Любовь Андреевна»
+    in_names = dict(db.execute(select(Hit.entry_id, func.count()).where(Hit.dictionary_id == dict_id, Hit.in_name,
+                                                                         Hit.is_valid.is_(None)).group_by(Hit.entry_id)).all())
     opt_counts = {e.id: option_counts(db, e) for e in d.entries if e.ambiguous or not e.verified}
     pending = db.scalar(select(func.count()).select_from(Job).where(Job.status.in_(["queued", "running"]), Job.kind == "match")) or 0
-    return render(request, "dictionary_detail.html", d=d, hits=hits, opt_counts=opt_counts, pending=pending)
+    # вхождения, найденные прежней версией синтаксического слоя: связи в профиле слова неполные до пересчёта
+    stale = db.scalar(select(func.count()).select_from(Hit).where(Hit.dictionary_id == dict_id, Hit.syntax_version != SYNTAX_VERSION)) or 0
+    from app.services.dictionaries import duplicate_groups
+
+    no_category = sum(1 for e in d.entries if not e.category)
+    dup_groups = duplicate_groups(d)
+    return render(request, "dictionary_detail.html", d=d, hits=hits, entries=entries, sort=sort, DICT_SORTS=DICT_SORTS, in_names=in_names, opt_counts=opt_counts, pending=pending, stale=stale,
+                  no_category=no_category, has_categories=no_category < len(d.entries), dup_groups=dup_groups,
+                  no_cats=bool((d.settings or {}).get("no_categories")),
+                  all_corpora=list(db.scalars(select(Corpus).order_by(Corpus.name))), scope=set(scope_corpora(d)),
+                  names_ok=set((d.settings or {}).get("names_ok_entries", [])))
 
 
 @router.post("/dictionaries/{dict_id}/entries/{entry_id}")
@@ -405,19 +461,35 @@ def entry_update(request: Request, dict_id: int, entry_id: int, option: str = Fo
         new_lemma, new_upos = option.split("|", 1)
     if lemma.strip():
         new_lemma = lemma.strip()
-    update_entry(db, e, lemma=new_lemma, upos=new_upos if new_upos is not None else e.upos, match_mode=match_mode, category=category)
+    from app.services.dictionaries import no_categories
+
+    flat = no_categories(e.dictionary)  # словарь «без категорий» — поле категории не показывается и не сохраняется
+    changed = update_entry(db, e, lemma=new_lemma, upos=new_upos if new_upos is not None else e.upos, match_mode=match_mode,
+                           category=None if flat else category)
     db.commit()
-    flash(request, f"Слово «{e.surface}» обновлено; пересчёт вхождений поставлен в очередь", "success")
+    flash(request, f"Слово «{e.surface}» сохранено и отмечено как проверенное"
+          + ("; пересчёт вхождений поставлен в очередь" if changed else ""), "success")
     return redirect(f"/dictionaries/{dict_id}#e{entry_id}")
 
 
 @router.post("/dictionaries/{dict_id}/entries/{entry_id}/delete")
 def entry_delete(request: Request, dict_id: int, entry_id: int, db: Session = Depends(get_session)):
     e = db.get(DictionaryEntry, entry_id)
+    anchor = ""
     if e is not None and e.dictionary_id == dict_id:
+        # после удаления страница открывается на соседнем слове, а не в начале списка
+        sort = request.query_params.get("sort") if request.query_params.get("sort") in DICT_SORTS else "hits"
+        ids = [x.id for x in _sorted_entries(db.get(Dictionary, dict_id).entries, _entry_hits(db, dict_id), sort)]
+        pos = ids.index(entry_id)
+        nxt = ids[pos + 1] if pos + 1 < len(ids) else (ids[pos - 1] if pos else None)
+        anchor = f"#e{nxt}" if nxt else ""
+        surface = e.surface
         db.delete(e)
         db.commit()
-    return redirect(f"/dictionaries/{dict_id}")
+        flash(request, f"«{surface}» удалено из словаря вместе с вхождениями", "success")
+        if sort != "hits":
+            anchor = f"?sort={sort}{anchor}"
+    return redirect(f"/dictionaries/{dict_id}{anchor}")
 
 
 @router.post("/dictionaries/{dict_id}/add")
@@ -429,26 +501,185 @@ async def dictionary_add(request: Request, dict_id: int, words: str = Form(""), 
     items = parse_dictionary_text(words) if words.strip() else []
     if file is not None and file.filename:
         items += parse_dictionary_file(file.filename, await file.read())
-    new = add_entries(db, d, items)
+    skipped: list = []
+    new = add_entries(db, d, items, skipped=skipped)
     db.commit()
-    flash(request, f"Добавлено слов: {len(new)}", "success")
+    flash(request, f"Добавлено слов: {len(new)}." + _skipped_note(skipped), "success")
+    return redirect(f"/dictionaries/{dict_id}")
+
+
+def _skipped_note(skipped: list) -> str:
+    """Сообщение о пропущенных повторах: «благоухания» → «благоухание» (одна лемма — одна запись)."""
+    if not skipped:
+        return ""
+    sample = ", ".join(f"«{a}» → «{b}»" for a, b in skipped[:6])
+    return f" Повторы по лемме не добавлены ({len(skipped)}): {sample}{' …' if len(skipped) > 6 else ''}."
+
+
+@router.post("/dictionaries/{dict_id}/merge-duplicates")
+def dictionary_merge_duplicates(request: Request, dict_id: int, db: Session = Depends(get_session)):
+    """Объединить записи с одной леммой (повторы и словоформы одного слова)."""
+    from app.services.dictionaries import merge_duplicates
+
+    d = db.get(Dictionary, dict_id)
+    if d is None:
+        raise HTTPException(404)
+    n = merge_duplicates(db, d)
+    db.commit()
+    flash(request, f"Повторы объединены: удалено записей {n}; их формы записаны в комментарий оставшейся записи." if n
+          else "Повторов по лемме нет", "success")
+    return redirect(f"/dictionaries/{dict_id}")
+
+
+@router.get("/dictionaries/{dict_id}/cognates")
+def dictionary_cognates(request: Request, dict_id: int, db: Session = Depends(get_session)):
+    """Однокоренные слова из текстов для слов словаря (или для слов, вписанных в поле)."""
+    from app.services.wordfamily import cognates
+
+    d = db.get(Dictionary, dict_id)
+    if d is None:
+        raise HTTPException(404)
+    words_q = (request.query_params.get("words") or "").strip()
+    entries = {e.lemma: e for e in d.entries if not e.phrase}
+    words = [w.strip() for w in re.split(r"[,;\n]", words_q) if w.strip()] if words_q else list(entries)
+    scope = scope_text_ids(db, d)
+    found = cognates(db, words, sorted(scope) if scope is not None else None,
+                     exclude={e.lemma for e in d.entries} | {e.surface for e in d.entries})
+    for g in found:
+        e = entries.get(g["source"])
+        g["category"] = e.category if e else ""
+    return render(request, "dictionary_cognates.html", d=d, found=found, words_q=words_q, n_words=len(words))
+
+
+@router.post("/dictionaries/{dict_id}/add-suggested")
+def dictionary_add_suggested(request: Request, dict_id: int, rows: list[str] = Form([]), back: str = Form(""),
+                             db: Session = Depends(get_session)):
+    """Добавить отмеченные предложения (строка: слово\tкатегория\tкомментарий) с категорией исходного слова."""
+    d = db.get(Dictionary, dict_id)
+    if d is None:
+        raise HTTPException(404)
+    items = []
+    for r in rows:
+        word, cat, comment = (r.split("\t") + ["", "", ""])[:3]
+        if word.strip():
+            items.append({"surface": word.strip(), "category": cat.strip() or None, "upos": None, "comment": comment.strip() or None})
+    new = add_entries(db, d, items) if items else []
+    db.commit()
+    flash(request, f"В словарь «{d.name}» добавлено слов: {len(new)}. Вхождения ищутся в фоне (страница «Задачи»).", "success")
+    return redirect(back if back.startswith("/") else f"/dictionaries/{dict_id}")
+
+
+@router.get("/dictionaries/{dict_id}/categories")
+def dictionary_categories(request: Request, dict_id: int, db: Session = Depends(get_session)):
+    """Предложение категорий для слов без категории: группы по смыслу, правка названий и состава."""
+    from app.services.wordfamily import suggest_categories
+
+    d = db.get(Dictionary, dict_id)
+    if d is None:
+        raise HTTPException(404)
+    k = _int(request.query_params.get("k"))
+    redo = bool(request.query_params.get("all"))  # все слова заново (существующие категории заменяются)
+    sug = suggest_categories(db, dict_id, k=k if k and 2 <= k <= 20 else None, only_empty=not redo)
+    from app.services.dictionaries import no_categories
+
+    return render(request, "dictionary_categories.html", d=d, sug=sug, redo=redo, no_cats=no_categories(d),
+                  n_with_cat=sum(1 for e in d.entries if e.category))
+
+
+@router.post("/dictionaries/{dict_id}/categories")
+async def dictionary_categories_apply(request: Request, dict_id: int, db: Session = Depends(get_session)):
+    from app.services.wordfamily import apply_categories
+
+    d = db.get(Dictionary, dict_id)
+    if d is None:
+        raise HTTPException(404)
+    form = await request.form()
+    names = {int(k[5:]): str(v) for k, v in form.items() if k.startswith("name_") and k[5:].isdigit()}
+    assign = {int(k[6:]): int(v) for k, v in form.items() if k.startswith("entry_") and k[6:].isdigit() and str(v).isdigit()}
+    redo = form.get("all") == "1"
+    n = apply_categories(db, dict_id, names, assign, only_empty=not redo)
+    note = ""
+    if n and (d.settings or {}).get("no_categories"):  # категории назначены — словарь снова с категориями
+        d.settings = {**d.settings, "no_categories": False}
+        note = "; режим «без категорий» выключен"
+    db.commit()
+    flash(request, f"Категории назначены: {n} слов{note}", "success")
     return redirect(f"/dictionaries/{dict_id}")
 
 
 @router.post("/dictionaries/{dict_id}/settings")
 def dictionary_settings(request: Request, dict_id: int, name: str = Form(...), description: str = Form(""),
                         include_participles: str | None = Form(None), include_gerunds: str | None = Form(None),
-                        merge_propn: str | None = Form(None), db: Session = Depends(get_session)):
+                        merge_propn: str | None = Form(None), count_names: str | None = Form(None),
+                        no_categories: str | None = Form(None),
+                        scope_corpus_ids: list[str] = Form([]), db: Session = Depends(get_session)):
+    from app.services.matching import flag_name_hits
+
     d = db.get(Dictionary, dict_id)
     if d is None:
         raise HTTPException(404)
     d.name, d.description = name.strip(), description.strip() or None
-    d.settings = {"include_participles": bool(include_participles), "include_gerunds": bool(include_gerunds),
-                  "merge_propn": bool(merge_propn)}
-    enqueue(db, "match", {"dictionary_id": d.id}, title=f"Пересчёт словаря «{d.name}»")
+    old = dict(d.settings or {})
+    new = {**old, "include_participles": bool(include_participles), "include_gerunds": bool(include_gerunds),
+           "merge_propn": bool(merge_propn), "count_names": bool(count_names), "no_categories": bool(no_categories),
+           "corpus_ids": sorted({int(c) for c in scope_corpus_ids if c.isdigit()})}
+    d.settings = new
+    cleared = 0
+    if new["no_categories"]:
+        from app.services.dictionaries import clear_categories
+
+        cleared = clear_categories(d)
+    match_keys = ("include_participles", "include_gerunds", "merge_propn", "corpus_ids")
+    if any(old.get(k, DEFAULT_SETTINGS.get(k, [])) != new[k] for k in match_keys):
+        enqueue(db, "match", {"dictionary_id": d.id}, title=f"Пересчёт словаря «{d.name}»")
+        msg = "Настройки сохранены, словарь пересчитывается"
+    else:  # «считать слова в составе имён» меняет только пометки — без пересчёта
+        db.flush()
+        flag_name_hits(db, [d.id])
+        msg = "Настройки сохранены"
+    if cleared:
+        msg += f"; категории удалены у {cleared} слов"
     db.commit()
-    flash(request, "Настройки сохранены, словарь пересчитывается", "success")
+    flash(request, msg, "success")
     return redirect(f"/dictionaries/{dict_id}")
+
+
+@router.post("/dictionaries/{dict_id}/entries/{entry_id}/names")
+def entry_names_toggle(request: Request, dict_id: int, entry_id: int, db: Session = Depends(get_session)):
+    """Слово-исключение: считать его вхождения и внутри имён собственных (например, «Бог»)."""
+    from app.services.matching import flag_name_hits
+
+    d = db.get(Dictionary, dict_id)
+    e = db.get(DictionaryEntry, entry_id)
+    if d is None or e is None or e.dictionary_id != dict_id:
+        raise HTTPException(404)
+    ok = set((d.settings or {}).get("names_ok_entries", []))
+    ok ^= {entry_id}
+    d.settings = {**(d.settings or {}), "names_ok_entries": sorted(ok)}
+    db.flush()
+    flag_name_hits(db, [d.id])
+    db.commit()
+    flash(request, f"«{e.surface}»: " + ("вхождения внутри имён тоже считаются" if entry_id in ok else "вхождения внутри имён не считаются"),
+          "success")
+    return redirect(f"/dictionaries/{dict_id}#e{entry_id}")
+
+
+@router.post("/dictionaries/{dict_id}/scope/add")
+def dictionary_scope_add(request: Request, dict_id: int, corpus_id: str = Form(""), back: str = Form("/analysis"),
+                         db: Session = Depends(get_session)):
+    """Добавить корпус в область словаря и сопоставить его тексты (кнопка в «Анализе»)."""
+    d = db.get(Dictionary, dict_id)
+    if d is None:
+        raise HTTPException(404)
+    cid = _int(corpus_id)
+    if cid and scope_corpora(d):
+        d.settings = {**(d.settings or {}), "corpus_ids": sorted(set(scope_corpora(d)) | {cid})}
+        db.flush()
+        c = db.get(Corpus, cid)
+        n = sync_scope(db, [t.id for t in c.texts] if c else [])
+        db.commit()
+        flash(request, f"Корпус добавлен к словарю «{d.name}»" + ("; сопоставление поставлено в очередь" if n else ""), "success")
+    return redirect(back if back.startswith("/") else "/analysis")
 
 
 @router.post("/dictionaries/{dict_id}/rematch")
@@ -456,9 +687,12 @@ def dictionary_rematch(request: Request, dict_id: int, db: Session = Depends(get
     d = db.get(Dictionary, dict_id)
     if d is None:
         raise HTTPException(404)
+    from app.services.dictionaries import clear_categories, no_categories
+
+    cleared = clear_categories(d) if no_categories(d) else 0  # «без категорий»: старые названия категорий не остаются
     enqueue(db, "match", {"dictionary_id": d.id}, title=f"Пересчёт словаря «{d.name}»")
     db.commit()
-    flash(request, "Пересчёт поставлен в очередь", "success")
+    flash(request, "Пересчёт поставлен в очередь" + (f"; категории удалены у {cleared} слов" if cleared else ""), "success")
     return redirect(f"/dictionaries/{dict_id}")
 
 
@@ -580,12 +814,35 @@ def _analysis_context(db: Session, request: Request) -> dict:
     word_counts = {}
     if dict_id:
         word_counts = {r["entry_id"]: r["count"] for r in A.frequency(db, dict_id, sel.ids)["rows"]}
+    # в выпадающих списках и внутри категорий — сначала частые слова выборки, слова без вхождений — в конце
+    entries.sort(key=lambda e: (-word_counts.get(e.id, 0), e.surface.lower()))
+    cur = next((d for d in dictionaries if d.id == dict_id), None)
+    from app.services.dictionaries import no_categories
+
+    no_cats = no_categories(cur)  # настройка словаря «Без категорий»: простой список слов, графики только по словам
+    if no_cats:
+        sel.unit = ""
     categories: dict[str, list] = {}
-    for e in entries:
-        categories.setdefault(e.category or "", []).append(e)
+    for e in sorted(entries, key=lambda e: "" if no_cats else (e.category or "")):
+        categories.setdefault("" if no_cats else (e.category or ""), []).append(e)
+    # словарь только для выбранных корпусов, а в выборке есть другие тексты — предупреждаем
+    scope_out = 0
+    if cur is not None:
+        from app.services.dictionaries import scope_text_ids
+
+        scope = scope_text_ids(db, cur)
+        if scope is not None:
+            scope_out = sum(1 for t in sel.ids if t not in scope)
+    # вхождения прежней версии синтаксического слоя: связи (профиль, коллокации, роли) — по старым правилам до пересчёта;
+    # страница предложения при этом уже показывает новые — предупреждаем, чтобы расхождение не выглядело ошибкой
+    stale = db.scalar(select(func.count()).select_from(Hit).where(
+        Hit.dictionary_id == dict_id, Hit.text_id.in_(sel.ids or [-1]), Hit.syntax_version != SYNTAX_VERSION)) or 0 if dict_id else 0
+    stale_pending = bool(stale) and bool(db.scalar(select(func.count()).select_from(Job).where(
+        Job.status.in_(["queued", "running"]), Job.kind == "match")))
     return dict(dictionaries=dictionaries, corpora=corpora, dict_id=dict_id, corpus_id=sel.corpus_id, entries=entries,
+                scope_out=scope_out, stale=stale, stale_pending=stale_pending,
                 corpus_name=sel.corpus_name, tab=qp.get("tab", "overview"), sel=sel, sel_texts=corpus_texts(db, sel),
-                facets=A.facets(db, sel.corpus_ids), word_counts=word_counts, categories=categories,
+                facets=A.facets(db, sel.corpus_ids), word_counts=word_counts, categories=categories, no_cats=no_cats,
                 n_texts=len(sel.ids), stop_options=stop_options(db))
 
 
@@ -599,13 +856,15 @@ def _overview_params(request: Request) -> dict:
     }
 
 
-def _overview_context(db: Session, request: Request, dict_id: int, text_ids: list[int]) -> dict:
-    """text_ids — уже отфильтрованная выборка (панель «Выборка»)."""
+def _overview_context(db: Session, request: Request, dict_id: int, text_ids: list[int], all_groups: bool = False) -> dict:
+    """text_ids — уже отфильтрованная выборка (панель «Выборка»); all_groups — без сворачивания в «остальные» (выгрузка)."""
     p = _overview_params(request)
     entry_ids = p["entry_ids"]
-    if not entry_ids:  # по умолчанию — пять самых частых слов
+    by = "cat" if request.query_params.get("unit") == "cat" else "word"
+    if not entry_ids and by == "word":  # по умолчанию — пять самых частых слов (категории — самые частые категории)
         entry_ids = [r["entry_id"] for r in A.frequency(db, dict_id, text_ids)["rows"] if r["count"]][:5]
-    ov = A.overview(db, dict_id, text_ids, entry_ids, p["dim"], p["step"])
+    top = None if all_groups or request.query_params.get("gtop") == "all" else (_int(request.query_params.get("gtop")) or A.GROUPS_TOP)
+    ov = A.overview(db, dict_id, text_ids, entry_ids, p["dim"], p["step"], by=by, groups_top=top)
     return {"ov": ov, "ov_params": p, "ov_entry_ids": entry_ids, "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
 
 
@@ -685,7 +944,7 @@ def _map_context(db: Session, request: Request, dict_id: int, sel) -> dict:
     if text_id not in {t.id for t in texts}:
         text_id = texts[0].id if texts else None
     segments = _int(qp.get("segments")) or 50
-    tm = text_map(db, text_id, dict_id, sel.words, segments) if text_id else None
+    tm = text_map(db, text_id, dict_id, sel.words, segments, by="cat" if sel.unit == "cat" else "word") if text_id else None
     return {"tm": tm, "map_texts": texts, "map_text_id": text_id, "SEGMENT_CHOICES": SEGMENT_CHOICES}
 
 
@@ -700,22 +959,142 @@ def text_passage(text_id: int, request: Request, db: Session = Depends(get_sessi
                                  _int(qp.get("dictionary_id")), words)}
 
 
-def _entities_context(db: Session, request: Request, dict_id: int, sel) -> dict:
+def _entity_flags(qp) -> set[str]:
+    from app.services.entities import FLAGS
+
+    flags = {f for f in qp.getlist("f") if f in FLAGS}
+    if qp.get("nolatin"):  # старый параметр ссылок
+        flags.add("nolatin")
+    return flags
+
+
+def _entities_context(db: Session, request: Request, dict_id: int, sel, full: bool = True) -> dict:
+    """full=False — только указатель (обновление списка при вводе в поиск, без сети персонажей и графиков)."""
     from app.services import entities as E
+    from app.services.dict_build import NAME_MODES
 
     qp = request.query_params
     etype = qp.get("etype") if qp.get("etype") in E.ETYPES else None
-    unit = qp.get("unit") if qp.get("unit") in E.UNITS else "sentence"
-    ix = E.entity_index(db, sel.ids, etype, qp.get("q") or "")
-    if qp.get("nolatin"):
-        ix["items"] = [x for x in ix["items"] if any("а" <= ch.lower() <= "я" or ch.lower() == "ё" for ch in x["name"])]
-        ix["total"] = len(ix["items"]) if len(ix["items"]) < ix["total"] else ix["total"]
-        ix["n_mentions"] = sum(x["count"] for x in ix["items"])
+    unit = qp.get("eunit") if qp.get("eunit") in E.UNITS else "sentence"
+    flags = _entity_flags(qp)
+    hidden_only = bool(qp.get("hidden"))
+    ix = E.entity_index(db, sel.ids, etype, qp.get("q") or "", flags=flags, hidden_only=hidden_only, features=True)
     cross = qp.get("cross") if qp.get("cross") in ("LOC", "PER", "ORG") else "LOC"
-    return {"ents": ix, "ent_etype": etype, "ent_unit": unit, "ent_cross": cross,
-            "network": E.persons_network(db, sel.ids, unit) if ix["n_mentions"] else None,
-            "ent_dict": E.entity_dictionary(db, sel.ids, dict_id, sel.words, cross, unit) if ix["n_mentions"] else None,
-            "ETYPES": E.ETYPES, "ETYPE_ONE": E.ETYPE_ONE, "UNITS": E.UNITS}
+    sel_texts = list(db.execute(select(TextDoc.id, TextDoc.title).where(TextDoc.id.in_(sel.ids or [-1])).order_by(TextDoc.title)))
+    ctx = {"ents": ix, "ent_etype": etype, "ent_unit": unit, "ent_cross": cross, "ent_flags": flags, "ent_hidden": hidden_only,
+           "merge_hints": E.merge_suggestions(ix["items"]) if not (flags or hidden_only) else [], "ent_texts": sel_texts,
+           "ETYPES": E.ETYPES, "ETYPE_ONE": E.ETYPE_ONE, "UNITS": E.UNITS, "ENT_FLAGS": E.FLAGS, "NOISE_SURE": E.NOISE_SURE,
+           "NAME_MODES": NAME_MODES}
+    if full:
+        ctx["network"] = E.persons_network(db, sel.ids, unit) if ix["n_mentions"] else None
+        ctx["ent_dict"] = E.entity_dictionary(db, sel.ids, dict_id, sel.words, cross, unit) if ix["n_mentions"] else None
+    return ctx
+
+
+@router.get("/analysis/entities-index")
+def entities_index_fragment(request: Request, db: Session = Depends(get_session)):
+    """Указатель имён без остальной страницы — для поиска по мере ввода."""
+    from app.web.deps import templates
+
+    ctx = _analysis_context(db, request)
+    ctx.update(_entities_context(db, request, ctx["dict_id"], ctx["sel"], full=False))
+    ctx["request"] = request
+    return templates.TemplateResponse(request, "_entities_index.html", ctx)
+
+
+@router.post("/api/entities/hide")
+async def entities_hide(request: Request, db: Session = Depends(get_session)):
+    """«Это не имя» для группы имён (hidden=true) или возврат скрытых (hidden=false); без перезагрузки страницы."""
+    from app.services.entities import set_hidden
+    from app.services.matching import flag_name_hits
+
+    body = await request.json()
+    names = [str(x) for x in body.get("names") or [] if str(x).strip()][:20000]
+    if not names:
+        return JSONResponse({"error": "не отмечено ни одного имени"}, status_code=400)
+    tids = set_hidden(db, names, bool(body.get("hidden", True)))
+    db.flush()
+    if tids:  # скрытое «имя» возвращает слова словаря в частоты, возвращённое — снова исключает
+        flag_name_hits(db, text_ids=tids)
+    db.commit()
+    return {"n": len(set(names))}
+
+
+@router.post("/entities/etype")
+def entities_etype(request: Request, names: list[str] = Form([]), names_all: str = Form(""), etype: str = Form(""),
+                   back: str = Form("/analysis?tab=entities"), db: Session = Depends(get_session)):
+    """Перенести отмеченные имена в другой класс (персона, место, организация)."""
+    from app.services.entities import ETYPE_ONE, set_etype
+    from app.services.matching import flag_name_hits
+
+    names = _names_from_form(names, names_all)
+    if not names:
+        flash(request, "Отметьте имена в указателе", "error")
+    else:
+        tids = set_etype(db, names, etype or None)
+        db.flush()
+        if tids:
+            flag_name_hits(db, text_ids=tids)
+        db.commit()
+        flash(request, f"Класс «{ETYPE_ONE.get(etype, 'как определила модель')}»: имён {len(names)}", "success")
+    return redirect(back if back.startswith("/") else "/analysis?tab=entities")
+
+
+@router.post("/entities/to-dictionary")
+def entities_to_dictionary(request: Request, names: list[str] = Form([]), names_all: str = Form(""), dict_name: str = Form(""),
+                           mode: str = Form("person"), back: str = Form("/analysis?tab=entities"), db: Session = Depends(get_session)):
+    """Словарь из отмеченных имён указателя: персонаж — категория, варианты имени — записи."""
+    from app.services import dict_build as DB
+    from app.services import entities as E
+    from app.services.selection import from_params
+    from urllib.parse import parse_qs, urlsplit
+
+    chosen = set(_names_from_form(names, names_all))
+    if not chosen:
+        flash(request, "Отметьте имена в указателе (или «отметить все найденные»)", "error")
+        return redirect(back if back.startswith("/") else "/analysis?tab=entities")
+    sel = from_params(db, parse_qs(urlsplit(back).query))
+    items = [x for x in E.entity_index(db, sel.ids, top=None)["items"] if x["name"] in chosen]
+    try:
+        d = DB.build_dictionary(db, dict_name, DB.name_groups(items, mode if mode in DB.NAME_MODES else "person", E.ETYPE_ONE),
+                                f"Из указателя имён ({len(items)} имён)")
+    except ValueError as exc:
+        db.rollback()
+        flash(request, str(exc), "error")
+        return redirect(back if back.startswith("/") else "/analysis?tab=entities")
+    db.commit()
+    flash(request, f"Словарь «{d.name}» создан из указателя имён: {len(d.entries)} записей, сопоставление поставлено в очередь", "success")
+    return redirect(f"/dictionaries/{d.id}")
+
+
+@router.post("/places/to-dictionary")
+def places_to_dictionary(request: Request, dict_name: str = Form(""), mode: str = Form("place"), only_map: str | None = Form(None),
+                         back: str = Form("/analysis?tab=geo"), db: Session = Depends(get_session)):
+    """Словарь из мест выборки (вкладка «География»)."""
+    from app.services import dict_build as DB
+    from app.services.geo import place_map
+    from app.services.selection import from_params
+    from urllib.parse import parse_qs, urlsplit
+
+    sel = from_params(db, parse_qs(urlsplit(back).query))
+    gm = place_map(db, sel.ids, top=5000)
+    points = gm["points"] + ([] if only_map else gm["unresolved"])
+    try:
+        d = DB.build_dictionary(db, dict_name, DB.place_groups(points, mode if mode in DB.PLACE_MODES else "place"),
+                                f"Из мест на карте ({len(points)} мест)")
+    except ValueError as exc:
+        db.rollback()
+        flash(request, str(exc), "error")
+        return redirect(back if back.startswith("/") else "/analysis?tab=geo")
+    db.commit()
+    flash(request, f"Словарь «{d.name}» создан из мест: {len(d.entries)} записей, сопоставление поставлено в очередь", "success")
+    return redirect(f"/dictionaries/{d.id}")
+
+
+def _names_from_form(names: list[str], names_all: str) -> list[str]:
+    """Отмеченные флажки плюс «Отметить все найденные» (список всех имён по фильтру, по строке на имя)."""
+    out = {n.strip() for n in names if n.strip()} | {n.strip() for n in names_all.split("\n") if n.strip()}
+    return sorted(out)
 
 
 def _semantic_context(db: Session, request: Request, dict_id: int, sel, entry_id: int | None) -> dict:
@@ -773,12 +1152,12 @@ def _stylo_context(db: Session, request: Request, sel) -> dict:
     from app.services import stylometry as ST
 
     qp = request.query_params
-    unit = qp.get("unit") if qp.get("unit") in ("text", "chunk") else ("chunk" if len(sel.ids) < 4 else "text")
+    unit = qp.get("sunit") if qp.get("sunit") in ("text", "chunk") else ("chunk" if len(sel.ids) < 4 else "text")
     chunk = _int(qp.get("chunk")) or 5000
     chunk = chunk if chunk in (2000, 5000, 10000, 20000) else 5000
     target = _int(qp.get("target"))
     res = ST.analyze(db, sel.ids, mfw=_int(qp.get("mfw")) or 100, kind=qp.get("kind") or "cosine", unit=unit, chunk=chunk,
-                     target=target if target in sel.ids else None)
+                     target=target if target in sel.ids else None, exclude=sel.names)
     texts = list(db.execute(select(TextDoc.id, TextDoc.title, TextDoc.author).where(TextDoc.id.in_(sel.ids or [-1]))
                             .order_by(TextDoc.author, TextDoc.title)))
     return {"sty": res, "sty_texts": texts, "sty_target": target, "MFW_CHOICES": ST.MFW_CHOICES, "DISTANCES": ST.DISTANCES,
@@ -813,7 +1192,7 @@ def entity_cooccurrence(request: Request, db: Session = Depends(get_session)):
     qp = request.query_params
     sel = from_params(db, qp)
     return {"sentences": cooccurrence_examples(db, sel.ids, qp.get("name", ""), _int(qp.get("entry")) or 0,
-                                               qp.get("unit") or "sentence")}
+                                               qp.get("eunit") or "sentence")}
 
 
 @router.post("/entities/override")
@@ -822,9 +1201,64 @@ def entity_override(request: Request, norm: str = Form(...), etype: str = Form("
     from app.services.entities import set_override
 
     set_override(db, norm.strip(), etype or None, canonical, bool(hidden))
+    db.flush()
+    from app.services.matching import flag_name_hits
+
+    # «это не имя» возвращает в частоты слова словаря внутри этого «имени»
+    tids = list(db.scalars(select(func.distinct(Entity.text_id)).where(Entity.norm == norm.strip())))
+    if tids:
+        flag_name_hits(db, text_ids=tids)
     db.commit()
     flash(request, f"Правка для «{norm}» сохранена" + (f": объединено с «{canonical.strip()}»" if canonical.strip() else ""), "success")
     return redirect(back if back.startswith("/") else "/analysis?tab=entities")
+
+
+@router.post("/entities/merge")
+def entities_merge(request: Request, names: list[str] = Form([]), names_all: str = Form(""), canonical: str = Form(""),
+                   scope: str = Form("all"), back: str = Form("/analysis?tab=entities"), db: Session = Depends(get_session)):
+    """Объединить отмеченные имена в одного персонажа — во всех текстах или только в одном."""
+    from app.services.entities import merge_names
+
+    names = _names_from_form(names, names_all)
+
+    target = canonical.strip() or (max(names, key=len) if names else "")
+    if len(set(names) | {target}) < 2 or not target:
+        flash(request, "Отметьте хотя бы два имени (или одно и впишите имя персонажа)", "error")
+    else:
+        text_id = _int(scope) if scope != "all" else None
+        n = merge_names(db, names, target, text_id)
+        db.commit()
+        where = f"в тексте «{db.get(TextDoc, text_id).title}»" if text_id and db.get(TextDoc, text_id) else "во всех текстах"
+        flash(request, f"Объединено в «{target}» {where}: вариантов {n}", "success")
+    return redirect(back if back.startswith("/") else "/analysis?tab=entities")
+
+
+@router.post("/entities/split")
+def entities_split(request: Request, variant: str = Form(...), text_ids: list[str] = Form([]),
+                   back: str = Form("/analysis?tab=entities"), db: Session = Depends(get_session)):
+    from app.services.entities import split_name
+
+    split_name(db, variant.strip(), [int(t) for t in text_ids if t.isdigit()])
+    db.commit()
+    flash(request, f"«{variant}» отделено от персонажа", "success")
+    return redirect(back if back.startswith("/") else "/analysis?tab=entities")
+
+
+@router.post("/places")
+def place_edit(request: Request, name: str = Form(...), action: str = Form("coords"), coords: str = Form(""),
+               option: str = Form(""), kind: str = Form(""), back: str = Form("/analysis?tab=geo"),
+               db: Session = Depends(get_session)):
+    """Ручная правка места на карте: координаты, вариант из справочника, «не на карте», сброс."""
+    from app.services.geo import set_place
+
+    try:
+        msg = set_place(db, name, action, coords, _int(option), kind)
+        db.commit()
+        flash(request, msg, "success")
+    except ValueError as exc:
+        db.rollback()
+        flash(request, str(exc), "error")
+    return redirect(back if back.startswith("/") else "/analysis?tab=geo")
 
 
 @router.post("/entities/extract")
@@ -865,6 +1299,13 @@ def analysis(request: Request, db: Session = Depends(get_session)):
         ctx.update(_map_context(db, request, dict_id, sel))
     elif tab == "entities":
         ctx.update(_entities_context(db, request, dict_id, sel))
+    elif tab == "geo":
+        from app.services.geo import EDIT_KINDS, KIND_LABELS, place_map
+
+        from app.services.dict_build import PLACE_MODES
+
+        ctx.update({"geo": place_map(db, sel.ids), "GEO_KINDS": KIND_LABELS, "EDIT_KINDS": EDIT_KINDS, "PLACE_MODES": PLACE_MODES,
+                    "geo_mode": "countries" if qp.get("geo_mode") == "countries" else "places"})
     elif tab == "semantic":
         ctx.update(_semantic_context(db, request, dict_id, sel, entry_id))
     elif tab == "topics":
@@ -877,13 +1318,17 @@ def analysis(request: Request, db: Session = Depends(get_session)):
         # отмеченные слова — только они (переключатель all_words показывает весь словарь)
         words = None if qp.get("all_words") else (sel.words or None)
         ctx["freq"] = A.only_words(A.frequency(db, dict_id, text_ids), words)
-        ctx["heat"] = A.frequency_by_text(db, dict_id, text_ids, entry_ids=words)
+        ctx["heat"] = A.frequency_by_text(db, dict_id, text_ids, entry_ids=words, by="cat" if sel.unit == "cat" else "word")
         ctx["freq_filtered"] = bool(words)
+        ctx["cats"] = None if ctx["no_cats"] else A.category_frequency(db, dict_id, text_ids, entry_ids=words, dim=qp.get("cat_dim") or "author")
+        ctx["DIMENSIONS"] = A.DIMENSIONS
     elif tab == "conc":
         ctx["conc"] = A.concordance(
             db, dict_id, text_ids, entry_id=entry_id, entry_ids=sel.words, role=qp.get("role") or None,
             rel_type=qp.get("rel_type") or None, related_lemma=qp.get("related") or None,
             near=qp.get("near") or None, window=_int(qp.get("window")) or 3,
+            phrase=qp.get("phrase") or None, phrase_any_order=bool(qp.get("phrase_any")),
+            names_only=bool(qp.get("names")),
             include_invalid=bool(qp.get("invalid")), page=_int(qp.get("page")) or 1,
         )
     elif tab == "profile":
@@ -895,8 +1340,10 @@ def analysis(request: Request, db: Session = Depends(get_session)):
                 entry_id = freq[0]["entry_id"] if freq else ctx["entries"][0].id
             ctx["entry_id"] = entry_id
         if entry_id:
+            # все связанные слова: первые PROFILE_TOP видны сразу, остальные — под «ещё …» (раньше редкие отбрасывались молча)
             ctx["profile"] = A.word_profile(db, entry_id, text_ids, scopes=scopes, include_negated=bool(qp.get("negated")),
-                                            stop=sel.stopset)
+                                            stop=sel.stopset, top=10_000)
+            ctx["PROFILE_TOP"] = 25
             ctx["forms"] = A.forms_distribution(db, entry_id, text_ids)
     elif tab == "compare":
         corpus_b = _int(qp.get("corpus_b"))
@@ -976,6 +1423,11 @@ def sentence_view(request: Request, sentence_id: int, token: int | None = None, 
     focus = token or (min(hit_tokens) if hit_tokens else None)
     roles = {t.idx: an.role(t.idx) for t in sent.tokens}
     rels = an.relations(focus) if focus else []
+    from app.services.unlink import is_unlinked, unlinked_pairs
+
+    pairs = unlinked_pairs(db, [sentence_id]).get(sentence_id)
+    unlinked = {r.related_idx for r in rels if is_unlinked(pairs, focus, r.related_idx)}
+    rels.sort(key=lambda r: r.related_idx in unlinked)  # убранные вручную — в конце, с кнопкой «вернуть»
     tree = [{"i": t.idx, "form": t.form, "lemma": t.lemma, "upos": t.upos, "head": t.head, "rel": t.deprel,
              "role": roles[t.idx].role} for t in sent.tokens]
     groups = [{"members": [sent.tok(m).form for m in g.members], "type": g.conj_type} for g in an.groups]
@@ -991,10 +1443,32 @@ def sentence_view(request: Request, sentence_id: int, token: int | None = None, 
         select(Job.id).where(Job.kind == "deepparse", Job.status.in_(["queued", "running"]),
                              Job.params["sentence_ids"].contains([sentence_id]))))
     return render(request, "sentence.html", row=row, sent=sent, doc=doc, roles=roles, rels=rels, focus=focus,
-                  precise_pending=precise_pending,
+                  precise_pending=precise_pending, unlinked=unlinked,
                   tree_json=json.dumps(tree, ensure_ascii=False).replace("</", "<\\/"), groups=groups, hit_tokens=hit_tokens,
                   conllu=sent.to_conllu(sentence_id), prev_id=prev_id, next_id=next_id, context=context,
                   tree_children=tree_children)
+
+
+@router.post("/sentences/{sentence_id}/unlink")
+def sentence_unlink(request: Request, sentence_id: int, focus: int = Form(...), other: int = Form(...), undo: str = Form(""),
+                    db: Session = Depends(get_session)):
+    """Убрать связь двух слов предложения (или вернуть её — undo=1): ошибка разбора, например однородные сказуемые
+    при чужом подлежащем. Учитывается в профиле слова, коллокациях и при пересчёте вхождений."""
+    from app.services.unlink import relink, unlink
+
+    row = db.get(SentenceRow, sentence_id)
+    if row is None:
+        raise HTTPException(404)
+    a, b = sorted((focus, other))
+    if a < 1 or b > (db.scalar(select(func.max(TokenRow.idx)).where(TokenRow.sentence_id == sentence_id)) or 0) or a == b:
+        raise HTTPException(400)
+    if undo:
+        relink(db, sentence_id, focus, other)
+        flash(request, "Связь возвращена.")
+    else:
+        n = unlink(db, sentence_id, focus, other)
+        flash(request, "Связь убрана" + (f" (из сохранённых связей вхождений: {n})" if n else "") + ". Её можно вернуть.")
+    return redirect(f"/sentences/{sentence_id}?token={focus}#rels")
 
 
 @router.post("/sentences/{sentence_id}/precise")
@@ -1058,15 +1532,24 @@ async def check_submit(request: Request, text: str = Form(""), file: UploadFile 
 
 @router.get("/jobs")
 def jobs_page(request: Request, db: Session = Depends(get_session)):
+    from app.services.jobs import eta_seconds, human_duration, queue_estimate
+
     jobs = list(db.scalars(select(Job).order_by(Job.id.desc()).limit(100)))
     active = any(j.status in ("queued", "running") for j in jobs)
-    return render(request, "jobs.html", jobs=jobs, active=active)
+    q = queue_estimate(db) if active else {"n": 0, "seconds": None}
+    return render(request, "jobs.html", jobs=jobs, active=active, etas={j.id: human_duration(eta_seconds(j)) for j in jobs},
+                  queue_eta=human_duration(q["seconds"]), queue_n=q["n"], queue_unknown=q.get("unknown", 0))
 
 
 @router.get("/api/jobs")
 def jobs_api(db: Session = Depends(get_session)):
+    from app.services.jobs import eta_seconds, human_duration, queue_estimate
+
     jobs = list(db.scalars(select(Job).where(Job.status.in_(["queued", "running"])).order_by(Job.id)))
-    return {"active": [{"id": j.id, "title": j.title, "status": j.status, "progress": j.progress, "message": j.message} for j in jobs]}
+    q = queue_estimate(db)
+    return {"active": [{"id": j.id, "title": j.title, "status": j.status, "progress": j.progress, "message": j.message,
+                        "eta": human_duration(eta_seconds(j))} for j in jobs],
+            "queue": {"n": q["n"], "eta": human_duration(q["seconds"]), "unknown": q.get("unknown", 0)}}
 
 
 @router.post("/jobs/{job_id}/retry")
@@ -1127,3 +1610,68 @@ def jobs_clear(request: Request, what: str = Form("finished"), db: Session = Dep
 
 
 __all__ = ["router", "TokenRow", "TokenRelation"]
+
+
+# ------------------------------------------------------------------ база знаний
+
+
+@router.get("/help")
+def help_index(request: Request, q: str = ""):
+    from app.services import help as H
+
+    return render(request, "help.html", articles=list(H.articles().values()), terms=H.glossary(), q=q.strip(),
+                  results=H.search(q) if q.strip() else None)
+
+
+@router.get("/help/term/{tid}.json")
+def help_term(tid: str):
+    from app.services import help as H
+
+    t = H.glossary().get(tid)
+    if t is None:
+        raise HTTPException(404)
+    return JSONResponse(t)
+
+
+@router.get("/help/files/{name}")
+def help_file(name: str):
+    from app.services import help as H
+
+    p = H.FILES_DIR / name
+    if "/" in name or "\\" in name or name.startswith(".") or not p.is_file():
+        raise HTTPException(404)
+    return FileResponse(p, filename=name)
+
+
+@router.get("/help/{slug}")
+def help_article(request: Request, slug: str):
+    from app.services import help as H
+
+    art = H.articles().get(slug)
+    if art is None:
+        raise HTTPException(404)
+    return render(request, "help_article.html", art=art, articles=list(H.articles().values()))
+
+
+# ------------------------------------------------------------------ дашборд
+
+
+def _dashboard_data(db: Session, request: Request) -> tuple[dict, object, int | None, list]:
+    """Данные дашборда: в новом интерфейсе — дашборд v2 (services/dashboard_v2.py), в классическом — прежний."""
+    from app.services.dashboard import build
+    from app.services.dashboard_v2 import build_v2
+    from app.services.selection import from_params
+
+    sel = from_params(db, request.query_params)
+    dictionaries = list(db.scalars(select(Dictionary).order_by(Dictionary.id)))
+    dict_id = _int(request.query_params.get("dictionary_id")) or (dictionaries[0].id if dictionaries else None)
+    return (build_v2 if ui_mode(request) == "v2" else build)(db, sel, dict_id), sel, dict_id, dictionaries
+
+
+@router.get("/dashboard")
+def dashboard_page(request: Request, db: Session = Depends(get_session)):
+    """Обзорный дашборд по выборке: корпус (corpus_id), отмеченные тексты (texts) или один текст."""
+    dash, sel, dict_id, dictionaries = _dashboard_data(db, request)
+    return render(request, "dashboard_view.html", dash=dash, selq=sel.query(False), sel_pairs=sel.pairs(False),
+                  dict_id=dict_id, dictionaries=dictionaries)
+

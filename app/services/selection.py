@@ -6,7 +6,9 @@
     authors, genres, stypes    — фильтры по сведениям о текстах (пусто — без фильтра);
     year_from, year_to         — диапазон лет (тексты без года при этом фильтре исключаются);
     words=…&words=…            — выбранные слова словаря (id статей);
-    stop                       — стоп-слова: "" — нет, "ru" — встроенный список, число — свой список.
+    stop                       — стоп-слова: "" — нет, "ru" — встроенный список, число — свой список;
+    noprop=1                   — без имён собственных (TF-IDF, ключевые слова, темы, семантика, коллокации, стилометрия);
+    unit=cat                   — графики по категориям словаря, а не по словам (обзор, тепловая карта частот, карта текста).
 """
 
 from __future__ import annotations
@@ -42,7 +44,10 @@ class Selection:
     year_to: int | None = None
     words: list[int] = field(default_factory=list)
     stop: str = ""
-    stopset: frozenset = frozenset()
+    stopset: frozenset = frozenset()  # стоп-слова и, при noprop, леммы имён собственных
+    noprop: bool = False
+    unit: str = ""  # "" — по словам, "cat" — по категориям словаря
+    names: frozenset = frozenset()  # леммы имён собственных выборки (заполняются при noprop)
     corpus_ids: list[int] = field(default_factory=list)  # все готовые тексты корпуса
     ids: list[int] = field(default_factory=list)  # итоговая выборка после фильтров
     corpus_name: str = "Все тексты"
@@ -65,6 +70,10 @@ class Selection:
             out += [("words", str(w)) for w in self.words]
         if self.stop:
             out.append(("stop", self.stop))
+        if self.noprop:
+            out.append(("noprop", "1"))
+        if self.unit:
+            out.append(("unit", self.unit))
         return out
 
     def query(self, with_words: bool = True) -> str:
@@ -84,6 +93,10 @@ class Selection:
             parts.append("тип: " + ", ".join(SOURCE_TYPES.get(t, t) for t in self.stypes))
         if self.year_from or self.year_to:
             parts.append(f"годы: {self.year_from or '…'}–{self.year_to or '…'}")
+        if self.noprop:
+            parts.append(f"без имён собственных ({len(self.names)} лемм)")
+        if self.unit == "cat":
+            parts.append("по категориям словаря")
         return "; ".join(parts)
 
 
@@ -112,7 +125,15 @@ def from_params(session: Session, qp, corpus_key: str = "corpus_id") -> Selectio
         year_to=_int(get("year_to")),
         words=[int(x) for x in getlist("words") if str(x).isdigit()],
         stop=(get("stop") or "").strip(),
+        noprop=bool(get("noprop")),
+        unit="cat" if get("unit") == "cat" else "",
     )
+    if sel.unit and str(get("dictionary_id") or "").isdigit():
+        from app.models import Dictionary
+        from app.services.dictionaries import no_categories
+
+        if no_categories(session.get(Dictionary, int(get("dictionary_id")))):
+            sel.unit = ""  # словарь «без категорий»: графики только по словам
     from app.services.stopwords import resolve
 
     sel.stopset = resolve(session, sel.stop)
@@ -123,6 +144,11 @@ def from_params(session: Session, qp, corpus_key: str = "corpus_id") -> Selectio
     base = [t for t in sel.corpus_ids if t in set(sel.texts)] if sel.texts else sel.corpus_ids
     sel.ids = A.filter_texts(session, base, year_from=sel.year_from, year_to=sel.year_to, authors=sel.authors,
                              genres=sel.genres, source_types=sel.stypes) if sel.filtered else base
+    if sel.noprop:
+        from app.services.entities import name_lemmas
+
+        sel.names = name_lemmas(session, sel.ids)
+        sel.stopset = sel.stopset | sel.names
     return sel
 
 

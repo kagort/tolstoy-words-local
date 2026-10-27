@@ -193,7 +193,7 @@ def run_batch(session: Session, uploads: list[tuple[str, bytes]], *, meta_upload
                 year_from=y1, year_to=y2, genre=pick("genre") or None,
                 source_type=normalize_source_type(row.get("source_type") or m.get("source_type")) or common.get("source_type") or "natural",
                 generator=pick("generator") or None, corpus_ids=sorted(set(cids)),
-                extra_meta={"file_id": m["_key"]} if m.get("_key") else None,
+                extra_meta={k: v for k, v in (("file_id", m.get("_key")), ("short_title", pick("short_title"))) if v} or None,
             )
             report.created += 1
         except UnsupportedFormat as exc:

@@ -6,16 +6,26 @@ import logging
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from sqlalchemy import and_, delete, not_, select, update
+from sqlalchemy import and_, delete, not_, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
-from app.models import PARSE_PRECISE, Dictionary, DictionaryEntry, Hit, Job, SentenceRow, TextDoc, TokenRow
+from app.models import (
+    PARSE_PRECISE,
+    Dictionary,
+    DictionaryEntry,
+    Hit,
+    Job,
+    SentenceRow,
+    TextDoc,
+    TokenRow,
+)
 from app.nlp.morph import word_forms
 from app.nlp.syntax import SYNTAX_VERSION, SentenceAnalysis
 from app.nlp.tree import Sentence, Token, parse_feats
 from app.services.ingest import _alloc_ids, _copy
 from app.services.jobs import set_progress
+from app.services.unlink import is_unlinked, unlinked_pairs
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +41,13 @@ REL_COLS = (
 CHUNK = 500
 
 
+def relation_row(hit_id: int, dictionary_id: int, entry_id: int, text_id: int, rel) -> tuple:
+    """Строка token_relations (порядок REL_COLS) для связи вхождения."""
+    return (hit_id, dictionary_id, entry_id, text_id, rel.rel_type, rel.direction, rel.related_idx, rel.related_lemma,
+            rel.related_upos, rel.detail or None, rel.path or None, rel.source, rel.scope, rel.rule or None,
+            rel.confidence, rel.negated)
+
+
 def entry_token_filter(entry: DictionaryEntry, settings: dict):
     """Условие SQL на таблицу tokens для слова словаря."""
     conds = []
@@ -44,7 +61,10 @@ def entry_token_filter(entry: DictionaryEntry, settings: dict):
             allowed.add("PROPN")
         if entry.upos == "VERB":
             allowed.add("AUX")
-        conds.append(TokenRow.upos.in_(sorted(allowed)))
+        if entry.upos == "PROPN":  # имя: парсер мог разобрать как существительное — берём, если с заглавной («Вера», не «вера»)
+            conds.append(or_(TokenRow.upos == "PROPN", and_(TokenRow.upos == "NOUN", TokenRow.form.op("~")("^[А-ЯЁA-Z]"))))
+        else:
+            conds.append(TokenRow.upos.in_(sorted(allowed)))
         if entry.upos in ("VERB", "ADJ"):
             if not settings.get("include_participles", False):
                 conds.append(not_(TokenRow.feats.like("%VerbForm=Part%")))
@@ -78,6 +98,11 @@ def run_match(job_id: int | None, dictionary_id: int, entry_ids: list[int] | Non
         ready_texts = list(s.scalars(select(TextDoc.id).where(TextDoc.status == "ready")))
         if text_ids:
             ready_texts = [t for t in ready_texts if t in set(text_ids)]
+        from app.services.dictionaries import scope_text_ids
+
+        scope = scope_text_ids(s, d)  # словарь только для выбранных корпусов
+        if scope is not None:
+            ready_texts = [t for t in ready_texts if t in scope]
         # удаляем старые результаты для пересчитываемой области
         q = delete(Hit).where(Hit.dictionary_id == dictionary_id)
         if entry_ids:
@@ -101,7 +126,7 @@ def run_match(job_id: int | None, dictionary_id: int, entry_ids: list[int] | Non
             job.params = {**(job.params or {}), "manual": manual}
         s.execute(q)
         s.commit()
-        entry_data = [(e.id, e.surface, entry_token_filter(e, settings)) for e in entries]
+        entry_data = [(e.id, e.surface, entry_token_filter(e, settings), e.phrase) for e in entries]
         # двухступенчатая обработка: слова словаря ищутся с запасом в предварительном разборе
         cand_forms, cand_lemmas = set(), set()
         for e in entries:
@@ -130,6 +155,7 @@ def run_match(job_id: int | None, dictionary_id: int, entry_ids: list[int] | Non
         d = s.get(Dictionary, dictionary_id)
         if d is not None:
             d.matched_at = datetime.now(timezone.utc)
+            flag_name_hits(s, [dictionary_id], text_ids)  # слова внутри имён собственных не считаются
             s.commit()
     log.info("Словарь %s: найдено вхождений %s", dictionary_id, total_hits)
 
@@ -140,7 +166,9 @@ def _match_entries(job_id: int | None, dictionary_id: int, entry_data: list, rea
     total_hits = 0
     span = 1.0 - progress_from
     precise = select(SentenceRow.id).where(SentenceRow.text_id.in_(ready_texts or [-1]), SentenceRow.parse_level == PARSE_PRECISE)
-    for n, (entry_id, surface, cond) in enumerate(entry_data, start=1):
+    from app.services.phrases import contains_head
+
+    for n, (entry_id, surface, cond, phrase) in enumerate(entry_data, start=1):
         if not ready_texts:
             break
         with SessionLocal() as s:
@@ -152,6 +180,7 @@ def _match_entries(job_id: int | None, dictionary_id: int, entry_data: list, rea
             for start in range(0, len(rows), CHUNK):
                 chunk = rows[start : start + CHUNK]
                 sents = load_sentences(s, sorted({r.sentence_id for r in chunk}))
+                unlinked = unlinked_pairs(s, sents)  # связи, убранные вручную на странице предложения
                 analyses: dict[int, SentenceAnalysis] = {}
                 hit_ids = _alloc_ids(s, "dictionary_hits_id_seq", len(chunk))
                 hrows, rrows = [], []
@@ -159,16 +188,17 @@ def _match_entries(job_id: int | None, dictionary_id: int, entry_data: list, rea
                     sent = sents.get(r.sentence_id)
                     if sent is None:
                         continue
+                    # словосочетание: главное слово засчитывается, только если рядом есть остальные слова
+                    if phrase and not contains_head(sent.tokens, phrase["slots"], phrase["head"], r.idx):
+                        continue
                     an = analyses.get(r.sentence_id) or analyses.setdefault(r.sentence_id, SentenceAnalysis(sent))
                     role = an.role(r.idx)
                     hrows.append((hid, entry_id, dictionary_id, r.id, r.sentence_id, r.text_id, r.idx, r.form,
                                   role.role, role.subtype[:64] or None, role.detail[:64] or None,
                                   an.group_of(r.idx) is not None, SYNTAX_VERSION))
                     for rel in an.relations(r.idx):
-                        rrows.append((hid, dictionary_id, entry_id, r.text_id, rel.rel_type, rel.direction,
-                                      rel.related_idx, rel.related_lemma, rel.related_upos, rel.detail or None,
-                                      rel.path or None, rel.source, rel.scope, rel.rule or None,
-                                      rel.confidence, rel.negated))
+                        if not is_unlinked(unlinked.get(r.sentence_id), r.idx, rel.related_idx):
+                            rrows.append(relation_row(hid, dictionary_id, entry_id, r.text_id, rel))
                 _copy(s, "dictionary_hits", HIT_COLS, hrows)
                 _copy(s, "token_relations", REL_COLS, rrows)
                 s.commit()
@@ -179,3 +209,40 @@ def _match_entries(job_id: int | None, dictionary_id: int, entry_data: list, rea
         if job_id:
             set_progress(job_id, progress_from + span * n / max(len(entry_data), 1), f"Обработано слов: {n} из {len(entry_data)} («{surface}»)")
     return total_hits
+
+
+def flag_name_hits(session: Session, dictionary_ids: list[int] | None = None, text_ids: list[int] | None = None) -> int:
+    """Помечает вхождения слов словаря, стоящие внутри имени персоны (вкладка «Имена»): «Любовь» в «Любовь
+    Андреевна» для слова «любовь», «Вера» (Вера Ростова) для слова «вера». Такие вхождения не считаются
+    (analytics.VALID), пока их не отметят ✓ вручную. Места и организации («Америка», «НАТО») и записи словаря с частью
+    речи PROPN не помечаются — их в словарь добавляют намеренно. Настройки словаря: count_names — считать и внутри
+    имён; names_ok_entries — слова-исключения.
+
+    Вызывается после сопоставления, после извлечения имён и после правки имён. Возвращает число помеченных вхождений.
+    """
+    from sqlalchemy import text as sql
+
+    dicts = list(session.scalars(select(Dictionary).where(Dictionary.id.in_(dictionary_ids)) if dictionary_ids
+                                 else select(Dictionary)))
+    flagged = 0
+    for d in dicts:
+        st = d.settings or {}
+        params = {"d": d.id, "ok": [int(x) for x in st.get("names_ok_entries", [])] or [-1],
+                  "tids": text_ids or [-1], "all_texts": not text_ids}
+        scope = "h.dictionary_id = :d AND (:all_texts OR h.text_id = ANY(:tids))"
+        if st.get("count_names"):
+            session.execute(sql(f"UPDATE dictionary_hits h SET in_name = false WHERE {scope} AND h.in_name"), params)
+            continue
+        session.execute(sql(f"""
+            UPDATE dictionary_hits h SET in_name = (h.entry_id <> ALL(:ok) AND EXISTS (
+                SELECT 1 FROM entities e
+                JOIN tokens t ON t.id = h.token_id
+                JOIN dictionary_entries de ON de.id = h.entry_id
+                LEFT JOIN entity_overrides o ON o.norm = e.norm
+                WHERE e.sentence_id = h.sentence_id AND t.start_char >= e.start_char AND t.end_char <= e.end_char
+                  AND coalesce(o.hidden, false) = false
+                  AND coalesce(o.etype, e.etype) = 'PER'
+                  AND coalesce(de.upos, '') <> 'PROPN'))
+            WHERE {scope}"""), params)
+        flagged += session.scalar(sql(f"SELECT count(*) FROM dictionary_hits h WHERE {scope} AND h.in_name"), params) or 0
+    return flagged

@@ -94,6 +94,7 @@ def test_full_flow(client):
 
     page = client.get(f"/dictionaries/{dict_id}")
     assert page.status_code == 200 and "запах" in page.text
+    assert "прежней версией синтаксического" not in page.text
 
     base = f"dictionary_id={dict_id}&corpus_id={corpus_id}"
     for tab in ("overview", "freq", "conc", "profile", "compare", "structure"):
@@ -111,6 +112,11 @@ def test_full_flow(client):
         assert freq["запах"] >= 4
         prof = A.word_profile(s, entry.id, ids)
         assert prof["total"] == freq["запах"]
+        # у глагола в профиле — его зависимые: «Пахло дымом и гарью» → дым, гарь
+        verb = s.query(DictionaryEntry).filter_by(dictionary_id=dict_id, surface="пахнуть").one()
+        vprof = A.word_profile(s, verb.id, ids)
+        deps = {x["lemma"] for rt in ("object", "adverbial") for x in vprof["relations"].get(rt, {}).get("items", [])}
+        assert {"дым", "гарь"} <= deps, vprof["relations"].keys()
         hit_id = s.query(Hit.id).filter_by(entry_id=entry.id).first()[0]
         sent_id = s.query(Hit.sentence_id).filter_by(entry_id=entry.id).first()[0]
 
@@ -304,6 +310,9 @@ def test_selection_report_stopwords(client):
                        ("keywords", ""), ("keywords", f"&ref={corpus.id}"), ("map", f"&text_id={texts['Сирень']}&segments=20")):
         r = client.get(f"/analysis?tab={tab}&{base}{extra}&stop=ru")
         assert r.status_code == 200, (tab, extra)
+    cloud = client.get(f"/analysis?tab=keywords&{base}&min_count=2").text  # облако: переключатель размера G² / частота
+    if "kw-cloud" in cloud:
+        assert 'data-kw-size="f"' in cloud and 'data-f="' in cloud and 'data-g="' in cloud
     assert "chart-orbit" in client.get(f"/analysis?tab=colloc&{base}&entry_id={e_zapah.id}&min_count=1&pos=all").text
     assert "chart-map" in client.get(f"/analysis?tab=map&{base}&text_id={texts['Сирень']}").text
     assert client.get(f"/api/texts/{texts['Сирень']}/passage?from=1&to=5&dictionary_id={d.id}").json()["sentences"]
@@ -336,7 +345,7 @@ def test_selection_report_stopwords(client):
         assert S.topics(s, all_ids, k=3)["n_chunks"] >= 1
     r = client.post("/entities/override", data={"norm": "Лев Толстой", "etype": "", "canonical": ""}, follow_redirects=False)
     assert r.status_code == 303
-    for tab, extra in (("entities", ""), ("entities", "&etype=PER&unit=paragraph&cross=PER&nolatin=1"),
+    for tab, extra in (("entities", ""), ("entities", "&etype=PER&eunit=paragraph&cross=PER&nolatin=1&f=noise&q=Т*"),
                        ("semantic", f"&entry_id={e_zapah.id}&k=2"), ("semantic", "&seed=запах, аромат&any=1&groups=3"), ("topics", "&k=3")):
         r = client.get(f"/analysis?tab={tab}&{base}{extra}")
         assert r.status_code == 200, (tab, extra)
@@ -366,7 +375,7 @@ def test_selection_report_stopwords(client):
         rep = C.report(s, C.parse_raw("Короткий текст про запах сирени."))
         assert not rep["enough"] and rep["rows"]
         assert rep["model"]["ok"] is False  # в тестовой базе мало образцов — калибровки нет, вердикта нет
-    for tab, extra in (("stylo", "&mfw=50"), ("stylo", f"&unit=chunk&chunk=2000&target={texts['Сирень']}"), ("textcmp", ""),
+    for tab, extra in (("stylo", "&mfw=50"), ("stylo", f"&sunit=chunk&chunk=2000&target={texts['Сирень']}"), ("textcmp", ""),
                        ("textcmp", f"&cmp={texts['Сирень']}&cmp={texts['Дым']}")):
         r = client.get(f"/analysis?tab={tab}&{base}{extra}")
         assert r.status_code == 200, (tab, extra)

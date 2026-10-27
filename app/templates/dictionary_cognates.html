@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Однокоренные — {{ d.name }}{% endblock %}
+{% block content %}
+<p><a href="/dictionaries/{{ d.id }}">← Словарь «{{ d.name }}»</a></p>
+<h1>Однокоренные слова из корпуса</h1>
+<p class="help">Формы слова («милосердны», «милосердного») находятся и так — по лемме «милосердный». Здесь — однокоренные <strong>леммы</strong>,
+  которые встречаются в текстах{% if d.settings.get('corpus_ids') %} корпусов словаря{% endif %}: «милосердие» → «милосердный», «милосердно», «немилосердный».
+  Основа получается отсечением суффикса и окончания, учитываются приставки не-, без-/бес- и чередования (страх — страшный);
+  случайные совпадения начала слова отсеиваются по близости смысла (векторы navec). Отмеченные слова добавятся в категорию исходного слова.</p>
+<form method="get" class="panel row">
+  <div><label>Искать для слов (пусто — для всех слов словаря, {{ d.entries|length }})</label>
+    <input type="text" name="words" value="{{ words_q }}" placeholder="например: милосердие, страх"></div>
+  <div class="shrink"><button type="submit">Найти</button></div>
+</form>
+{% if found %}
+<form method="post" action="/dictionaries/{{ d.id }}/add-suggested">
+  <input type="hidden" name="back" value="/dictionaries/{{ d.id }}">
+  <div class="row" style="margin-bottom:8px">
+    <div class="muted">Найдено для {{ found|length }} из {{ n_words }} слов. Отмечены самые близкие по смыслу — проверьте по примеру.</div>
+    <div class="shrink"><button type="submit">Добавить отмеченные</button></div>
+  </div>
+  <div class="grid cols-2">
+  {% for g in found %}
+    <div class="panel"><h3 style="margin-top:0">{{ g.source }}{% if g.category %} <span class="muted small">— {{ g.category }}</span>{% endif %}</h3>
+      <table><tr><th></th><th>Слово</th><th>Часть речи</th><th class="num">В текстах</th><th class="num" title="близость по смыслу к «{{ g.source }}» (navec)">Близость</th><th></th></tr>
+      {% for x in g['items'] %}
+      <tr><td><input type="checkbox" name="rows" value="{{ x.lemma }}&#9;{{ g.category or '' }}&#9;от: {{ g.source }}" {{ 'checked' if x.sim is not none and x.sim >= 0.3 }}></td>
+        <td><strong>{{ x.lemma }}</strong></td><td class="small">{{ pos_label(x.upos) }}</td><td class="num">{{ x.count }}</td>
+        <td class="num">{{ x.sim if x.sim is not none else '—' }}</td>
+        <td class="small"><a href="/sentences/{{ x.example }}" target="_blank">пример</a></td></tr>
+      {% endfor %}</table></div>
+  {% endfor %}
+  </div>
+  <p><button type="submit">Добавить отмеченные</button></p>
+</form>
+{% else %}<div class="panel muted">Однокоренных слов в текстах не нашлось{% if not d.entries %}: словарь пуст{% endif %}.</div>{% endif %}
+{% endblock %}

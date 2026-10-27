@@ -130,7 +130,7 @@ def check_nlp(sentence: str) -> None:
             print(ps.sentence.to_conllu())
             an = SentenceAnalysis(ps.sentence)
             for t in ps.sentence.tokens:
-                if t.upos in ("NOUN", "PROPN"):
+                if t.upos in ("NOUN", "PROPN", "VERB", "ADJ"):
                     print(f"«{t.form}» — {an.role(t.idx).label}")
                     for r in an.relations(t.idx):
                         print(f"    {REL_LABELS.get(r.rel_type, r.rel_type)}: {r.related_lemma} ({r.scope}{', ' + r.rule if r.rule else ''})")

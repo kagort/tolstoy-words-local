@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Дашборд{% endblock %}
+{% block head %}<script src="/static-vendor/plotly.min.js"></script>{% if dash.v2 %}<script src="/static/dash_v2.js?v={{ asset_version }}"></script>{% endif %}{% endblock %}
+{% block content %}
+<div class="row no-print" style="margin-bottom:8px">
+  <div class="shrink"><a href="/analysis?{{ selq }}">← к анализу этой выборки</a></div>
+  <div class="spacer"></div>
+  <form class="shrink" method="get" action="/dashboard" style="display:flex;gap:6px;align-items:center">
+    {% for k, v in sel_pairs %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <label class="small">Словарь</label><select name="dictionary_id" onchange="this.form.submit()">{% for d in dictionaries %}<option value="{{ d.id }}" {{ 'selected' if d.id == dict_id }}>{{ d.name }}</option>{% endfor %}</select>
+  </form>
+  <div class="shrink">Скачать: <a href="/export/dashboard.html?{{ selq }}&dictionary_id={{ dict_id }}" title="один файл, открывается без интернета (~5 МБ)">HTML</a>
+    · <a href="/export/dashboard.html?{{ selq }}&dictionary_id={{ dict_id }}&cdn=1" title="маленький файл; библиотека графиков загружается из интернета">HTML облегчённый</a>
+    · <a href="#" onclick="window.print(); return false;">PDF (печать)</a></div>
+</div>
+{% include "_dashboard_v2_body.html" if dash.v2 else "_dashboard_body.html" %}
+{% endblock %}
