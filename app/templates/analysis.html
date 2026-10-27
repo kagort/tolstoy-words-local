@@ -155,6 +155,14 @@
 <div class="panel"><h3 style="margin-top:0">{% if v2 %}Отклонения от среднего: {{ 'категория' if ov.by == 'cat' else 'слово' }} × {{ ov.dim_label|lower }}{% else %}Тепловая карта: {{ 'категория' if ov.by == 'cat' else 'слово' }} × {{ ov.dim_label|lower }} ({{ mlabel }}){% endif %}</h3><div id="chart-ov-heat" class="chart" style="min-height:{{ 160 + 28 * ov.words|length }}px"></div>
   {% if v2 %}<p class="help">Для каждого {{ 'категории' if ov.by == 'cat' else 'слова' }} — насколько показатель ({{ mlabel }}) в группе выше (красное) или ниже (синее) среднего по группам, в стандартных отклонениях; само значение — в подсказке.</p>{% endif %}</div>
 {% endif %}
+{% if spread and spread.series %}
+<div class="panel"><div class="row" style="align-items:center">
+    <h3 style="margin:0">Распределение по текстам{% if spread.series|length == 1 %}: {{ spread.series[0].word }}{% endif %}</h3><div class="spacer"></div>
+    {% if spread.series|length > 1 %}<div class="shrink"><label class="small" style="display:inline-flex;gap:6px;align-items:center;margin:0">{{ 'Категория' if ov.by == 'cat' else 'Слово' }}
+      <select id="spread-pick" style="width:auto">{% for s_ in spread.series %}<option value="{{ loop.index0 }}">{{ s_.word }}</option>{% endfor %}</select></label></div>{% endif %}</div>
+  <div id="chart-spread" class="chart"></div>
+  <p class="help">Точка — текст (ipm {{ 'категории' if ov.by == 'cat' else 'слова' }} в тексте), ящик — середина распределения в группе «{{ spread.group_label|lower }}» (половина текстов), черта — медиана. Верхняя строка — все тексты выборки. Тексты без вхождений — в нуле.</p></div>
+{% endif %}
 <div class="panel table-scroll">
   <table>
     <tr><th>{{ ov.dim_label }}</th><th class="num">Слов</th><th class="num">Текстов</th>
@@ -313,7 +321,10 @@
   <div class="shrink">Скачать: <a href="/export/profile.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/profile.csv{{ qs(request) }}">CSV</a> · <a href="/export/profile.json{{ qs(request) }}">JSON</a></div>
 </div>
 <div class="grid cols-2">
-  <div class="panel"><h3 style="margin-top:0">Синтаксические роли слова</h3><div id="chart-roles" class="chart" style="min-height:280px"></div></div>
+  <div class="panel"><h3 style="margin-top:0">Синтаксические роли слова</h3><div id="chart-roles" class="chart" style="min-height:{{ 90 if v2 else 280 }}px"></div>
+    {% if v2 %}{% set rtot = profile.roles|sum(attribute='count') or 1 %}<table class="small" style="margin-top:6px">{% for r in profile.roles %}<tr>
+      <td><span class="role-sw" style="background:var(--r-{{ r.role }}, var(--inactive))"></span>{{ r.label }}</td>
+      <td class="num">{{ r.count }}</td><td class="num muted">{{ (100 * r.count / rtot)|round(1) }} %</td></tr>{% endfor %}</table>{% endif %}</div>
   <div class="panel"><h3 style="margin-top:0">Словоформы и грамматика</h3>
     <table>{% for f, c in forms.forms[:12] %}<tr><td>{{ f }}</td><td class="num">{{ c }}</td></tr>{% endfor %}</table>
     {% for k, vals in forms.feats.items() %}<div class="small" style="margin-top:6px"><span class="muted">{{ k }}:</span> {% for v, c in vals %}{{ v }} {{ c }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endfor %}
@@ -418,6 +429,12 @@
   if (window.QV2) {
     QV2.groups('chart-ov', ov, metric, ytitle, log);
     if (ov.words.length > 1 && ov.groups.length > 1) QV2.devHeat('chart-ov-heat', ov, metric);
+    const sp = {{ (spread or none)|tojson }};
+    if (sp && sp.series.length) {
+      QV2.spread('chart-spread', sp, 0, 'ipm в тексте', log);
+      const pick = document.getElementById('spread-pick');
+      if (pick) pick.addEventListener('change', () => QV2.spread('chart-spread', sp, +pick.value, 'ipm в тексте', log));
+    }
     return;
   }
   drawGroups('chart-ov', ov, metric, ytitle, { title: { text: `${ytitle} по группировке «${ov.dim_label}»`, font: { size: 14 } } }, { log });
@@ -487,6 +504,7 @@
 {% if tab == 'profile' and profile and profile.total %}
 (function () {
   const roles = {{ profile.roles|tojson }};
+  if (window.QV2) return QV2.roles('chart-roles', roles);
   drawChart('chart-roles', [{ type: 'bar', orientation: 'h', y: roles.map(r => r.label), x: roles.map(r => r.count),
     marker: { color: roles.map(r => cssVar('--r-' + r.role) || cssVar('--accent')) }, hovertemplate: '%{y}: %{x}<extra></extra>' }],
     { margin: { l: 190, r: 20, t: 10, b: 40 }, yaxis: { autorange: 'reversed' } });

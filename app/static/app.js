@@ -30,9 +30,23 @@ function plotLayout(extra) {
   return out;
 }
 
+// Новый интерфейс: встроенная шкала Plotly «Blues» заменяется шкалой из токенов (--surface-muted → --cat-1) на всех
+// графиках сразу. У Plotly «Blues» тёмный цвет — у малых значений, поэтому reversescale меняется на обратный:
+// где было «тёмное — большое», так и остаётся (и наоборот — например, в матрице расстояний «тёмное — близкие»).
+function tokenScales(data) {
+  if (!document.body || !document.body.classList.contains('v2')) return data;
+  const seq = [[0, cssVar('--surface-muted')], [1, cssVar('--cat-1')]];
+  (data || []).forEach(t => {
+    if (t && t.colorscale === 'Blues') { t.colorscale = seq; t.reversescale = !t.reversescale; }
+    if (t && t.marker && t.marker.colorscale === 'Blues') { t.marker.colorscale = seq; t.marker.reversescale = !t.marker.reversescale; }
+  });
+  return data;
+}
+
 function drawChart(id, data, layout) {
   const el = document.getElementById(id);
   if (!el || typeof Plotly === 'undefined') return;
+  data = tokenScales(data);
   Plotly.newPlot(el, data, plotLayout(layout), { responsive: true, displaylogo: false, locale: 'ru',
     toImageButtonOptions: { format: 'png', filename: id, scale: 2 },
     topojsonURL: '/static/topojson/' });  // контуры карты мира лежат локально: интернет не нужен

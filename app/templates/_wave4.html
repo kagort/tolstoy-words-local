@@ -44,7 +44,8 @@ document.addEventListener('DOMContentLoaded', function () {
   const st = {{ sty|tojson }};
   const authors = [...new Set(st.units.map(u => u.author))];
   const palette = ['#2f5fb3', '#d1495b', '#2a9d8f', '#e9a23b', '#7b5ea7', '#4a7c59', '#c06c84', '#3d5a80', '#8d6e63', '#00838f'];
-  const colorOf = a => palette[authors.indexOf(a) % palette.length];
+  // новый интерфейс — цвета категорий из токенов (8 цветов по кругу: авторы различимы и при числе больше 8)
+  const colorOf = a => window.QV2 ? cssVar('--cat-' + (authors.indexOf(a) % 8 + 1)) : palette[authors.indexOf(a) % palette.length];
   const order = st.dendro.order;
   const segs = st.dendro.segments.map(s => ({ type: 'scatter', mode: 'lines', x: [s[0], s[2]], y: [s[1], s[3]], line: { color: cssVar('--muted'), width: 1.4 }, hoverinfo: 'skip', showlegend: false }));
   segs.push({ type: 'scatter', mode: 'markers', x: order.map(() => 0), y: order.map((_, i) => i), marker: { size: 9, color: order.map(i => colorOf(st.units[i].author)) },
