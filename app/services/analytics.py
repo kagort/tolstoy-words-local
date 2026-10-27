@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from contextvars import ContextVar
 
 from sqlalchemy import Integer, and_, func, or_, select, tuple_
 from sqlalchemy.orm import Session
@@ -23,6 +24,20 @@ from app.services.stats import SIGNIFICANCE_LL, gries_dp, ipm, log_dice, log_lik
 
 # вхождение считается: отмечено ✓, или не проверялось и не стоит внутри имени собственного (см. matching.flag_name_hits)
 VALID = or_(Hit.is_valid.is_(True), and_(Hit.is_valid.is_(None), Hit.in_name.is_(False)))
+# «Имена собственные: не учитывать»: ещё и без вхождений внутри любых имён собственных («Чёрное море» для «чёрный»);
+# отмеченное вручную ✓ считается всегда
+VALID_NOPROP = or_(Hit.is_valid.is_(True), and_(Hit.is_valid.is_(None), Hit.in_name.is_(False), Hit.in_propn.is_(False)))
+_NOPROP: ContextVar[bool] = ContextVar("noprop", default=False)
+
+
+def set_noprop(on: bool) -> None:
+    """Режим подсчёта вхождений для текущего запроса (selection.from_params); фоновые задачи — всегда обычный."""
+    _NOPROP.set(bool(on))
+
+
+def valid():
+    """Условие «вхождение засчитывается» с учётом флажка «Имена собственные: не учитывать» текущего запроса."""
+    return VALID_NOPROP if _NOPROP.get() else VALID
 DEFAULT_SCOPES = ("direct", "shared")
 # вхождения категории (и суммы по нескольким словам): одно слово текста — один раз, даже если его нашли две записи
 # («Анна Павловна» и «Анна Павловна Шерер» в словаре персонажей)
@@ -53,7 +68,7 @@ def corpus_words(session: Session, text_ids: list[int]) -> int:
 
 
 def _hits(dictionary_id: int, text_ids: list[int], entry_id: int | None = None):
-    q = select(Hit).where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(text_ids), VALID)
+    q = select(Hit).where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(text_ids), valid())
     if entry_id:
         q = q.where(Hit.entry_id == entry_id)
     return q
@@ -71,13 +86,13 @@ def frequency(session: Session, dictionary_id: int, text_ids: list[int]) -> dict
     if text_ids:
         for entry_id, text_id, cnt in session.execute(
             select(Hit.entry_id, Hit.text_id, func.count())
-            .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(text_ids), VALID)
+            .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(text_ids), valid())
             .group_by(Hit.entry_id, Hit.text_id)
         ):
             per_text[entry_id][text_id] = cnt
         sent_counts = dict(session.execute(
             select(Hit.entry_id, func.count(func.distinct(Hit.sentence_id)))
-            .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(text_ids), VALID)
+            .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(text_ids), valid())
             .group_by(Hit.entry_id)
         ).all())
     rows = []
@@ -125,7 +140,7 @@ def frequency_by_text(session: Session, dictionary_id: int, text_ids: list[int],
     if by == "cat":
         cat = func.coalesce(func.nullif(DictionaryEntry.category, ""), NO_CATEGORY)
         q = (select(cat, Hit.text_id, TOKENS).select_from(Hit).join(DictionaryEntry, DictionaryEntry.id == Hit.entry_id)
-             .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(text_ids or [-1]), VALID))
+             .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(text_ids or [-1]), valid()))
         if entry_ids:
             q = q.where(Hit.entry_id.in_(entry_ids))
         cc: dict[str, dict] = defaultdict(dict)
@@ -140,7 +155,7 @@ def frequency_by_text(session: Session, dictionary_id: int, text_ids: list[int],
     if ids:
         for entry_id, text_id, cnt in session.execute(
             select(Hit.entry_id, Hit.text_id, func.count())
-            .where(Hit.entry_id.in_(ids), Hit.text_id.in_(text_ids), VALID)
+            .where(Hit.entry_id.in_(ids), Hit.text_id.in_(text_ids), valid())
             .group_by(Hit.entry_id, Hit.text_id)
         ):
             counts[entry_id][text_id] = cnt
@@ -152,7 +167,7 @@ def forms_distribution(session: Session, entry_id: int, text_ids: list[int]) -> 
     rows = session.execute(
         select(TokenRow.form_norm, TokenRow.feats)
         .join(Hit, Hit.token_id == TokenRow.id)
-        .where(Hit.entry_id == entry_id, Hit.text_id.in_(text_ids or [-1]), VALID)
+        .where(Hit.entry_id == entry_id, Hit.text_id.in_(text_ids or [-1]), valid())
     ).all()
     forms = Counter(f for f, _ in rows)
     feats = defaultdict(Counter)
@@ -215,7 +230,7 @@ def concordance(
     if names_only:  # вхождения внутри имён собственных, которые не считаются (для проверки)
         q = q.where(Hit.in_name, Hit.is_valid.is_(None))
     elif not include_invalid:
-        q = q.where(VALID)
+        q = q.where(valid())
     if entry_id:
         q = q.where(Hit.entry_id == entry_id)
     elif entry_ids:
@@ -309,14 +324,14 @@ def word_profile(session: Session, entry_id: int, text_ids: list[int], scopes=DE
     hit_q = _hits(entry.dictionary_id, text_ids, entry_id)
     total = session.scalar(select(func.count()).select_from(hit_q.subquery())) or 0
     roles = session.execute(
-        select(Hit.role, func.count()).where(Hit.entry_id == entry_id, Hit.text_id.in_(text_ids), VALID).group_by(Hit.role).order_by(func.count().desc())
+        select(Hit.role, func.count()).where(Hit.entry_id == entry_id, Hit.text_id.in_(text_ids), valid()).group_by(Hit.role).order_by(func.count().desc())
     ).all()
     rel_q = (
         select(TokenRelation.rel_type, TokenRelation.related_lemma, func.count().label("n"),
                func.count(func.distinct(TokenRelation.text_id)).label("texts"),
                func.min(Hit.sentence_id).label("example"))
         .join(Hit, Hit.id == TokenRelation.hit_id)
-        .where(TokenRelation.entry_id == entry_id, TokenRelation.text_id.in_(text_ids), VALID,
+        .where(TokenRelation.entry_id == entry_id, TokenRelation.text_id.in_(text_ids), valid(),
                TokenRelation.scope.in_(list(scopes)))
         .group_by(TokenRelation.rel_type, TokenRelation.related_lemma)
     )
@@ -384,10 +399,10 @@ def compare_profile(session: Session, entry_id: int, ids_a: list[int], ids_b: li
             select(TokenRelation.related_lemma, func.count())
             .join(Hit, Hit.id == TokenRelation.hit_id)
             .where(TokenRelation.entry_id == entry_id, TokenRelation.text_id.in_(ids), TokenRelation.rel_type == rel_type,
-                   TokenRelation.scope.in_(list(scopes)), TokenRelation.negated.is_(False), VALID)
+                   TokenRelation.scope.in_(list(scopes)), TokenRelation.negated.is_(False), valid())
             .group_by(TokenRelation.related_lemma)
         ).all()
-        hits = session.scalar(select(func.count()).select_from(Hit).where(Hit.entry_id == entry_id, Hit.text_id.in_(ids), VALID)) or 0
+        hits = session.scalar(select(func.count()).select_from(Hit).where(Hit.entry_id == entry_id, Hit.text_id.in_(ids), valid())) or 0
         return Counter(dict(rows)), hits
 
     ca, ha = counts(ids_a)
@@ -456,7 +471,7 @@ def _structure_stats(session: Session, where) -> dict:
 def sentence_structure(session: Session, dictionary_id: int, text_ids: list[int], entry_id: int | None = None,
                        entry_ids: list[int] | None = None) -> dict:
     ids = text_ids or [-1]
-    hit_sids = select(Hit.sentence_id).where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), VALID)
+    hit_sids = select(Hit.sentence_id).where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), valid())
     if entry_id:
         hit_sids = hit_sids.where(Hit.entry_id == entry_id)
     elif entry_ids:
@@ -578,7 +593,7 @@ def overview(session: Session, dictionary_id: int, text_ids: list[int], entry_id
     step = step if step in PERIOD_STEPS else 10
     ids = text_ids or [-1]
     key, groups = group_sizes(session, ids, dim, step)
-    base_where = [Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), VALID]
+    base_where = [Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), valid()]
 
     if by == "cat":
         item = func.coalesce(func.nullif(DictionaryEntry.category, ""), NO_CATEGORY)
@@ -680,7 +695,7 @@ def by_text(session: Session, dictionary_id: int, text_ids: list[int], entry_ids
         for t in texts:
             t["group"] = t["group"] if t["group"] in keep else rest
     pos = {t["id"]: k for k, t in enumerate(texts)}
-    base = [Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), VALID]
+    base = [Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), valid()]
     if by == "cat":
         item = func.coalesce(func.nullif(DictionaryEntry.category, ""), NO_CATEGORY)
         scope = [Hit.entry_id.in_(entry_ids)] if entry_ids else []
@@ -720,7 +735,7 @@ def category_frequency(session: Session, dictionary_id: int, text_ids: list[int]
     cat = func.coalesce(func.nullif(DictionaryEntry.category, ""), NO_CATEGORY)
     q = (select(cat, key, TOKENS).select_from(Hit)
          .join(DictionaryEntry, DictionaryEntry.id == Hit.entry_id).join(TextDoc, TextDoc.id == Hit.text_id)
-         .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), VALID))
+         .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), valid()))
     if entry_ids:
         q = q.where(Hit.entry_id.in_(entry_ids))
     counts: dict[str, dict] = defaultdict(dict)

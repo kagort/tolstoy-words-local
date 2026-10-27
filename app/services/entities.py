@@ -604,7 +604,7 @@ def entity_dictionary(session: Session, text_ids: list[int], dictionary_id: int,
         counts[name] += 1
     hq = (select(Hit.entry_id, Hit.text_id, SentenceRow.paragraph_idx, SentenceRow.idx)
           .join(SentenceRow, SentenceRow.id == Hit.sentence_id)
-          .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(text_ids or [-1]), A.VALID))
+          .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(text_ids or [-1]), A.valid()))
     if entry_ids:
         hq = hq.where(Hit.entry_id.in_(entry_ids))
     cell = Counter()
@@ -627,7 +627,7 @@ def cooccurrence_examples(session: Session, text_ids: list[int], name: str, entr
     ent = [r for r in _canonical_rows(session, text_ids) if r[4] == name]
     hits = session.execute(select(Hit.sentence_id, Hit.text_id, SentenceRow.paragraph_idx, SentenceRow.idx, TokenRow.start_char, TokenRow.end_char)
                            .join(SentenceRow, SentenceRow.id == Hit.sentence_id).join(TokenRow, TokenRow.id == Hit.token_id)
-                           .where(Hit.entry_id == entry_id, Hit.text_id.in_(text_ids or [-1]), A.VALID)).all()
+                           .where(Hit.entry_id == entry_id, Hit.text_id.in_(text_ids or [-1]), A.valid())).all()
     both = {_unit(r[1], r[2], r[3], unit) for r in ent} & {_unit(t, p, i, unit) for _, t, p, i, _, _ in hits}
     marks = defaultdict(list)
     for sid, tid, par, idx, st, en in hits:

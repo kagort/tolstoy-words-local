@@ -13,3 +13,16 @@ if TEST_DB:
     os.environ["ADMIN_USERNAME"] = "admin"
     os.environ["ADMIN_PASSWORD"] = "test-password"
     os.environ["SECRET_KEY"] = "test-secret"
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _reset_noprop():
+    """Режим «Имена собственные: не учитывать» задаётся на запрос (selection.from_params); тесты, вызывающие from_params
+    напрямую в процессе тестов, не должны переносить его в следующие тесты."""
+    yield
+    from app.services import analytics
+
+    analytics.set_noprop(False)

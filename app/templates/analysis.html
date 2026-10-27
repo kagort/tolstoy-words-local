@@ -41,7 +41,7 @@
       <select name="unit" title="строки графиков обзора, тепловых карт и карты текста — слова или суммы по категориям словаря">
         <option value="" {{ 'selected' if not sel.unit }}>по словам</option><option value="cat" {{ 'selected' if sel.unit == 'cat' }}>по категориям</option></select></div>{% endif %}
     <div class="shrink sel-opts"><label>Имена собственные{{ term('noprop') }}</label>
-      <label class="check" title="убирает имена людей, мест и организаций из ключевых слов, TF-IDF, тем, семантики, коллокаций и стилометрии (данные не удаляются){{ '; сейчас исключено лемм: ' ~ sel.names|length if sel.noprop }}"><input type="checkbox" name="noprop" value="1" {{ 'checked' if sel.noprop }}> не учитывать</label></div>
+      <label class="check" title="убирает имена людей, мест и организаций из ключевых слов, TF-IDF, тем, семантики, коллокаций и стилометрии, а слова словаря внутри имён и названий («чёрный» в «Чёрное море») не считаются в частотах и на графиках (данные не удаляются){{ '; сейчас исключено лемм: ' ~ sel.names|length if sel.noprop }}"><input type="checkbox" name="noprop" value="1" {{ 'checked' if sel.noprop }}> не учитывать</label></div>
     <div class="shrink"><button type="submit">Применить</button></div>
     <div class="shrink"><button type="submit" class="secondary" onclick="this.form.tab.value='report'" title="сводная страница по выбранным словам и выборке текстов">{{ icon('report') }}Построить отчёт</button></div>
     <div class="shrink"><button type="submit" class="secondary" formaction="/dashboard" title="обзор выборки на одной странице; можно скачать одним HTML-файлом">{{ icon('chart') }}Дашборд</button></div>
@@ -115,6 +115,8 @@
   </details>
 </form>
 
+{% if propn_excluded %}<p class="help">Имена собственные не учитываются: {{ propn_excluded }} вхождений слов словаря внутри имён и названий
+  («Чёрное море», «Белый дом») не посчитаны. Вернуть отдельное вхождение — ✓ в конкордансе.</p>{% endif %}
 <div class="tabs">
   {% for key, label in [('overview', 'Обзор'), ('report', 'Отчёт'), ('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('colloc', 'Коллокации'), ('keywords', 'Ключевые слова'), ('map', 'Карта текста'), ('entities', 'Имена'), ('geo', 'География'), ('semantic', 'Семантика'), ('topics', 'Темы'), ('stylo', 'Авторство'), ('textcmp', 'Сравнение текстов'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
   <a class="{{ 'active' if tab == key }}" href="/analysis?tab={{ key }}&dictionary_id={{ dict_id }}&{{ sel.query() }}{% if entry_id and key in ('profile','conc','structure','compare','colloc','semantic') %}&entry_id={{ entry_id }}{% endif %}">{{ label }}</a>

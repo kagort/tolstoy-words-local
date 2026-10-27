@@ -41,7 +41,7 @@ def text_map(session: Session, text_id: int, dictionary_id: int, entry_ids: list
 
     entries = {e.id: e for e in session.scalars(select(DictionaryEntry).where(DictionaryEntry.dictionary_id == dictionary_id))}
     hits = session.execute(select(Hit.entry_id, Hit.sentence_id, Hit.token_idx)
-                           .where(Hit.dictionary_id == dictionary_id, Hit.text_id == text_id, A.VALID)).all()
+                           .where(Hit.dictionary_id == dictionary_id, Hit.text_id == text_id, A.valid())).all()
     per_entry: dict[int, list[int]] = defaultdict(lambda: [0] * segments)
     points = defaultdict(list)
     for eid, sid, tidx in hits:
@@ -110,7 +110,7 @@ def passage(session: Session, text_id: int, from_idx: int, to_idx: int, dictiona
 
         q = (select(Hit.sentence_id, TokenRow.start_char, TokenRow.end_char, Hit.entry_id)
              .join(TokenRow, TokenRow.id == Hit.token_id)
-             .where(Hit.dictionary_id == dictionary_id, Hit.sentence_id.in_([s.id for s in sents]), A.VALID))
+             .where(Hit.dictionary_id == dictionary_id, Hit.sentence_id.in_([s.id for s in sents]), A.valid()))
         if entry_ids:
             q = q.where(Hit.entry_id.in_(entry_ids))
         for sid, st, en, eid in session.execute(q):
