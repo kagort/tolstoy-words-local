@@ -427,11 +427,20 @@ def _canonical_rows(session: Session, text_ids: list[int], etype: str | None = N
     q = (select(Entity.sentence_id, Entity.text_id, SentenceRow.paragraph_idx, SentenceRow.idx, Entity.norm, Entity.etype,
                 Entity.start_char, Entity.end_char)
          .join(SentenceRow, SentenceRow.id == Entity.sentence_id).where(Entity.text_id.in_(text_ids or [-1])))
+    rows, votes = [], defaultdict(Counter)
     for sid, tid, par, idx, norm_name, typ, st, en in session.execute(q):
         name, typ2, hidden = resolve(norm_name, typ, ovr, tid)
-        if hidden or (etype and typ2 != etype):
+        if hidden:
             continue
-        yield sid, tid, par, idx, name, typ2, st, en
+        rows.append((sid, tid, par, idx, name, st, en))
+        votes[name][typ2] += 1
+    # класс имени — как в указателе (entity_index): у большинства его упоминаний. Иначе персонаж, у которого модель
+    # приняла несколько упоминаний за место («у Самгина»), попадал бы в «места × слова словаря» и на карту связей
+    cls = {name: c.most_common(1)[0][0] for name, c in votes.items()}
+    for sid, tid, par, idx, name, st, en in rows:
+        if etype and cls[name] != etype:
+            continue
+        yield sid, tid, par, idx, name, cls[name], st, en
 
 
 def mentions(session: Session, text_ids: list[int], name: str, limit: int = 100) -> dict:
