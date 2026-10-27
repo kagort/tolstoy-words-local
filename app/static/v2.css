@@ -194,3 +194,4 @@ body.v2 { font: 15px/1.55 var(--font-sans); background: var(--bg); color: var(--
 }
 .v2 .dv2-pick { display: inline-flex; align-items: center; gap: 8px; } .v2 .dv2-pick select { width: auto; max-width: 100%; }
 .v2 .an-head { margin-bottom: 14px; } .v2 .an-head h1 { margin: 2px 0 4px; }
+.v2 .role-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: -1px; }

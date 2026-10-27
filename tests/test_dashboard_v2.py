@@ -100,6 +100,9 @@ def test_analysis_tabs_v2_charts(client):
         page = client.get(f"/analysis?tab={tab}&{q}").text
         assert "window.QV2" in page, tab
     assert "Площадь прямоугольника" in client.get(f"/analysis?tab=freq&{q}").text  # treemap категорий
+    assert "QV2.ridgeline" in client.get(f"/analysis?tab=map&{q}").text  # полосы плотности карты текста
+    assert "role-sw" in client.get(f"/analysis?tab=profile&{q}").text  # роли — полоса 100 % с цветными метками
+    assert "multiples" in client.get("/static/charts_v2.js").text
     client.cookies.set("qv_ui", "classic")
     page = client.get(f"/analysis?tab=overview&{q}").text
     assert "charts_v2.js" not in page and "корпус × словарь" not in page and "Тепловая карта:" in page

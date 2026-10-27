@@ -116,8 +116,8 @@
   {% if tm %}<div class="shrink">Скачать: <a href="/export/textmap.xlsx{{ qs(request, text_id=map_text_id) }}">XLSX</a></div>{% endif %}
 </div>
 {% if tm and tm.summary[0].total %}
-<p class="muted">Текст разбит на {{ tm.segments }} равных по числу слов отрезков (по ~{{ (tm.n_words / tm.segments)|round|int }} слов). Цвет — плотность вхождений (ipm, на миллион слов отрезка).
-  {% if not sel.words %}Показаны {{ tm.rows|length }} самых частых слов — свои слова выберите в блоке «Слова словаря».{% endif %} <strong>Щёлкните по клетке</strong> — ниже появится текст этого отрезка с подсвеченными словами.</p>
+<p class="muted">Текст разбит на {{ tm.segments }} равных по числу слов отрезков (по ~{{ (tm.n_words / tm.segments)|round|int }} слов). {% if ui_mode(request) == 'v2' %}Полоса — плотность вхождений по отрезкам (ipm, у каждой полосы свой масштаб: видно, где слово сгущается).{% else %}Цвет — плотность вхождений (ipm, на миллион слов отрезка).{% endif %}
+  {% if not sel.words %}Показаны {{ tm.rows|length }} самых частых слов — свои слова выберите в блоке «Слова словаря».{% endif %} <strong>Щёлкните по {{ 'полосе' if ui_mode(request) == 'v2' else 'клетке' }}</strong> — ниже появится текст этого отрезка с подсвеченными словами.</p>
 <div class="panel"><h3 style="margin-top:0">Карта словаря по тексту{{ term('textmap') }}</h3><div id="chart-map" class="chart" style="min-height:{{ 140 + 26 * (tm.rows|length + tm.summary|length) }}px"></div></div>
 {% if tm.peaks %}<div class="panel"><strong>Самые «плотные» места:</strong>
   {% for pk in tm.peaks %}<a href="#" class="chip" onclick="showPassage({{ pk.from }}, {{ pk.to }}, {{ pk.segment }}); return false;">отрезок {{ pk.segment }} (предл. {{ pk.from }}–{{ pk.to }}): {{ pk.count }} вхожд., {{ pk.ipm }} ipm</a>{% endfor %}</div>{% endif %}
@@ -134,6 +134,9 @@ document.addEventListener('DOMContentLoaded', function () {
   const tm = {{ tm|tojson }};
   const rows = tm.summary.concat(tm.rows).reverse();
   const segLabels = tm.seg_from.map((f, k) => `${k + 1}`);
+  if (window.QV2) {  // новый интерфейс: полосы плотности вместо тепловой карты
+    QV2.ridgeline('chart-map', tm, k => showPassage(tm.seg_from[k], tm.seg_to[k], k + 1));
+  } else {
   drawChart('chart-map', [{ type: 'heatmap', z: rows.map(r => r.ipm), x: segLabels, y: rows.map(r => r.label),
     customdata: rows.map(r => r.count.map((c, k) => [c, tm.seg_from[k], tm.seg_to[k]])),
     colorscale: [[0, '#f4f6fb'], [0.15, '#c6d4f0'], [0.5, '#5b82d6'], [1, '#14307a']],
@@ -141,6 +144,7 @@ document.addEventListener('DOMContentLoaded', function () {
     { xaxis: { title: 'отрезок текста (от начала к концу)' }, yaxis: { automargin: true }, margin: { l: 160, r: 20, t: 10, b: 50 } });
   const el = document.getElementById('chart-map');
   if (el && el.on) el.on('plotly_click', ev => { const k = ev.points[0].pointIndex[1]; showPassage(tm.seg_from[k], tm.seg_to[k], k + 1); });
+  }
   const pts = tm.points.slice().reverse();
   drawChart('chart-disp', pts.map(p => ({ type: 'scatter', mode: 'markers', name: p.label, x: p.x, y: p.x.map(() => p.label),
     marker: { symbol: 'line-ns-open', size: 16, line: { width: 1.5 } }, hovertemplate: '%{y}: %{x}% текста<extra></extra>' })),
