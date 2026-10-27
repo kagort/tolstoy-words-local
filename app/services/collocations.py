@@ -48,7 +48,7 @@ def collocations(session: Session, entry_id: int, text_ids: list[int], *, mode: 
     if not text_ids:
         return base
     hits = session.execute(
-        select(Hit.sentence_id, Hit.token_idx).where(Hit.entry_id == entry_id, Hit.text_id.in_(text_ids), A.VALID)
+        select(Hit.sentence_id, Hit.token_idx).where(Hit.entry_id == entry_id, Hit.text_id.in_(text_ids), A.valid())
     ).all()
     fx = len(hits)
     n = A.corpus_words(session, text_ids)
@@ -90,7 +90,7 @@ def collocations(session: Session, entry_id: int, text_ids: list[int], *, mode: 
         rel_q = (
             select(TokenRelation.rel_type, TokenRelation.related_lemma, TokenRelation.related_upos, func.count())
             .join(Hit, Hit.id == TokenRelation.hit_id)
-            .where(TokenRelation.entry_id == entry_id, TokenRelation.text_id.in_(text_ids), A.VALID,
+            .where(TokenRelation.entry_id == entry_id, TokenRelation.text_id.in_(text_ids), A.valid(),
                    TokenRelation.scope.in_(list(A.DEFAULT_SCOPES)), TokenRelation.negated.is_(False),
                    TokenRelation.rel_type != "case")
             .group_by(TokenRelation.rel_type, TokenRelation.related_lemma, TokenRelation.related_upos)

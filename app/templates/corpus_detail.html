@@ -3,7 +3,7 @@
 {% block content %}
 <p><a href="/corpora">← Все корпуса</a></p>
 <h1>Корпус «{{ corpus.name }}»</h1>
-<p><a class="btn secondary" href="/dashboard?corpus_id={{ corpus.id }}">📊 Дашборд корпуса</a> <a class="btn secondary" href="/analysis?corpus_id={{ corpus.id }}">Анализ</a></p>
+<p><a class="btn secondary" href="/dashboard?corpus_id={{ corpus.id }}">{{ icon('chart') }}Дашборд корпуса</a> <a class="btn secondary" href="/analysis?corpus_id={{ corpus.id }}">Анализ</a></p>
 <form method="post" action="/corpora/{{ corpus.id }}">
   <div class="panel">
     <div class="row">
@@ -12,27 +12,53 @@
     </div>
   </div>
   <div class="panel table-scroll">
-    <h2 style="margin-top:0">Состав корпуса</h2>
-    <p class="help">Отметьте тексты, которые входят в корпус, и нажмите «Сохранить».
-      <a href="#" onclick="document.querySelectorAll('.tc').forEach(c=>c.checked=true);return false">выбрать все</a> ·
-      <a href="#" onclick="document.querySelectorAll('.tc').forEach(c=>c.checked=false);return false">снять все</a></p>
+    <h2 style="margin-top:0">Тексты корпуса <span class="muted small">— {{ member_texts|length }}</span></h2>
+    {% if member_texts %}<p class="help">Снимите флажок, чтобы убрать текст из корпуса (сам текст останется в базе), и нажмите «Сохранить».</p>
     <table>
       <tr><th></th><th>Название</th><th>Автор</th><th>Год</th><th>Жанр</th><th>Тип</th><th class="num">Слов</th></tr>
-      {% for t in all_texts %}
-      <tr><td><input class="tc" type="checkbox" name="text_ids" value="{{ t.id }}" {{ 'checked' if t.id in member }}></td>
+      {% for t in member_texts %}
+      <tr><td><input class="tc" type="checkbox" name="text_ids" value="{{ t.id }}" checked></td>
         <td><a href="/texts/{{ t.id }}">{{ t.title }}</a></td><td>{{ t.author or '' }}</td><td>{{ t.years }}</td>
         <td>{{ t.genre or '' }}</td><td class="small">{{ SOURCE_TYPES.get(t.source_type, t.source_type) }}</td><td class="num">{{ t.n_words }}</td></tr>
       {% endfor %}
     </table>
+    {% else %}<p class="muted">В корпусе пока нет текстов — добавьте их ниже или при загрузке на странице «Тексты».</p>{% endif %}
+    {% if others %}
+    <details class="add-texts" {{ 'open' if not member_texts }}>
+      <summary>Добавить тексты в корпус <span class="muted small">— других текстов в базе: {{ others|length }}</span></summary>
+      <div class="row" style="align-items:center;margin:8px 0">
+        <div><input type="search" placeholder="поиск по названию и автору" oninput="addFilter()" id="add-q"></div>
+        <label class="check shrink" style="margin:0"><input type="checkbox" id="add-free" onchange="addFilter()"> только без корпуса</label>
+        <div class="shrink small"><a href="#" onclick="addAll(true);return false">отметить видимые</a> · <a href="#" onclick="addAll(false);return false">снять</a></div>
+      </div>
+      <table id="add-table">
+        <tr><th></th><th>Название</th><th>Автор</th><th>Год</th><th>Корпуса</th><th class="num">Слов</th></tr>
+        {% for t in others %}
+        <tr data-q="{{ (t.title ~ ' ' ~ (t.author or ''))|lower }}" data-free="{{ 0 if t.corpora else 1 }}">
+          <td><input class="ta" type="checkbox" name="text_ids" value="{{ t.id }}"></td>
+          <td><a href="/texts/{{ t.id }}">{{ t.title }}</a></td><td>{{ t.author or '' }}</td><td>{{ t.years }}</td>
+          <td class="small muted">{{ t.corpora|map(attribute='name')|join(', ') or 'без корпуса' }}</td><td class="num">{{ t.n_words }}</td></tr>
+        {% endfor %}
+      </table>
+    </details>{% endif %}
     <p><button type="submit">Сохранить</button> <a class="btn secondary" href="/analysis?corpus_id={{ corpus.id }}">Анализ корпуса</a></p>
   </div>
+<script>
+function addFilter() {
+  const q = document.getElementById('add-q').value.trim().toLowerCase(), free = document.getElementById('add-free').checked;
+  document.querySelectorAll('#add-table tr[data-q]').forEach(tr => {
+    tr.style.display = (!q || tr.dataset.q.includes(q)) && (!free || tr.dataset.free === '1') ? '' : 'none';
+  });
+}
+function addAll(on) { document.querySelectorAll('#add-table tr[data-q]').forEach(tr => { if (tr.style.display !== 'none') tr.querySelector('.ta').checked = on; }); }
+</script>
 </form>
 <div class="row" style="margin-top:12px">
 <form class="shrink" method="post" action="/corpora/{{ corpus.id }}/delete" onsubmit="return confirm('Удалить корпус? Тексты останутся в базе.')">
   <button class="danger" type="submit">Удалить только корпус</button>
 </form>
 <form class="shrink" method="post" action="/corpora/{{ corpus.id }}/delete" onsubmit="return confirm('Удалить корпус и ВСЕ его тексты ({{ member|length }}) со всей разметкой и вхождениями? Тексты удалятся и из других корпусов. Отменить нельзя.')">
-  <input type="hidden" name="with_texts" value="1"><button class="danger" type="submit">🗑 Удалить корпус вместе с текстами</button>
+  <input type="hidden" name="with_texts" value="1"><button class="danger" type="submit">{{ icon('trash') }}Удалить корпус вместе с текстами</button>
 </form>
 </div>
 {% endblock %}

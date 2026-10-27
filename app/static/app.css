@@ -228,3 +228,7 @@ tr.rel-off td:not(:last-child) { text-decoration: line-through; }
 .kw-size .link-btn.on { color: var(--text); font-weight: 600; text-decoration: none; }
 .sel-opts .check > input, .fopts label.check > input { margin-top: 0; }
 .fopts label.check { align-items: center; }
+
+/* линейные значки вместо эмодзи (deps.icon) */
+.ic { width: 1.05em; height: 1.05em; vertical-align: -0.17em; margin-right: 0.35em; flex-shrink: 0; }
+.icon-btn .ic, a > .ic:only-child { margin-right: 0; }

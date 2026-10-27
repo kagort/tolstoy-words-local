@@ -23,14 +23,14 @@
     {% if ent_hidden %}
     <button type="button" onclick="entHide(entChecked(), false)">↩ Вернуть отмеченные</button>
     {% else %}
-    <button type="button" class="danger" onclick="entHide(entChecked(), true)" title="«это не имя»: скрыть отмеченные во всех текстах (можно вернуть)">🗑 Не имя — скрыть</button>
+    <button type="button" class="danger" onclick="entHide(entChecked(), true)" title="«это не имя»: скрыть отмеченные во всех текстах (можно вернуть)">{{ icon('trash') }}Не имя — скрыть</button>
     <span class="pair"><select name="etype" aria-label="класс"><option value="">класс как у модели</option>{% for k, v in ETYPE_ONE.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select>
       <button type="submit" class="secondary" formaction="/entities/etype" onclick="return entPrepare()">Перенести в класс</button></span>
     <span class="pair"><input type="text" name="canonical" id="merge-canonical" placeholder="имя персонажа (пусто — самое длинное)">
       <select name="scope" aria-label="где"><option value="all">во всех текстах</option>
         {% for t in ent_texts[:200] %}<option value="{{ t.id }}" {{ 'selected' if ent_texts|length == 1 }}>только в «{{ t.title|truncate(40) }}»</option>{% endfor %}</select>
       <button type="submit" class="secondary" formaction="/entities/merge" onclick="return entPrepare()">Объединить</button></span>
-    <details class="inline-details ent-dict"><summary class="btn secondary">📚 Словарь из отмеченных</summary>
+    <details class="inline-details ent-dict"><summary class="btn secondary">{{ icon('book') }}Словарь из отмеченных</summary>
       <div class="ent-dict-form">
         <label>Название словаря</label><input type="text" name="dict_name" placeholder="например: Персонажи «Войны и мира»">
         <label>Категория записи</label><select name="mode">{% for k, v in NAME_MODES.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select>
@@ -61,7 +61,7 @@
     {% endif %}
     <td class="small nowrap"><a href="#" onclick="showMarked('/api/entities/mentions?{{ selq }}&name={{ e.name|urlencode }}', 'Упоминания: {{ e.name|replace("'", "") }}'); return false;">упоминания</a></td>
     <td class="nowrap">{% if ent_hidden %}<button class="small secondary" type="button" onclick='entHide({{ ([e.name] + e.variants)|tojson }}, false)'>вернуть</button>
-      {% else %}<button class="icon-btn" type="button" title="это не имя — скрыть" onclick='entHide([{{ e.name|tojson }}], true)'>🗑</button>
+      {% else %}<button class="icon-btn" type="button" title="это не имя — скрыть" onclick='entHide([{{ e.name|tojson }}], true)'>{{ icon('trash') }}</button>
       <details class="inline-details"><summary class="small">править</summary>
       <form method="post" action="/entities/override" class="small" style="margin-top:4px">
         <input type="hidden" name="norm" value="{{ e.name }}"><input type="hidden" name="back" value="{{ back }}">

@@ -10,7 +10,7 @@
 <body>
 <header class="top">
   <div class="wrap">
-    <a class="brand" href="/">📚 {{ site_title }}</a>
+    <a class="brand" href="/">{{ icon('book') }}{{ site_title }}</a>
     {% if user %}
     {% set p = request.url.path %}
     <nav>

@@ -144,6 +144,7 @@ def from_params(session: Session, qp, corpus_key: str = "corpus_id") -> Selectio
     base = [t for t in sel.corpus_ids if t in set(sel.texts)] if sel.texts else sel.corpus_ids
     sel.ids = A.filter_texts(session, base, year_from=sel.year_from, year_to=sel.year_to, authors=sel.authors,
                              genres=sel.genres, source_types=sel.stypes) if sel.filtered else base
+    A.set_noprop(sel.noprop)  # подсчёт вхождений в этом запросе: при «не учитывать» — без слов внутри имён собственных
     if sel.noprop:
         from app.services.entities import name_lemmas
 

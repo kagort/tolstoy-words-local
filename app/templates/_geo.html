@@ -15,7 +15,7 @@
 <div class="row" style="margin-bottom:8px">
   <div class="shrink tabs-inline">Показать: {% if geo_mode == 'countries' %}<a href="/analysis{{ qs(request, geo_mode=None) }}">места</a> · <strong>страны</strong>{% else %}<strong>места</strong> · <a href="/analysis{{ qs(request, geo_mode='countries') }}">страны</a>{% endif %}</div>
   <div class="spacer"></div>
-  <details class="shrink inline-details ent-dict right"><summary class="btn small secondary">📚 Словарь из мест</summary>
+  <details class="shrink inline-details ent-dict right"><summary class="btn small secondary">{{ icon('book') }}Словарь из мест</summary>
     <form method="post" action="/places/to-dictionary" class="ent-dict-form">
       <input type="hidden" name="back" value="{{ back }}">
       <label>Название словаря</label><input type="text" name="dict_name" placeholder="например: География «Казаков»" required>

@@ -154,7 +154,7 @@ def _group_counts(session: Session, dictionary_id: int, members: dict):
     group_of = {t: g for g, v in members.items() for t in v}
     out: dict[str, Counter] = defaultdict(Counter)
     for eid, tid, n in session.execute(select(Hit.entry_id, Hit.text_id, func.count())
-                                       .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(list(group_of) or [-1]), A.VALID)
+                                       .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(list(group_of) or [-1]), A.valid())
                                        .group_by(Hit.entry_id, Hit.text_id)):
         out[group_of[tid]][eid] += n
     return out
@@ -276,7 +276,7 @@ def _time(session: Session, dictionary_id: int, ids: list[int], texts, has_cats:
 
 
 def _syntax(session: Session, dictionary_id: int, ids: list[int], cat_of: dict, has_cats: bool, cat_order: list[str], found) -> dict | None:
-    q = (select(Hit.entry_id, Hit.role, func.count()).where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), A.VALID)
+    q = (select(Hit.entry_id, Hit.role, func.count()).where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), A.valid())
          .group_by(Hit.entry_id, Hit.role))
     word = {r["entry_id"]: r["word"] for r in found}
     keys = [c for c in cat_order if c != A.NO_CATEGORY][:8] if has_cats else [r["word"] for r in found[:10]]
@@ -310,7 +310,7 @@ def _network(session: Session, dictionary_id: int, ids: list[int], rows: list[di
 
     by_sent: dict[int, set] = defaultdict(set)
     for sid, eid in session.execute(select(Hit.sentence_id, Hit.entry_id)
-                                    .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), A.VALID).limit(max_rows)):
+                                    .where(Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), A.valid()).limit(max_rows)):
         by_sent[sid].add(eid)
     freq = Counter()
     for s in by_sent.values():
@@ -431,7 +431,7 @@ def _quotes(session: Session, dictionary_id: int, ids: list[int], top_rows: list
     for r in top_rows:
         q = (select(Hit.sentence_id, Hit.text_id, SentenceRow.text, Hit.token_idx, TextDoc.title, TextDoc.author, TextDoc.year_from)
              .join(SentenceRow, SentenceRow.id == Hit.sentence_id).join(TextDoc, TextDoc.id == Hit.text_id)
-             .where(Hit.entry_id == r["entry_id"], Hit.text_id.in_(ids), A.VALID,
+             .where(Hit.entry_id == r["entry_id"], Hit.text_id.in_(ids), A.valid(),
                     func.length(SentenceRow.text).between(20, 320))
              .order_by(func.abs(func.length(SentenceRow.text) - 140), Hit.id).limit(40))  # ближе к 140 знакам — лучше
         cands = session.execute(q).all()

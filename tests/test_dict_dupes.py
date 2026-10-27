@@ -185,7 +185,7 @@ def test_dictionary_sorted_by_hits(client):
         expected = [e.surface for e in sorted(d.entries, key=lambda e: (-hits.get(e.id, 0), e.surface))]
         dict_id = d.id
     page = client.get(f"/dictionaries/{dict_id}").text
-    shown = re.findall(r'<tr id="e\d+"[^>]*>\s*<td><form[^>]*></form><strong>([^<]+)</strong>', page)
+    shown = re.findall(r'<tr id="e\d+"[^>]*>\s*<td><input[^>]*></td>\s*<td><form[^>]*></form><strong>([^<]+)</strong>', page)
     assert shown == expected and hits  # «сад» (3 вхождения) выше «благоухания» (2) и «запаха» (1)
-    abc = re.findall(r'<tr id="e\d+"[^>]*>\s*<td><form[^>]*></form><strong>([^<]+)</strong>', client.get(f"/dictionaries/{dict_id}?sort=abc").text)
+    abc = re.findall(r'<tr id="e\d+"[^>]*>\s*<td><input[^>]*></td>\s*<td><form[^>]*></form><strong>([^<]+)</strong>', client.get(f"/dictionaries/{dict_id}?sort=abc").text)
     assert abc == sorted(expected)

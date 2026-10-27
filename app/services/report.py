@@ -77,7 +77,7 @@ def build_report(session: Session, dictionary_id: int, text_ids: list[int], entr
 
     texts_with = session.scalar(
         select(func.count(func.distinct(Hit.text_id))).where(Hit.dictionary_id == dictionary_id, Hit.entry_id.in_(ids or [-1]),
-                                                          Hit.text_id.in_(text_ids or [-1]), A.VALID)) or 0
+                                                          Hit.text_id.in_(text_ids or [-1]), A.valid())) or 0
     total = sum(w["count"] for w in words)
     return {
         "words": words, "cards": cards, "overviews": overviews, "role_matrix": role_matrix, "structure": structure,
