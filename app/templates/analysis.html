@@ -43,8 +43,8 @@
     <div class="shrink sel-opts"><label>Имена собственные{{ term('noprop') }}</label>
       <label class="check" title="убирает имена людей, мест и организаций из ключевых слов, TF-IDF, тем, семантики, коллокаций и стилометрии (данные не удаляются){{ '; сейчас исключено лемм: ' ~ sel.names|length if sel.noprop }}"><input type="checkbox" name="noprop" value="1" {{ 'checked' if sel.noprop }}> не учитывать</label></div>
     <div class="shrink"><button type="submit">Применить</button></div>
-    <div class="shrink"><button type="submit" class="secondary" onclick="this.form.tab.value='report'" title="сводная страница по выбранным словам и выборке текстов">📋 Построить отчёт</button></div>
-    <div class="shrink"><button type="submit" class="secondary" formaction="/dashboard" title="обзор выборки на одной странице; можно скачать одним HTML-файлом">📊 Дашборд</button></div>
+    <div class="shrink"><button type="submit" class="secondary" onclick="this.form.tab.value='report'" title="сводная страница по выбранным словам и выборке текстов">{{ icon('report') }}Построить отчёт</button></div>
+    <div class="shrink"><button type="submit" class="secondary" formaction="/dashboard" title="обзор выборки на одной странице; можно скачать одним HTML-файлом">{{ icon('chart') }}Дашборд</button></div>
   </div>
 
   <details class="sel-block" id="sel-texts" {{ 'open' if sel.filtered and tab != 'report' }}>
@@ -111,12 +111,12 @@
       {% endfor %}
     </div>
     <p class="help">Число рядом со словом — вхождений в текущей выборке текстов. Выбор сохраняется при переходе между вкладками и в выгрузках.</p>
-    <p><button type="submit">Применить</button> <button type="submit" class="secondary" onclick="this.form.tab.value='report'">📋 Построить отчёт по выбранным</button></p>
+    <p><button type="submit">Применить</button> <button type="submit" class="secondary" onclick="this.form.tab.value='report'">{{ icon('report') }}Построить отчёт по выбранным</button></p>
   </details>
 </form>
 
 <div class="tabs">
-  {% for key, label in [('overview', 'Обзор'), ('report', '📋 Отчёт'), ('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('colloc', 'Коллокации'), ('keywords', 'Ключевые слова'), ('map', 'Карта текста'), ('entities', 'Имена'), ('geo', 'География'), ('semantic', 'Семантика'), ('topics', 'Темы'), ('stylo', 'Авторство'), ('textcmp', 'Сравнение текстов'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
+  {% for key, label in [('overview', 'Обзор'), ('report', 'Отчёт'), ('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('colloc', 'Коллокации'), ('keywords', 'Ключевые слова'), ('map', 'Карта текста'), ('entities', 'Имена'), ('geo', 'География'), ('semantic', 'Семантика'), ('topics', 'Темы'), ('stylo', 'Авторство'), ('textcmp', 'Сравнение текстов'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
   <a class="{{ 'active' if tab == key }}" href="/analysis?tab={{ key }}&dictionary_id={{ dict_id }}&{{ sel.query() }}{% if entry_id and key in ('profile','conc','structure','compare','colloc','semantic') %}&entry_id={{ entry_id }}{% endif %}">{{ label }}</a>
   {% endfor %}
 </div>
@@ -218,8 +218,8 @@
 <div class="panel row" style="align-items:center">
   <div class="muted small">Отметьте слова флажками (они же отмечаются в блоке «Слова словаря»), затем:</div>
   <div class="shrink">
-    <button type="submit" form="sel-form" onclick="document.getElementById('sel-form').tab.value='report'">📋 Отчёт по отмеченным</button>
-    <button type="submit" form="sel-form" class="secondary" formaction="/export/concordance.xlsx" title="все предложения с отмеченными словами">⬇ Предложения отмеченных (XLSX)</button>
+    <button type="submit" form="sel-form" onclick="document.getElementById('sel-form').tab.value='report'">{{ icon('report') }}Отчёт по отмеченным</button>
+    <button type="submit" form="sel-form" class="secondary" formaction="/export/concordance.xlsx" title="все предложения с отмеченными словами">{{ icon('download') }}Предложения отмеченных (XLSX)</button>
     <button type="submit" form="sel-form" class="secondary" formaction="/export/concordance.csv">CSV</button>
     <button type="submit" form="sel-form" class="secondary" formaction="/export/hits.conllu">CoNLL-U</button>
   </div>
@@ -278,7 +278,7 @@
   </details>
 </div>
 <div class="row" style="margin-bottom:6px">
-  <div class="muted">Найдено: {{ conc.total }}{% if conc.phrase_sentences is not none %} (предложений со словосочетанием: {{ conc.phrase_sentences }}){% endif %}. Наведите курсор на строку — появится окно с соседними предложениями; ID или выделенное слово открывают разбор предложения 🌳.</div>
+  <div class="muted">Найдено: {{ conc.total }}{% if conc.phrase_sentences is not none %} (предложений со словосочетанием: {{ conc.phrase_sentences }}){% endif %}. Наведите курсор на строку — появится окно с соседними предложениями; ID или выделенное слово открывают разбор предложения {{ icon('tree') }}.</div>
   <form class="shrink" method="get" action="/go/sentence" style="display:flex;gap:6px;align-items:center"><input type="text" name="id" placeholder="ID предложения" style="width:150px"><button class="small secondary" type="submit">Открыть разбор</button></form>
   <div class="shrink">Скачать: <a href="/export/concordance.xlsx{{ qs(request, page=None) }}">XLSX</a> · <a href="/export/concordance.csv{{ qs(request, page=None) }}">CSV</a> · <a href="/export/hits.conllu{{ qs(request, page=None) }}">CoNLL-U</a></div>
 </div>
@@ -287,7 +287,7 @@
     <tr><th>ID</th><th class="num">Левый контекст</th><th>Слово</th><th>Правый контекст</th><th>Член предложения (связь UD)</th><th>Источник</th><th></th></tr>
     {% for i in conc['items'] %}
     <tr class="{{ 'invalid' if i.is_valid == false or (i.in_name and i.is_valid is none) }}" data-ctx="{{ i.sentence_id }}" data-start="{{ i.start }}" data-end="{{ i.end }}">
-      <td class="small"><a href="/sentences/{{ i.sentence_id }}" title="открыть разбор предложения">🌳&nbsp;{{ i.sentence_id }}</a><div class="muted">№&nbsp;{{ i.sentence_no }}</div></td>
+      <td class="small"><a href="/sentences/{{ i.sentence_id }}" title="открыть разбор предложения">{{ icon('tree', 'разбор') }}{{ i.sentence_id }}</a><div class="muted">№&nbsp;{{ i.sentence_no }}</div></td>
       <td class="left">{{ i.left }}</td>
       <td class="kw"><a href="/sentences/{{ i.sentence_id }}" title="открыть разбор предложения">{{ i.kw }}</a><div class="muted small" style="font-weight:normal">{% if i.in_name %}<span class="badge warn" title="внутри имени собственного: не считается, пока не отмечено ✓">в имени</span> {% endif %}{{ i.upos }}{% if i.word|lower != i.kw|lower and ' ' in i.word %} · «{{ i.word }}»{% endif %}</div></td>
       <td class="right">{{ i.right }}{% if i.phrase %}<div class="small"><span class="badge">{{ i.phrase|join(' · ') }}</span></div>{% endif %}</td>

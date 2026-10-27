@@ -111,12 +111,17 @@ def dashboard(request: Request, db: Session = Depends(get_session)):
 @router.get("/texts")
 def texts_list(request: Request, corpus_id: str | None = None, db: Session = Depends(get_session)):
     cid = _int(corpus_id)
+    no_corpus = corpus_id == "none"  # тексты, не входящие ни в один корпус
     q = select(TextDoc).order_by(TextDoc.id)
-    if cid:
+    if no_corpus:
+        q = q.where(~TextDoc.corpora.any())
+    elif cid:
         q = q.where(TextDoc.corpora.any(Corpus.id == cid))
     texts = list(db.scalars(q))
     corpora = list(db.scalars(select(Corpus).order_by(Corpus.name)))
-    return render(request, "texts.html", texts=texts, corpora=corpora, corpus_id=cid, max_mb=settings.upload_max_mb)
+    n_no_corpus = db.scalar(select(func.count()).select_from(TextDoc).where(~TextDoc.corpora.any())) or 0
+    return render(request, "texts.html", texts=texts, corpora=corpora, corpus_id="none" if no_corpus else cid,
+                  n_no_corpus=n_no_corpus, max_mb=settings.upload_max_mb)
 
 
 @router.post("/texts/upload")
@@ -333,9 +338,11 @@ def corpus_detail(request: Request, corpus_id: int, db: Session = Depends(get_se
     c = db.get(Corpus, corpus_id)
     if c is None:
         raise HTTPException(404)
-    all_texts = list(db.scalars(select(TextDoc).order_by(TextDoc.author, TextDoc.title)))
-    member = {t.id for t in c.texts}
-    return render(request, "corpus_detail.html", corpus=c, all_texts=all_texts, member=member)
+    member_texts = sorted(c.texts, key=lambda t: ((t.author or ""), t.title))
+    member = {t.id for t in member_texts}
+    # для добавления — остальные тексты базы (в свёрнутом блоке); у каждого — в каких корпусах он уже есть
+    others = [t for t in db.scalars(select(TextDoc).order_by(TextDoc.author, TextDoc.title)) if t.id not in member]
+    return render(request, "corpus_detail.html", corpus=c, member_texts=member_texts, others=others, member=member)
 
 
 @router.post("/corpora/{corpus_id}")
@@ -442,6 +449,11 @@ def dictionary_detail(request: Request, dict_id: int, db: Session = Depends(get_
     hits = _entry_hits(db, dict_id)
     sort = request.query_params.get("sort") if request.query_params.get("sort") in DICT_SORTS else "hits"
     entries = _sorted_entries(d.entries, hits, sort)
+    # «Непроверенные»: неоднозначные слова, разбор которых ещё не подтверждён, — быстро пройти и проверить
+    unverified = [e for e in entries if e.ambiguous and not e.verified]
+    show = "unverified" if request.query_params.get("show") == "unverified" else "all"
+    if show == "unverified":
+        entries = unverified
     # вхождения внутри имён собственных (не считаются): «любовь» в «Любовь Андреевна»
     in_names = dict(db.execute(select(Hit.entry_id, func.count()).where(Hit.dictionary_id == dict_id, Hit.in_name,
                                                                          Hit.is_valid.is_(None)).group_by(Hit.entry_id)).all())
@@ -455,11 +467,39 @@ def dictionary_detail(request: Request, dict_id: int, db: Session = Depends(get_
     dup_groups = duplicate_groups(d)
     from app.services.dictionaries import matched_texts
 
-    return render(request, "dictionary_detail.html", d=d, hits=hits, coverage=matched_texts(db, d), entries=entries, sort=sort, DICT_SORTS=DICT_SORTS, in_names=in_names, opt_counts=opt_counts, pending=pending, stale=stale,
+    categories = sorted({e.category for e in d.entries if e.category})
+    return render(request, "dictionary_detail.html", d=d, hits=hits, coverage=matched_texts(db, d), show=show,
+                  n_unverified=len(unverified), n_all=len(d.entries), categories=categories, entries=entries, sort=sort, DICT_SORTS=DICT_SORTS, in_names=in_names, opt_counts=opt_counts, pending=pending, stale=stale,
                   no_category=no_category, has_categories=no_category < len(d.entries), dup_groups=dup_groups,
                   no_cats=bool((d.settings or {}).get("no_categories")),
                   all_corpora=list(db.scalars(select(Corpus).order_by(Corpus.name))), scope=set(scope_corpora(d)),
                   names_ok=set((d.settings or {}).get("names_ok_entries", [])))
+
+
+@router.post("/dictionaries/{dict_id}/assign-category")
+def assign_category(request: Request, dict_id: int, category: str = Form(""), entry_ids: list[str] = Form([]),
+                    back: str = Form(""), db: Session = Depends(get_session)):
+    """«Создать категорию»: назначить категорию (новую или существующую) отмеченным словам; пустое имя — убрать категорию.
+    В режиме «без категорий» он выключается (как при «Предложить категории»). Вхождения не пересчитываются."""
+    d = db.get(Dictionary, dict_id)
+    if d is None:
+        raise HTTPException(404)
+    ids = {int(x) for x in entry_ids if x.isdigit()}
+    target = [e for e in d.entries if e.id in ids]
+    url = back if back.startswith(f"/dictionaries/{dict_id}") else f"/dictionaries/{dict_id}"
+    if not target:
+        flash(request, "Отметьте слова флажками в первой колонке таблицы", "error")
+        return redirect(url)
+    name = " ".join(category.split())[:120]
+    for e in target:
+        e.category = name or None
+    note = ""
+    if name and (d.settings or {}).get("no_categories"):
+        d.settings = {**d.settings, "no_categories": False}
+        note = "; режим «без категорий» выключен"
+    db.commit()
+    flash(request, (f"Категория «{name}» — {len(target)} слов" if name else f"Категория убрана у {len(target)} слов") + note, "success")
+    return redirect(url)
 
 
 @router.post("/dictionaries/{dict_id}/entries/{entry_id}")

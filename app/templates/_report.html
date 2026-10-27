@@ -8,7 +8,7 @@
       {% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if report_b == c.id|string }}>{{ c.name }}</option>{% endfor %}</select></div>
   <div class="shrink"><button type="submit" form="sel-form">Обновить отчёт</button></div>
   <div class="shrink">Скачать отчёт: <a href="/export/report.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/report.json{{ qs(request) }}">JSON</a>
-    · <a href="#" onclick="window.print(); return false;" title="печать или сохранение в PDF средствами браузера">🖨 печать / PDF</a></div>
+    · <a href="#" onclick="window.print(); return false;" title="печать или сохранение в PDF средствами браузера">{{ icon('print') }}печать / PDF</a></div>
 </div>
 
 <div class="panel report-head">
@@ -72,7 +72,7 @@
   {% else %}<div class="muted small">Связей не найдено.</div>{% endif %}
   {% if c.examples %}
   <div class="examples">
-    {% for i in c.examples %}<div class="example"><a href="/sentences/{{ i.sentence_id }}" class="muted small no-print">🌳 {{ i.sentence_id }}</a> {{ i.left }}<strong>{{ i.kw }}</strong>{{ i.right }} <span class="muted small">— {{ i.source }}</span></div>{% endfor %}
+    {% for i in c.examples %}<div class="example"><a href="/sentences/{{ i.sentence_id }}" class="muted small no-print">{{ icon('tree', 'разбор') }}{{ i.sentence_id }}</a> {{ i.left }}<strong>{{ i.kw }}</strong>{{ i.right }} <span class="muted small">— {{ i.source }}</span></div>{% endfor %}
   </div>
   {% endif %}
 </div>

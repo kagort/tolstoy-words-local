@@ -43,7 +43,7 @@
       <tr><td>Загружен</td><td class="num">{{ doc.created_at.strftime('%d.%m.%Y %H:%M') if doc.created_at }}</td></tr>
     </table>
     <p class="row">
-      {% if doc.status == 'ready' %}<a class="btn" href="/texts/{{ doc.id }}/stats">📊 Статистический портрет</a>
+      {% if doc.status == 'ready' %}<a class="btn" href="/texts/{{ doc.id }}/stats">{{ icon('chart') }}Статистический портрет</a>
         <a class="btn secondary" href="/dashboard?texts={{ doc.id }}" title="обзор текста на одной странице: словарь, ключевые слова, персонажи, места">Дашборд</a>{% endif %}
       <a class="btn secondary" href="/export/text/{{ doc.id }}.conllu">Скачать разметку (CoNLL-U)</a>
       {% if levels and levels.fast and doc.status == 'ready' %}
@@ -51,7 +51,7 @@
         <button class="secondary" type="submit" {{ 'disabled' if precise_pending }}>{{ 'Точный разбор в очереди…' if precise_pending else 'Точный разбор всего текста (' ~ levels.fast ~ ' предл.)' }}</button></form>
       {% endif %}
       <form class="inline shrink" method="post" action="/texts/{{ doc.id }}/reparse"><button class="secondary" type="submit">Разобрать заново</button></form>
-      <form class="inline shrink" method="post" action="/texts/{{ doc.id }}/delete" onsubmit="return confirm('Удалить текст вместе со всей разметкой, вхождениями словарей, именами и портретом? Отменить нельзя.')"><button class="danger" type="submit">🗑 Удалить текст со всеми связями</button></form>
+      <form class="inline shrink" method="post" action="/texts/{{ doc.id }}/delete" onsubmit="return confirm('Удалить текст вместе со всей разметкой, вхождениями словарей, именами и портретом? Отменить нельзя.')"><button class="danger" type="submit">{{ icon('trash') }}Удалить текст со всеми связями</button></form>
     </p>
   </div>
 </div>
@@ -62,7 +62,7 @@
   <table>
     <tr><th class="num">№</th><th class="num">ID</th><th>Предложение</th><th>Тип</th><th class="num">Слов</th></tr>
     {% for s in sents %}
-    <tr data-ctx="{{ s.id }}"><td class="num muted">{{ s.idx }}</td><td class="num small"><a href="/sentences/{{ s.id }}" title="разбор предложения">🌳&nbsp;{{ s.id }}</a></td><td><a href="/sentences/{{ s.id }}" style="color:inherit">{{ s.text }}</a></td>
+    <tr data-ctx="{{ s.id }}"><td class="num muted">{{ s.idx }}</td><td class="num small"><a href="/sentences/{{ s.id }}" title="разбор предложения">{{ icon('tree', 'разбор') }}{{ s.id }}</a></td><td><a href="/sentences/{{ s.id }}" style="color:inherit">{{ s.text }}</a></td>
       <td class="small muted">{{ SENT_TYPE_LABELS.get(s.sent_type, s.sent_type) }}</td><td class="num">{{ s.n_words }}</td></tr>
     {% endfor %}
   </table>
