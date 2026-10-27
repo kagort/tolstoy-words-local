@@ -639,6 +639,9 @@ def overview(session: Session, dictionary_id: int, text_ids: list[int], entry_id
             "corpus_words": sum(g["n_words"] for g in groups), "n_texts": sum(g["n_texts"] for g in groups)}
 
 
+BY_TEXT_GROUPS = 15  # строк-групп в распределении по текстам
+
+
 def by_text(session: Session, dictionary_id: int, text_ids: list[int], entry_ids: list[int], dim: str = "author",
             step: int = 10, by: str = "word", max_texts: int = 2000) -> dict | None:
     """Частота слов (или категорий) в каждом тексте выборки — для «полосы точек» (точка — текст) с ящиками по группам.
@@ -657,6 +660,8 @@ def by_text(session: Session, dictionary_id: int, text_ids: list[int], entry_ids
     from app.web.deps import SOURCE_TYPES
 
     def glabel(g):
+        if g in (None, "—"):
+            return {"author": "без автора", "genre": "без жанра"}.get(gdim, "—")
         if gdim == "period":
             return _period_label(int(g) if g is not None else NO_DATE, step)
         if gdim == "source_type":
@@ -668,6 +673,12 @@ def by_text(session: Session, dictionary_id: int, text_ids: list[int], entry_ids
     texts = [{"id": t.id, "label": text_labels(t.title, t.author, t.year_from, t.meta)[0],
               "full": text_labels(t.title, t.author, t.year_from, t.meta)[1], "group": glabel(t.g), "n_words": t.n_words or 0}
              for t in meta]
+    sizes = Counter(t["group"] for t in texts)
+    if len(sizes) > BY_TEXT_GROUPS:  # много групп — крупнейшие по числу текстов, остальные одной строкой
+        keep = {g for g, _ in sizes.most_common(BY_TEXT_GROUPS)}
+        rest = f"остальные ({len(sizes) - BY_TEXT_GROUPS})"
+        for t in texts:
+            t["group"] = t["group"] if t["group"] in keep else rest
     pos = {t["id"]: k for k, t in enumerate(texts)}
     base = [Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), VALID]
     if by == "cat":
