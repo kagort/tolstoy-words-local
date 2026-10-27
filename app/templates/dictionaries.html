@@ -6,10 +6,12 @@
   <div class="panel">
     {% if dictionaries %}
     <table>
-      <tr><th>Словарь</th><th class="num">Слов</th><th class="num">Вхождений</th><th>Пересчитан</th><th></th></tr>
-      {% for d in dictionaries %}
-      <tr><td><a href="/dictionaries/{{ d.id }}">{{ d.name }}</a><div class="small muted">{{ d.description or '' }}</div></td>
+      <tr><th>Словарь</th><th class="num">Слов</th><th class="num">Вхождений</th><th class="num" title="на скольких текстах посчитан словарь (из текстов его области)">Текстов</th><th>Пересчитан</th><th></th></tr>
+      {% for d in dictionaries %}{% set cv = coverage[d.id] %}
+      <tr><td><a href="/dictionaries/{{ d.id }}">{{ d.name }}</a><div class="small muted">{{ d.description or '' }}</div>
+          <div class="small muted">{{ 'корпуса: ' ~ scopes[d.id]|join(', ') if scopes[d.id] else 'все тексты' }}</div></td>
         <td class="num">{{ d.entries|length }}</td><td class="num">{{ counts.get(d.id, 0) }}</td>
+        <td class="num" title="посчитан на {{ cv.n }} из {{ cv.total }} текстов области{{ '' if cv.exact else ' (оценка: пересчитан до версии 0.14.1)' }}">{{ cv.n }}{% if cv.n != cv.total %}<span class="muted">/{{ cv.total }}</span>{% endif %}</td>
         <td class="small">{{ d.matched_at.strftime('%d.%m.%Y %H:%M') if d.matched_at else '—' }}</td>
         <td class="num"><a href="/analysis?dictionary_id={{ d.id }}">анализ →</a></td></tr>
       {% endfor %}
@@ -30,6 +32,8 @@
       <textarea name="words" placeholder="запах, аромат, вонь, пахнуть"></textarea>
       <label class="check"><input type="checkbox" name="include_participles"> учитывать причастия как формы глагола</label>
       <label class="check"><input type="checkbox" name="include_gerunds"> учитывать деепричастия как формы глагола</label>
+      {% if all_corpora %}<label>Сопоставлять с <span class="muted small">(ничего не отмечено — со всеми текстами всех корпусов; для большого словаря и одного корпуса отметьте его — сопоставление пойдёт только по его текстам)</span></label>
+      <div class="word-grid" style="max-height:140px">{% for c in all_corpora %}<label class="check-item"><input type="checkbox" name="scope_corpus_ids" value="{{ c.id }}"> {{ c.name }} <span class="muted small">({{ c.texts|length }})</span></label>{% endfor %}</div>{% endif %}
       <label class="check"><input type="checkbox" name="suggest" value="1" checked> сразу предложить однокоренные слова из корпуса («милосердие» → «милосердный»)</label>
       <p><button type="submit">Создать словарь</button></p>
     </form>

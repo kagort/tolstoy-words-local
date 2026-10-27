@@ -108,8 +108,11 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     // по виду объекта — отдельный цвет и пункт легенды (города, страны, реки, горы…)
     const kinds = {{ GEO_KINDS|tojson }};
-    const palette = { city: cssVar('--accent'), country: '#7c3aed', region: '#0f766e', river: '#0284c7', sea: '#0369a1', lake: '#0369a1',
-                      mountain: '#b45309', feature: '#6b7280' };
+    const palette = window.QV2  // новый интерфейс — цвета из токенов
+      ? { city: cssVar('--cat-1'), country: cssVar('--cat-5'), region: cssVar('--cat-4'), river: cssVar('--cat-6'), sea: cssVar('--cat-6'),
+          lake: cssVar('--cat-6'), mountain: cssVar('--cat-2'), feature: cssVar('--inactive') }
+      : { city: cssVar('--accent'), country: '#7c3aed', region: '#0f766e', river: '#0284c7', sea: '#0369a1', lake: '#0369a1',
+          mountain: '#b45309', feature: '#6b7280' };
     const top = new Set(geo.points.slice(0, 25).map(p => p.name));
     [...new Set(geo.points.map(p => p.kind || 'city'))].forEach(k => {
       const pts = geo.points.filter(p => (p.kind || 'city') === k);

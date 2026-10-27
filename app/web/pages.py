@@ -377,16 +377,24 @@ def corpus_delete(request: Request, corpus_id: int, with_texts: str | None = For
 
 @router.get("/dictionaries")
 def dictionaries_list(request: Request, db: Session = Depends(get_session)):
+    from app.services.dictionaries import matched_texts
+
     dicts = list(db.scalars(select(Dictionary).order_by(Dictionary.id)))
     counts = dict(db.execute(select(Hit.dictionary_id, func.count()).group_by(Hit.dictionary_id)).all())
-    return render(request, "dictionaries.html", dictionaries=dicts, counts=counts)
+    corpora = list(db.scalars(select(Corpus).order_by(Corpus.name)))
+    names = {c.id: c.name for c in corpora}
+    coverage = {d.id: matched_texts(db, d) for d in dicts}
+    scopes = {d.id: [names[c] for c in scope_corpora(d) if c in names] for d in dicts}
+    return render(request, "dictionaries.html", dictionaries=dicts, counts=counts, coverage=coverage, scopes=scopes,
+                  all_corpora=corpora)
 
 
 @router.post("/dictionaries")
 async def dictionary_create(request: Request, name: str = Form(...), description: str = Form(""),
                             words: str = Form(""), file: UploadFile | None = File(None),
                             include_participles: str | None = Form(None), include_gerunds: str | None = Form(None),
-                            suggest: str | None = Form(None), db: Session = Depends(get_session)):
+                            suggest: str | None = Form(None), scope_corpus_ids: list[str] = Form([]),
+                            db: Session = Depends(get_session)):
     items = []
     if file is not None and file.filename:
         items += parse_dictionary_file(file.filename, await file.read())
@@ -399,8 +407,10 @@ async def dictionary_create(request: Request, name: str = Form(...), description
         flash(request, "Словарь с таким названием уже есть", "error")
         return redirect("/dictionaries")
     skipped: list = []
+    # корпуса области — сразу при создании: первое сопоставление идёт только по их текстам (большой словарь × маленький корпус)
     d = create_dictionary(db, name, items, description.strip() or None,
-                          {"include_participles": bool(include_participles), "include_gerunds": bool(include_gerunds)},
+                          {"include_participles": bool(include_participles), "include_gerunds": bool(include_gerunds),
+                           "corpus_ids": sorted({int(c) for c in scope_corpus_ids if c.isdigit()})},
                           skipped=skipped)
     db.commit()
     flash(request, f"Словарь создан: {len(d.entries)} слов. Проверьте разборы неоднозначных слов (подсвечены)."
@@ -443,7 +453,9 @@ def dictionary_detail(request: Request, dict_id: int, db: Session = Depends(get_
 
     no_category = sum(1 for e in d.entries if not e.category)
     dup_groups = duplicate_groups(d)
-    return render(request, "dictionary_detail.html", d=d, hits=hits, entries=entries, sort=sort, DICT_SORTS=DICT_SORTS, in_names=in_names, opt_counts=opt_counts, pending=pending, stale=stale,
+    from app.services.dictionaries import matched_texts
+
+    return render(request, "dictionary_detail.html", d=d, hits=hits, coverage=matched_texts(db, d), entries=entries, sort=sort, DICT_SORTS=DICT_SORTS, in_names=in_names, opt_counts=opt_counts, pending=pending, stale=stale,
                   no_category=no_category, has_categories=no_category < len(d.entries), dup_groups=dup_groups,
                   no_cats=bool((d.settings or {}).get("no_categories")),
                   all_corpora=list(db.scalars(select(Corpus).order_by(Corpus.name))), scope=set(scope_corpora(d)),
@@ -683,12 +695,27 @@ def dictionary_scope_add(request: Request, dict_id: int, corpus_id: str = Form("
 
 
 @router.post("/dictionaries/{dict_id}/rematch")
-def dictionary_rematch(request: Request, dict_id: int, db: Session = Depends(get_session)):
+def dictionary_rematch(request: Request, dict_id: int, corpus_id: str = Form(""), db: Session = Depends(get_session)):
     d = db.get(Dictionary, dict_id)
     if d is None:
         raise HTTPException(404)
     from app.services.dictionaries import clear_categories, no_categories
 
+    cid = _int(corpus_id)
+    if cid:  # пересчёт только текстов одного корпуса — остальные вхождения словаря не трогаются
+        from app.services.dictionaries import scope_text_ids
+
+        c = db.get(Corpus, cid)
+        scope = scope_text_ids(db, d)
+        ids = sorted(t.id for t in (c.texts if c else []) if t.status == "ready" and (scope is None or t.id in scope))
+        if not ids:
+            flash(request, f"В корпусе «{c.name if c else cid}» нет готовых текстов из области словаря"
+                  + (" — добавьте корпус в «Сопоставлять с»" if c and scope is not None and c.texts else ""), "error")
+            return redirect(f"/dictionaries/{dict_id}")
+        enqueue(db, "match", {"dictionary_id": d.id, "text_ids": ids}, title=f"Пересчёт словаря «{d.name}» × корпус «{c.name}» ({len(ids)})")
+        db.commit()
+        flash(request, f"Пересчёт по корпусу «{c.name}» ({len(ids)} текстов) поставлен в очередь", "success")
+        return redirect(f"/dictionaries/{dict_id}")
     cleared = clear_categories(d) if no_categories(d) else 0  # «без категорий»: старые названия категорий не остаются
     enqueue(db, "match", {"dictionary_id": d.id}, title=f"Пересчёт словаря «{d.name}»")
     db.commit()
@@ -865,7 +892,9 @@ def _overview_context(db: Session, request: Request, dict_id: int, text_ids: lis
         entry_ids = [r["entry_id"] for r in A.frequency(db, dict_id, text_ids)["rows"] if r["count"]][:5]
     top = None if all_groups or request.query_params.get("gtop") == "all" else (_int(request.query_params.get("gtop")) or A.GROUPS_TOP)
     ov = A.overview(db, dict_id, text_ids, entry_ids, p["dim"], p["step"], by=by, groups_top=top)
-    return {"ov": ov, "ov_params": p, "ov_entry_ids": entry_ids, "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
+    # распределение по текстам (точка — текст) — только для страницы нового интерфейса, не для выгрузки
+    spread = None if all_groups or ui_mode(request) != "v2" else A.by_text(db, dict_id, text_ids, entry_ids, p["dim"], p["step"], by=by)
+    return {"ov": ov, "spread": spread, "ov_params": p, "ov_entry_ids": entry_ids, "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
 
 
 def _report_context(db: Session, request: Request, dict_id: int, sel) -> dict:

@@ -61,7 +61,7 @@ window.QV2 = (function () {
   // «Обзор»: группы × слова. До 6 групп — точки Кливленда (цвет — группа, линия от минимума к максимуму);
   // больше 6 — полоса точек (beeswarm-подобная: точка — группа, ромб — медиана); периоды — линии (прежний drawGroups).
   function groups(id, ov, metric, xtitle, log) {
-    if (ov.dim === 'period') return drawGroups(id, ov, metric, xtitle, {}, { log });
+    if (ov.dim === 'period') return ov.words.length > 1 && !log ? multiples(id, ov, metric, xtitle) : drawGroups(id, ov, metric, xtitle, {}, { log });
     const words = ov.words.slice(0, 25), G = ov.groups, many = G.length > 6;
     const y = words.map(w => w.word);
     const h = height(id, Math.max(260, 70 + (many ? 34 : 28) * words.length));
@@ -166,5 +166,88 @@ window.QV2 = (function () {
         legend: { orientation: 'h', x: 0, y: 1.08 }, margin: { l: 60, r: 20, t: 30, b: 60 } });
   }
 
-  return { cat, catIndex, lollipop, treemap, groups, devHeat, scatterCompare, bars100, lengthLines };
+  // Распределение по текстам: точка — текст, ящик — группа (автор, жанр, период); верхняя строка — все тексты.
+  // Видно, держится ли частота на одном тексте или ровная, и чем группы отличаются по разбросу, а не только по сумме.
+  function spread(id, sp, k, xtitle, log) {
+    const s = sp.series[k];
+    if (!s) return;
+    const groups = [...new Set(sp.texts.map(t => t.group))];
+    const med = g => { const v = sp.texts.map((t, i) => t.group === g ? s.ipm[i] : null).filter(x => x !== null).sort((a, b) => a - b); return v[Math.floor(v.length / 2)] || 0; };
+    groups.sort((a, b) => med(b) - med(a));
+    const ALL = 'все тексты (' + sp.texts.length + ')';
+    const rows = [ALL, ...groups];
+    const mk = (name, idx, color) => ({ type: 'box', orientation: 'h', name, y: idx.map(() => name), x: idx.map(i => s.ipm[i]),
+      boxpoints: 'all', jitter: 0.6, pointpos: 0, fillcolor: 'rgba(0,0,0,0)', line: { color: v('--text-muted'), width: 1 },
+      marker: { color, size: 6, opacity: 0.7 }, text: idx.map(i => `${sp.texts[i].label}<br>${s.count[i]} вхожд., ${fmt(s.ipm[i])} ipm`),
+      hoveron: 'points', hovertemplate: '%{text}<extra></extra>', showlegend: false });
+    const all = sp.texts.map((_, i) => i);
+    const traces = [mk(ALL, all, v('--cat-2')), ...groups.map(g => mk(g, all.filter(i => sp.texts[i].group === g), v('--cat-1')))];
+    drawChart(id, traces, { height: height(id, Math.max(240, 80 + 42 * rows.length)),
+      xaxis: { title: { text: xtitle }, type: log ? 'log' : 'linear', rangemode: 'tozero' },
+      yaxis: { categoryorder: 'array', categoryarray: rows.slice().reverse(), automargin: true, tickfont: { size: 11 } },
+      margin: { l: 20, r: 20, t: 10, b: 44 } });
+  }
+
+  // Время маленькими графиками: по графику на слово (категорию), общая ось лет, у каждого своя шкала —
+  // видна форма изменения, а не только самые частые слова. Пунктир — среднее по периодам.
+  function multiples(id, ov, metric, ytitle) {
+    const keep = ov.groups.map((g, i) => g.label === 'без даты' ? -1 : i).filter(i => i >= 0);  // тексты без года — не на оси лет
+    const words = ov.words.slice(0, 12), x = keep.map(i => ov.groups[i].label);
+    const cols = words.length <= 4 ? Math.min(2, words.length) : 3, rows = Math.ceil(words.length / cols);
+    const traces = [], ann = [], layout = { grid: { rows, columns: cols, pattern: 'independent', xgap: 0.12, ygap: 0.3 }, showlegend: false };
+    words.forEach((w, k) => {
+      const ax = k ? String(k + 1) : '', vals = keep.map(i => w[metric][i] || 0), mean = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
+      traces.push({ type: 'scatter', mode: 'lines+markers', x, y: vals, xaxis: 'x' + ax, yaxis: 'y' + ax, line: { color: cat(k), width: 2 },
+        marker: { size: 4 }, fill: 'tozeroy', fillcolor: 'rgba(0,0,0,0.03)', hovertemplate: w.word + ' · %{x}: %{y}<extra></extra>' });
+      traces.push({ type: 'scatter', mode: 'lines', x: [x[0], x[x.length - 1]], y: [mean, mean], xaxis: 'x' + ax, yaxis: 'y' + ax,
+        line: { color: v('--inactive'), width: 1, dash: 'dot' }, hoverinfo: 'skip' });
+      // оси подграфиков (x2, y2…) не получают оформление plotLayout — задаём цвета токенов явно
+      const axis = { gridcolor: v('--grid'), linecolor: v('--border'), zerolinecolor: v('--border'), tickfont: { size: 9, color: v('--text-muted') } };
+      layout['xaxis' + ax] = Object.assign({}, axis, { tickangle: x.length > 2 ? -30 : 0, showgrid: false, automargin: true });
+      layout['yaxis' + ax] = Object.assign({}, axis, { rangemode: 'tozero', nticks: 4 });
+      ann.push({ text: '<b>' + w.word + '</b>', xref: 'x' + ax + ' domain', yref: 'y' + ax + ' domain', x: 0, y: 1.18, showarrow: false,
+        xanchor: 'left', font: { size: 12, color: v('--text') } });
+    });
+    layout.annotations = ann;
+    layout.height = height(id, 60 + rows * 210);
+    layout.margin = { l: 40, r: 10, t: 30, b: 50 };
+    drawChart(id, traces, layout);
+  }
+
+  // Полосы плотности (ridgeline) для карты текста: по полосе на слово / категорию, форма — ipm по отрезкам (каждая
+  // полоса в своём масштабе), подпись — слева. Щелчок по полосе — текст отрезка (как у тепловой карты).
+  function ridgeline(id, tm, onClick) {
+    const rows = tm.summary.concat(tm.rows), n = tm.segments, x = [...Array(n).keys()].map(k => k + 1);
+    const traces = [];
+    rows.forEach((r, i) => {
+      const base = rows.length - 1 - i, mx = Math.max(...r.ipm, 1e-9);
+      const y = r.ipm.map(v => base + 0.92 * v / mx);
+      traces.push({ type: 'scatter', mode: 'lines', x, y: x.map(() => base), line: { width: 0 }, hoverinfo: 'skip', showlegend: false });
+      traces.push({ type: 'scatter', mode: 'lines', x, y, fill: 'tonexty', line: { shape: 'spline', smoothing: 0.7, width: 1.5,
+        color: r.kind === 'word' ? cat(i - tm.summary.length) : v('--text-muted') },
+        fillcolor: r.kind === 'word' ? 'rgba(0,0,0,0.05)' : 'rgba(0,0,0,0.07)', showlegend: false,
+        customdata: r.ipm.map((v_, k) => [v_, r.count[k], tm.seg_from[k], tm.seg_to[k], r.label]),
+        hovertemplate: '%{customdata[4]} · отрезок %{x} (предл. %{customdata[2]}–%{customdata[3]})<br>%{customdata[1]} вхожд., %{customdata[0]} ipm<extra></extra>' });
+    });
+    drawChart(id, traces, { height: height(id, 70 + 46 * rows.length), hovermode: 'closest',
+      xaxis: { title: { text: 'отрезок текста (от начала к концу)' }, range: [1, n], showgrid: false },
+      yaxis: { tickvals: rows.map((_, i) => rows.length - 1 - i + 0.3), ticktext: rows.map(r => r.label), range: [-0.1, rows.length],
+               automargin: true, showgrid: false, zeroline: false, tickfont: { size: 11 } },
+      margin: { l: 20, r: 20, t: 10, b: 50 } });
+    const el = document.getElementById(id);
+    if (el && el.on && onClick) el.on('plotly_click', ev => { const k = ev.points[0].pointIndex; if (k >= 0) onClick(k); });
+  }
+
+  // Роли слова — одна полоса 100 % с подписями долей (цвета ролей из токенов).
+  function roles(id, rs) {
+    const tot = rs.reduce((a, r) => a + r.count, 0) || 1;
+    drawChart(id, rs.map(r => ({ type: 'bar', orientation: 'h', name: r.label, y: [''], x: [100 * r.count / tot],
+      text: [100 * r.count / tot >= 7 ? Math.round(100 * r.count / tot) + ' %' : ''], textposition: 'inside', insidetextanchor: 'middle',
+      textfont: { color: '#fff', size: 12 }, marker: { color: v('--r-' + r.role) || v('--inactive'), line: { color: v('--surface'), width: 1 } },
+      hovertemplate: r.label + ': ' + r.count + ' (%{x:.1f} %)<extra></extra>' })),
+      { barmode: 'stack', height: height(id, 90), showlegend: false, xaxis: { range: [0, 100], ticksuffix: ' %', showgrid: false },
+        yaxis: { visible: false }, margin: { l: 10, r: 10, t: 4, b: 26 } });  // легенда — цветные метки в таблице под полосой
+  }
+
+  return { cat, catIndex, spread, multiples, ridgeline, roles, lollipop, treemap, groups, devHeat, scatterCompare, bars100, lengthLines };
 })();

@@ -95,11 +95,35 @@ def test_analysis_tabs_v2_charts(client):
     q = f"dictionary_id={client.dict_id}&corpus_id={client.corpus_id}"
     page = client.get(f"/analysis?tab=overview&{q}").text
     assert "Анализ · корпус × словарь" in page and "/static/charts_v2.js" in page and "Отклонения от среднего" in page
+    assert "Распределение по текстам" in page and "chart-spread" in page
     for tab in ("freq", "structure", "compare"):
         page = client.get(f"/analysis?tab={tab}&{q}").text
         assert "window.QV2" in page, tab
     assert "Площадь прямоугольника" in client.get(f"/analysis?tab=freq&{q}").text  # treemap категорий
+    assert "QV2.ridgeline" in client.get(f"/analysis?tab=map&{q}").text  # полосы плотности карты текста
+    assert "role-sw" in client.get(f"/analysis?tab=profile&{q}").text  # роли — полоса 100 % с цветными метками
+    assert "multiples" in client.get("/static/charts_v2.js").text
     client.cookies.set("qv_ui", "classic")
     page = client.get(f"/analysis?tab=overview&{q}").text
     assert "charts_v2.js" not in page and "корпус × словарь" not in page and "Тепловая карта:" in page
     client.cookies.set("qv_ui", "v2")
+
+
+def test_by_text_distribution(client):
+    from app.db import SessionLocal
+    from app.models import DictionaryEntry
+    from app.services import analytics as A
+    from app.services.selection import from_params
+
+    with SessionLocal() as s:
+        ids = from_params(s, {"corpus_id": [str(client.corpus_id)]}).ids
+        e = s.query(DictionaryEntry).filter_by(dictionary_id=client.dict_id, surface="печаль").one()
+        sp = A.by_text(s, client.dict_id, ids, [e.id], "author")
+        assert sp["group_dim"] == "author" and len(sp["texts"]) == 3
+        assert {t["group"] for t in sp["texts"]} == {"И. Петров", "П. Сидоров"}
+        ser = sp["series"][0]
+        assert ser["word"] == "печаль" and len(ser["ipm"]) == 3 and sum(ser["count"]) == A.frequency(s, client.dict_id, ids)["rows"][
+            [r["word"] for r in A.frequency(s, client.dict_id, ids)["rows"]].index("печаль")]["count"]
+        assert A.by_text(s, client.dict_id, ids[:2], [e.id]) is None  # меньше трёх текстов — не показываем
+        cat = A.by_text(s, client.dict_id, ids, [], "text", by="cat")
+        assert cat["group_dim"] == "author" and {x["word"] for x in cat["series"]} <= {"СВЕТЛОЕ", "ТЁМНОЕ", "МЕСТО"}

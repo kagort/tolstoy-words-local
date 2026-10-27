@@ -258,6 +258,24 @@ def scope_text_ids(session: Session, d: Dictionary) -> set[int] | None:
     return set(session.scalars(select(corpus_texts.c.text_id).where(corpus_texts.c.corpus_id.in_(cids))))
 
 
+def matched_texts(session: Session, d: Dictionary) -> dict:
+    """На скольких текстах посчитан словарь: {n — посчитано, total — текстов в области словаря, exact — точно ли}.
+
+    Точное число ведётся с версии 0.14.1 (settings["matched_texts"], обновляет matching.run_match); у словарей,
+    пересчитанных раньше, — число готовых текстов области (после полного пересчёта они все посчитаны)."""
+    from app.models import TextDoc
+
+    scope = scope_text_ids(session, d)
+    q = select(TextDoc.id).where(TextDoc.status == "ready")
+    if scope is not None:
+        q = q.where(TextDoc.id.in_(scope or [-1]))
+    ready = set(session.scalars(q))
+    st = d.settings or {}
+    if "matched_texts" in st:
+        return {"n": len(ready & set(st["matched_texts"])), "total": len(ready), "exact": True}
+    return {"n": len(ready) if d.matched_at else 0, "total": len(ready), "exact": False}
+
+
 def sync_scope(session: Session, text_ids: list[int]) -> int:
     """После изменения корпусов у текстов: тексты, вошедшие в область словаря, ставятся на сопоставление,
     вышедшие — теряют вхождения этого словаря. Возвращает число поставленных задач."""
@@ -276,6 +294,9 @@ def sync_scope(session: Session, text_ids: list[int]) -> int:
         drop = sorted(have - scope)
         if drop:
             session.execute(Hit.__table__.delete().where(Hit.dictionary_id == d.id, Hit.text_id.in_(drop)))
+            st = dict(d.settings or {})
+            if "matched_texts" in st:
+                d.settings = {**st, "matched_texts": sorted(set(st["matched_texts"]) - set(drop))}
         if add:
             enqueue(session, "match", {"dictionary_id": d.id, "text_ids": add},
                     title=f"Словарь «{d.name}» × новые тексты области ({len(add)})")

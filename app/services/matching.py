@@ -155,6 +155,10 @@ def run_match(job_id: int | None, dictionary_id: int, entry_ids: list[int] | Non
         d = s.get(Dictionary, dictionary_id)
         if d is not None:
             d.matched_at = datetime.now(timezone.utc)
+            if not entry_ids:  # какие тексты посчитаны: полный пересчёт — заново, по текстам (корпусу) — добавить к прежним
+                st = dict(d.settings or {})
+                done = set(ready_texts) | (set(st.get("matched_texts") or []) if text_ids else set())
+                d.settings = {**st, "matched_texts": sorted(done)}
             flag_name_hits(s, [dictionary_id], text_ids)  # слова внутри имён собственных не считаются
             s.commit()
     log.info("Словарь %s: найдено вхождений %s", dictionary_id, total_hits)
