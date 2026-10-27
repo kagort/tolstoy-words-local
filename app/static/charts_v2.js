@@ -166,5 +166,27 @@ window.QV2 = (function () {
         legend: { orientation: 'h', x: 0, y: 1.08 }, margin: { l: 60, r: 20, t: 30, b: 60 } });
   }
 
-  return { cat, catIndex, lollipop, treemap, groups, devHeat, scatterCompare, bars100, lengthLines };
+  // Распределение по текстам: точка — текст, ящик — группа (автор, жанр, период); верхняя строка — все тексты.
+  // Видно, держится ли частота на одном тексте или ровная, и чем группы отличаются по разбросу, а не только по сумме.
+  function spread(id, sp, k, xtitle, log) {
+    const s = sp.series[k];
+    if (!s) return;
+    const groups = [...new Set(sp.texts.map(t => t.group))];
+    const med = g => { const v = sp.texts.map((t, i) => t.group === g ? s.ipm[i] : null).filter(x => x !== null).sort((a, b) => a - b); return v[Math.floor(v.length / 2)] || 0; };
+    groups.sort((a, b) => med(b) - med(a));
+    const ALL = 'все тексты (' + sp.texts.length + ')';
+    const rows = [ALL, ...groups];
+    const mk = (name, idx, color) => ({ type: 'box', orientation: 'h', name, y: idx.map(() => name), x: idx.map(i => s.ipm[i]),
+      boxpoints: 'all', jitter: 0.6, pointpos: 0, fillcolor: 'rgba(0,0,0,0)', line: { color: v('--text-muted'), width: 1 },
+      marker: { color, size: 6, opacity: 0.7 }, text: idx.map(i => `${sp.texts[i].label}<br>${s.count[i]} вхожд., ${fmt(s.ipm[i])} ipm`),
+      hoveron: 'points', hovertemplate: '%{text}<extra></extra>', showlegend: false });
+    const all = sp.texts.map((_, i) => i);
+    const traces = [mk(ALL, all, v('--cat-2')), ...groups.map(g => mk(g, all.filter(i => sp.texts[i].group === g), v('--cat-1')))];
+    drawChart(id, traces, { height: height(id, Math.max(240, 80 + 42 * rows.length)),
+      xaxis: { title: { text: xtitle }, type: log ? 'log' : 'linear', rangemode: 'tozero' },
+      yaxis: { categoryorder: 'array', categoryarray: rows.slice().reverse(), automargin: true, tickfont: { size: 11 } },
+      margin: { l: 20, r: 20, t: 10, b: 44 } });
+  }
+
+  return { cat, catIndex, spread, lollipop, treemap, groups, devHeat, scatterCompare, bars100, lengthLines };
 })();

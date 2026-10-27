@@ -639,6 +639,59 @@ def overview(session: Session, dictionary_id: int, text_ids: list[int], entry_id
             "corpus_words": sum(g["n_words"] for g in groups), "n_texts": sum(g["n_texts"] for g in groups)}
 
 
+def by_text(session: Session, dictionary_id: int, text_ids: list[int], entry_ids: list[int], dim: str = "author",
+            step: int = 10, by: str = "word", max_texts: int = 2000) -> dict | None:
+    """Частота слов (или категорий) в каждом тексте выборки — для «полосы точек» (точка — текст) с ящиками по группам.
+
+    Группы — по dim (автор, жанр, тип, период); при dim = "text" — по автору. Тексты без вхождений — с нулём: они тоже
+    часть распределения. Возвращает None, если текстов меньше 3 или больше max_texts.
+    """
+    ids = list(text_ids or [])
+    if not (3 <= len(ids) <= max_texts) or not entry_ids and by != "cat":
+        return None
+    gdim = "author" if dim == "text" else (dim if dim in DIMENSIONS else "author")
+    gkey = _group_expr(gdim, step).label("g")
+    meta = session.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.year_from, TextDoc.n_words, TextDoc.meta, gkey)
+                           .where(TextDoc.id.in_(ids)).order_by(TextDoc.id)).all()
+    from app.services.labels import TITLE_MAX, clip, short_author, text_labels
+    from app.web.deps import SOURCE_TYPES
+
+    def glabel(g):
+        if gdim == "period":
+            return _period_label(int(g) if g is not None else NO_DATE, step)
+        if gdim == "source_type":
+            return SOURCE_TYPES.get(g, g)
+        if gdim == "author":
+            return short_author(g) or g
+        return clip(g, TITLE_MAX)
+
+    texts = [{"id": t.id, "label": text_labels(t.title, t.author, t.year_from, t.meta)[0],
+              "full": text_labels(t.title, t.author, t.year_from, t.meta)[1], "group": glabel(t.g), "n_words": t.n_words or 0}
+             for t in meta]
+    pos = {t["id"]: k for k, t in enumerate(texts)}
+    base = [Hit.dictionary_id == dictionary_id, Hit.text_id.in_(ids), VALID]
+    if by == "cat":
+        item = func.coalesce(func.nullif(DictionaryEntry.category, ""), NO_CATEGORY)
+        scope = [Hit.entry_id.in_(entry_ids)] if entry_ids else []
+        ranked = session.execute(select(item, TOKENS).select_from(Hit).join(DictionaryEntry, DictionaryEntry.id == Hit.entry_id)
+                                 .where(*base, *scope).group_by(item).order_by(TOKENS.desc())).all()
+        items = [(c, c) for c, _ in ranked][: len(entry_ids) if entry_ids else 6]
+        scope = scope + [item.in_([c for c, _ in items] or ["-"])]
+    else:
+        item = Hit.entry_id
+        surf = dict(session.execute(select(DictionaryEntry.id, DictionaryEntry.surface).where(DictionaryEntry.id.in_(entry_ids))).all())
+        items = [(e, surf[e]) for e in entry_ids if e in surf]
+        scope = [Hit.entry_id.in_([e for e, _ in items] or [-1])]
+    counts: dict = defaultdict(lambda: [0] * len(texts))
+    for it, tid, n in session.execute(select(item, Hit.text_id, TOKENS).select_from(Hit)
+                                      .join(DictionaryEntry, DictionaryEntry.id == Hit.entry_id)
+                                      .where(*base, *scope).group_by(item, Hit.text_id)):
+        counts[it][pos[tid]] = n
+    series = [{"word": label, "count": counts[it], "ipm": [round(ipm(c, t["n_words"] or 1), 2) for c, t in zip(counts[it], texts)]}
+              for it, label in items]
+    return {"group_dim": gdim, "group_label": DIMENSIONS[gdim], "texts": texts, "series": series}
+
+
 # ------------------------------------------------------------------ частоты по категориям словаря
 
 NO_CATEGORY = "без категории"

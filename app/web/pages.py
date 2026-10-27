@@ -865,7 +865,9 @@ def _overview_context(db: Session, request: Request, dict_id: int, text_ids: lis
         entry_ids = [r["entry_id"] for r in A.frequency(db, dict_id, text_ids)["rows"] if r["count"]][:5]
     top = None if all_groups or request.query_params.get("gtop") == "all" else (_int(request.query_params.get("gtop")) or A.GROUPS_TOP)
     ov = A.overview(db, dict_id, text_ids, entry_ids, p["dim"], p["step"], by=by, groups_top=top)
-    return {"ov": ov, "ov_params": p, "ov_entry_ids": entry_ids, "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
+    # распределение по текстам (точка — текст) — только для страницы нового интерфейса, не для выгрузки
+    spread = None if all_groups or ui_mode(request) != "v2" else A.by_text(db, dict_id, text_ids, entry_ids, p["dim"], p["step"], by=by)
+    return {"ov": ov, "spread": spread, "ov_params": p, "ov_entry_ids": entry_ids, "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
 
 
 def _report_context(db: Session, request: Request, dict_id: int, sel) -> dict:
