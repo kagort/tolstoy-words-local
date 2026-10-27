@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import math
+import re
 import statistics
 from collections import Counter, defaultdict
 
@@ -21,6 +22,7 @@ from app.models import Dictionary, DictionaryEntry, Hit, SentenceRow, TextDoc
 from app.services import analytics as A
 from app.services.stats import SIGNIFICANCE_LL, log_likelihood, log_ratio
 
+INITIAL_SPACE = re.compile(r"(\b[A-ZА-ЯЁ]\.) (?=[A-ZА-ЯЁ])")  # пробел после инициала перед следующим инициалом или фамилией
 MAX_CAT_COLORS = 8  # категорий в цвете; остальные — серым (DESIGN_TOKENS.md, раздел 2)
 ROLE_ORDER = ["subject", "predicate", "object", "attribute", "adverbial", "other"]
 ROLE_NAMES = {"subject": "подлежащее", "predicate": "сказуемое", "object": "дополнение", "attribute": "определение",
@@ -78,6 +80,9 @@ def build_v2(session: Session, sel, dictionary_id: int | None) -> dict:
     v2["names"] = _names(session, d.id, ids, found, cat_of, has_cats, cat_order, cat_color)
     v2["quality"] = _quality(session, d, ids, rows)
     v2["quotes"] = _quotes(session, d.id, ids, found[:12])
+    for sec in v2.values():  # «Л. Н. Толстой» во фразах-выводах не разрывается переносом строки
+        if isinstance(sec, dict) and sec.get("say"):
+            sec["say"] = INITIAL_SPACE.sub("\\1\u00a0", sec["say"])
     base["v2"] = v2
     return base
 
