@@ -375,7 +375,8 @@ async function showMarked(url, title) {
   const list = data.sentences || [];
   for (const s of list) {
     const p = document.createElement('div'); p.className = 'example';
-    const a = document.createElement('a'); a.href = `/sentences/${s.id}`; a.className = 'muted small'; a.textContent = `🌳 ${s.id} `; p.appendChild(a);
+    const a = document.createElement('a'); a.href = `/sentences/${s.id}`; a.className = 'muted small'; a.title = 'разбор предложения';
+    a.innerHTML = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v5M5 14v-2a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2M12 10v4M4 14h2v4H4zM11 14h2v4h-2zM18 14h2v4h-2zM10 3h4v3h-4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' + s.id + ' '; p.appendChild(a);
     let pos = 0;
     for (const [st, en] of s.marks || []) {
       if (st < pos) continue;

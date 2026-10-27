@@ -188,6 +188,9 @@ class Hit(Base):
     is_valid: Mapped[bool | None] = mapped_column(Boolean)
     # слово внутри имени собственного («Любовь Андреевна» для слова «любовь»): не считается, пока не отмечено ✓
     in_name: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # внутри любого имени собственного (персона, место, организация; прилагательное с заглавной не в начале предложения —
+    # «Чёрное море»): не считается, когда в анализе отмечено «Имена собственные: не учитывать» (analytics.valid)
+    in_propn: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     syntax_version: Mapped[str] = mapped_column(String(16))
 
 

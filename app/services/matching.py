@@ -215,10 +215,28 @@ def _match_entries(job_id: int | None, dictionary_id: int, entry_data: list, rea
     return total_hits
 
 
+# Вхождение внутри имени собственного (для «Имена собственные: не учитывать»): в пределах имени с вкладки «Имена» любого
+# класса (не скрытого), или само слово — прилагательное с заглавной буквы сразу после слова (не после знака препинания и
+# не в начале предложения: «в Чёрное море», «у Белого дома», если модель имён их пропустила; «: Прекрасно» — не имя).
+# Не помечаются записи словаря с частью речи PROPN или с заглавной буквы («НАТО», «Америка») — их добавляют намеренно.
+# Подставляется в UPDATE dictionary_hits h … (миграция 0010 и flag_name_hits).
+PROPN_SQL = """(
+    NOT EXISTS (SELECT 1 FROM dictionary_entries de WHERE de.id = h.entry_id
+                AND (de.upos = 'PROPN' OR substr(de.surface, 1, 1) <> lower(substr(de.surface, 1, 1)))) AND (
+      EXISTS (SELECT 1 FROM entities e JOIN tokens t ON t.id = h.token_id
+              LEFT JOIN entity_overrides o ON o.norm = e.norm
+              WHERE e.sentence_id = h.sentence_id AND t.start_char >= e.start_char AND t.end_char <= e.end_char
+                AND coalesce(o.hidden, false) = false)
+      OR EXISTS (SELECT 1 FROM tokens t WHERE t.id = h.token_id AND t.upos = 'ADJ'
+                 AND substr(t.form, 1, 1) <> lower(substr(t.form, 1, 1))
+                 AND EXISTS (SELECT 1 FROM tokens p WHERE p.sentence_id = t.sentence_id AND p.idx = t.idx - 1
+                             AND p.upos <> 'PUNCT'))))"""
+
+
 def flag_name_hits(session: Session, dictionary_ids: list[int] | None = None, text_ids: list[int] | None = None) -> int:
     """Помечает вхождения слов словаря, стоящие внутри имени персоны (вкладка «Имена»): «Любовь» в «Любовь
     Андреевна» для слова «любовь», «Вера» (Вера Ростова) для слова «вера». Такие вхождения не считаются
-    (analytics.VALID), пока их не отметят ✓ вручную. Места и организации («Америка», «НАТО») и записи словаря с частью
+    (analytics.valid()), пока их не отметят ✓ вручную. Места и организации («Америка», «НАТО») и записи словаря с частью
     речи PROPN не помечаются — их в словарь добавляют намеренно. Настройки словаря: count_names — считать и внутри
     имён; names_ok_entries — слова-исключения.
 
@@ -234,6 +252,8 @@ def flag_name_hits(session: Session, dictionary_ids: list[int] | None = None, te
         params = {"d": d.id, "ok": [int(x) for x in st.get("names_ok_entries", [])] or [-1],
                   "tids": text_ids or [-1], "all_texts": not text_ids}
         scope = "h.dictionary_id = :d AND (:all_texts OR h.text_id = ANY(:tids))"
+        # внутри любого имени собственного — для «Имена собственные: не учитывать» (не зависит от count_names)
+        session.execute(sql(f"UPDATE dictionary_hits h SET in_propn = {PROPN_SQL} WHERE {scope}"), params)
         if st.get("count_names"):
             session.execute(sql(f"UPDATE dictionary_hits h SET in_name = false WHERE {scope} AND h.in_name"), params)
             continue

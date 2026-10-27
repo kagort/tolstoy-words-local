@@ -435,7 +435,7 @@ def export_textcmp(fmt: str, request: Request, db: Session = Depends(get_session
 def export_hits_conllu(request: Request, db: Session = Depends(get_session)):
     qp = request.query_params
     dict_id, ids = _ctx(db, request)
-    q = select(Hit.sentence_id).where(Hit.dictionary_id == dict_id, Hit.text_id.in_(ids or [-1]), A.VALID).distinct()
+    q = select(Hit.sentence_id).where(Hit.dictionary_id == dict_id, Hit.text_id.in_(ids or [-1]), A.valid()).distinct()
     if _int(qp.get("entry_id")):
         q = q.where(Hit.entry_id == _int(qp.get("entry_id")))
     elif _words(db, request):

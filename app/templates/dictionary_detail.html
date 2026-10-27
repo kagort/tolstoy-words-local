@@ -5,9 +5,9 @@
 <h1>Словарь «{{ d.name }}»</h1>
 {% if scope %}<p class="muted">Сопоставляется только с корпусами: {% for c in all_corpora if c.id in scope %}{{ c.name }}{% if not loop.last %}, {% endif %}{% endfor %} (настройки ниже).</p>{% endif %}
 <div class="row" style="margin-bottom:10px">
-  <a class="btn secondary shrink" href="/dictionaries/{{ d.id }}/cognates" title="однокоренные слова из текстов: «милосердие» → «милосердный», «немилосердно»">🌱 Однокоренные из корпуса</a>
-  {% if not no_cats %}<a class="btn {{ '' if not has_categories else 'secondary' }} shrink" href="/dictionaries/{{ d.id }}/categories" title="сгруппировать слова без категории по смыслу (векторы navec)">🗂 Предложить категории{% if no_category %} ({{ no_category }} без категории){% endif %}</a>
-  {% else %}<a class="btn secondary shrink" href="/dictionaries/{{ d.id }}/categories?all=1" title="разбить все слова на категории по смыслу; после применения режим «без категорий» выключится">🗂 Предложить категории</a>
+  <a class="btn secondary shrink" href="/dictionaries/{{ d.id }}/cognates" title="однокоренные слова из текстов: «милосердие» → «милосердный», «немилосердно»">{{ icon('sprout') }}Однокоренные из корпуса</a>
+  {% if not no_cats %}<a class="btn {{ '' if not has_categories else 'secondary' }} shrink" href="/dictionaries/{{ d.id }}/categories" title="сгруппировать слова без категории по смыслу (векторы navec)">{{ icon('folder') }}Предложить категории{% if no_category %} ({{ no_category }} без категории){% endif %}</a>
+  {% else %}<a class="btn secondary shrink" href="/dictionaries/{{ d.id }}/categories?all=1" title="разбить все слова на категории по смыслу; после применения режим «без категорий» выключится">{{ icon('folder') }}Предложить категории</a>
   <span class="shrink muted small">Сейчас словарь без категорий (настройки ниже)</span>{% endif %}
 </div>
 {% if dup_groups %}
@@ -22,17 +22,31 @@
 {% if pending %}<div class="flash info">Идёт пересчёт вхождений (задач в очереди: {{ pending }}). Числа обновятся после завершения — см. <a href="/jobs">Задачи</a>.</div>{% endif %}
 
 <div class="panel table-scroll">
+  {% set showq = '&show=unverified' if show == 'unverified' else '' %}
   <div class="row" style="align-items:baseline">
     <h2 style="margin-top:0">Слова и их разбор <span class="muted small">— {{ entries|length }}</span></h2>
-    <div class="shrink small">Порядок: {% for k, v in DICT_SORTS.items() %}{% if k == sort %}<strong>{{ v }}</strong>{% else %}<a href="/dictionaries/{{ d.id }}{{ '' if k == 'hits' else '?sort=' ~ k }}">{{ v }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+    <div class="shrink small seg-links">Показать:
+      {% if show == 'all' %}<strong>все ({{ n_all }})</strong>{% else %}<a href="/dictionaries/{{ d.id }}?sort={{ sort }}">все ({{ n_all }})</a>{% endif %} ·
+      {% if show == 'unverified' %}<strong>непроверенные ({{ n_unverified }})</strong>{% elif n_unverified %}<a href="/dictionaries/{{ d.id }}?sort={{ sort }}&show=unverified" title="неоднозначные слова, разбор которых ещё не подтверждён: проверьте вариант и нажмите «Сохранить»">непроверенные ({{ n_unverified }})</a>{% else %}<span class="muted">непроверенных нет</span>{% endif %}</div>
+    <div class="shrink small">Порядок: {% for k, v in DICT_SORTS.items() %}{% if k == sort %}<strong>{{ v }}</strong>{% else %}<a href="/dictionaries/{{ d.id }}?sort={{ k }}{{ showq }}">{{ v }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>
   </div>
+  {% if show == 'unverified' %}<p class="flash info">Показаны только непроверенные неоднозначные слова. Выберите верный разбор и нажмите «Сохранить» — слово станет проверенным и уйдёт из этого списка.</p>{% endif %}
+  <form method="post" action="/dictionaries/{{ d.id }}/assign-category" id="catform" class="row cat-bar" style="align-items:flex-end">
+    <input type="hidden" name="back" value="/dictionaries/{{ d.id }}?sort={{ sort }}{{ showq }}">
+    <div><label>{{ icon('tag') }}Категория для отмеченных слов <span class="muted small">(новое название — новая категория; пусто — убрать категорию)</span></label>
+      <input type="text" name="category" list="cat-list" placeholder="например: ЗАПАХИ ЦВЕТОВ">
+      <datalist id="cat-list">{% for c in categories %}<option value="{{ c }}">{% endfor %}</datalist></div>
+    <div class="shrink"><button type="submit">Создать категорию</button></div>
+    <div class="shrink small muted" id="cat-count">отмечено: 0</div>
+  </form>
   <p class="help">Система определяет лемму и часть речи по словарю pymorphy3. <strong>Подсвеченные</strong> слова неоднозначны — проверьте вариант
     (например, «духи» — это <em>духи</em> (парфюм) или <em>дух</em>?). В скобках — сколько токенов с такой леммой уже есть в базе.
     Режим «по формам» ищет перечисленные словоформы, а не лемму: полезно, если парсер лемматизирует слово иначе.</p>
   <table>
-    <tr><th>Слово</th><th>Разбор (лемма · часть речи)</th><th>Режим</th>{% if not no_cats %}<th>Категория</th>{% endif %}<th class="num">Вхождений{{ ' ↓' if sort == 'hits' }}</th><th></th></tr>
+    <tr><th><input type="checkbox" title="отметить все слова в таблице" onchange="document.querySelectorAll('.cat-check').forEach(c => c.checked = this.checked); catCount()"></th><th>Слово</th><th>Разбор (лемма · часть речи)</th><th>Режим</th>{% if not no_cats %}<th>Категория</th>{% endif %}<th class="num">Вхождений{{ ' ↓' if sort == 'hits' }}</th><th></th></tr>
     {% for e in entries %}
     <tr id="e{{ e.id }}" class="{{ 'ambiguous' if e.ambiguous and not e.verified }}">
+      <td><input type="checkbox" class="cat-check" form="catform" name="entry_ids" value="{{ e.id }}" onchange="catCount()"></td>
       <td><form id="f{{ e.id }}" method="post" action="/dictionaries/{{ d.id }}/entries/{{ e.id }}"></form><strong>{{ e.surface }}</strong>{% if e.phrase %} <span class="badge" title="словосочетание: ищется по главному слову «{{ e.lemma }}», остальные слова проверяются рядом">словосочетание</span>{% endif %}{% if e.verified %} <span class="badge ready" title="проверено">✓</span>{% elif e.ambiguous %} <span class="badge warn">проверить</span>{% endif %}</td>
       <td>
         <select name="option" form="f{{ e.id }}">
@@ -103,4 +117,7 @@
     </p>
   </div>
 </div>
+<script>
+function catCount() { const el = document.getElementById('cat-count'); if (el) el.textContent = 'отмечено: ' + document.querySelectorAll('.cat-check:checked').length; }
+</script>
 {% endblock %}

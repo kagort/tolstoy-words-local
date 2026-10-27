@@ -56,7 +56,7 @@
   {% for c in senses.clusters %}
   <div class="panel word-card"><h4 style="margin:0 0 6px">Группа {{ c.id }} <span class="muted small">— {{ c.size }} вхождений ({{ c.share }} %)</span></h4>
     <div>{% for w in c.words %}<span class="chip">{{ w }}</span>{% endfor %}</div>
-    <div class="examples">{% for ex in c.examples %}<div class="example"><a class="muted small" href="/sentences/{{ ex.sentence_id }}">🌳 {{ ex.sentence_id }}</a> {{ ex.text }}</div>{% endfor %}</div>
+    <div class="examples">{% for ex in c.examples %}<div class="example"><a class="muted small" href="/sentences/{{ ex.sentence_id }}">{{ icon('tree', 'разбор') }}{{ ex.sentence_id }}</a> {{ ex.text }}</div>{% endfor %}</div>
   </div>
   {% endfor %}
 </div>

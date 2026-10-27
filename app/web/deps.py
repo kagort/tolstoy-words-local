@@ -38,11 +38,35 @@ def _asset_version() -> str:
     import hashlib
 
     h = hashlib.md5(__version__.encode())
-    for name in ("app.js", "app.css", "v2.css", "fonts.css"):
+    for name in ("app.js", "app.css", "v2.css", "fonts.css", "charts_v2.js", "dash_v2.js"):
         f = TEMPLATES_DIR.parent / "static" / name
         if f.exists():
             h.update(f.read_bytes())
     return h.hexdigest()[:10]
+
+
+# Линейные значки для кнопок и ссылок (вместо эмодзи): тот же стиль, что у значков бокового меню (base_v2.html).
+ICONS = {
+    "tree": "M12 3v5M5 14v-2a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2M12 10v4M4 14h2v4H4zM11 14h2v4h-2zM18 14h2v4h-2zM10 3h4v3h-4z",
+    "trash": "M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3",
+    "chart": "M4 20V10M10 20V4M16 20v-7M22 20H2",
+    "report": "M9 3h6v3H9zM7 4.5H5V21h14V4.5h-2M8 11h8M8 15h6",
+    "book": "M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zM5 17a3 3 0 0 1 3-3h11",
+    "folder": "M3 6h6l2 2h10v11H3zM3 10h18",
+    "download": "M12 4v11M7 10l5 5 5-5M5 20h14",
+    "print": "M7 9V3h10v6M7 17H4v-7h16v7h-3M7 14h10v7H7z",
+    "sprout": "M12 21v-9M12 12c0-4 3-6.5 7.5-6.5 0 4-3 6.5-7.5 6.5zM12 14.5c0-3-2.2-5.5-6.5-5.5 0 3 2.2 5.5 6.5 5.5z",
+    "tag": "M3 12V4h8l10 10-8 8zM7.5 8.5h.01",
+    "filter": "M3 5h18l-7 8v6l-4 2v-8z",
+}
+
+
+def icon(name: str, title: str = "") -> Markup:
+    """SVG-значок 1em в цвет текста; title — подсказка (иначе значок скрыт от экранного чтения)."""
+    d = ICONS.get(name, "")
+    a11y = f'role="img" aria-label="{title}"' if title else 'aria-hidden="true"'
+    return Markup(f'<svg class="ic" viewBox="0 0 24 24" {a11y}><path d="{d}" fill="none" stroke="currentColor" '
+                  'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>')
 
 
 UI_MODES = ("v2", "classic")
@@ -59,6 +83,7 @@ def ui_mode(request: Request | None) -> str:
 templates.env.globals.update(
     asset_version=_asset_version(),
     ui_mode=ui_mode,
+    icon=icon,
     site_title=settings.site_title,
     app_version=__version__,
     ROLE_LABELS=ROLE_LABELS,

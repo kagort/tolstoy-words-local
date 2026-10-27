@@ -12,7 +12,7 @@
 {% endmacro %}
 {% block content %}
 <p><a href="/texts/{{ doc.id }}">← Карточка текста</a></p>
-<h1>📊 Статистический портрет: «{{ doc.title }}»</h1>
+<h1>Статистический портрет: «{{ doc.title }}»</h1>
 <p class="muted">{{ doc.author or '' }}{{ ', ' ~ doc.years if doc.years }}{{ ', ' ~ doc.genre if doc.genre }} · конвейер: {{ doc.pipeline_version }}</p>
 
 {% if not st %}

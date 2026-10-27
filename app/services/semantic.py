@@ -174,7 +174,7 @@ def senses(session: Session, entry_id: int, text_ids: list[int], k: int = 3, win
            stop: frozenset[str] = frozenset(), max_hits: int = 3000) -> dict:
     """Кластеры контекстов вхождений: контекст — средний вектор знаменательных слов в окне ±window."""
     hits = session.execute(select(Hit.id, Hit.sentence_id, Hit.token_idx)
-                           .where(Hit.entry_id == entry_id, Hit.text_id.in_(text_ids or [-1]), A.VALID)
+                           .where(Hit.entry_id == entry_id, Hit.text_id.in_(text_ids or [-1]), A.valid())
                            .order_by(Hit.id)).all()
     if len(hits) > max_hits:
         hits = random.Random(5).sample(hits, max_hits)
