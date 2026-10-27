@@ -79,3 +79,22 @@ def test_manual_ok_counts_even_with_noprop(client):
         h.is_valid = True
         s.commit()
     assert _count(True, client.dict_id, client.corpus_id) == 4
+
+
+def test_character_with_some_place_mentions_not_in_places(client):
+    """Персонаж, у которого модель приняла часть упоминаний за место, не попадает в «места × слова словаря»."""
+    from app.db import SessionLocal
+    from app.models import Entity, EntityAlias, SentenceRow
+    from app.services.entities import entity_dictionary, entity_index
+
+    with SessionLocal() as s:
+        sents = s.query(SentenceRow).order_by(SentenceRow.idx).all()
+        tid = sents[0].text_id
+        for sent, etype, norm in ((sents[1], "PER", "Клим Самгин"), (sents[2], "PER", "Клим Самгин"), (sents[1], "LOC", "Самгин")):
+            s.add(Entity(text_id=tid, sentence_id=sent.id, etype=etype, start_char=0, end_char=1, surface=norm, norm=norm))
+        s.add(EntityAlias(norm="Самгин", canonical="Клим Самгин"))  # вариант объединён с персонажем
+        s.commit()
+        loc = entity_dictionary(s, [tid], client.dict_id, etype="LOC")
+        per = entity_dictionary(s, [tid], client.dict_id, etype="PER")
+        assert "Клим Самгин" not in loc["names"] and "Клим Самгин" in per["names"]
+        assert "Клим Самгин" not in [i["name"] for i in entity_index(s, [tid], "LOC")["items"]]
