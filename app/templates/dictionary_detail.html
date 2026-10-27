@@ -89,8 +89,15 @@
       <p><button type="submit">Сохранить и пересчитать</button></p>
     </form>
     {% if stale and not pending %}<p class="flash info">Вхождения ({{ stale }}) найдены прежней версией синтаксического разбора: в профиле слова не хватает связей (у глаголов — подлежащих, дополнений и обстоятельств, у прилагательных — определяемых слов). Нажмите «Пересчитать вхождения».</p>{% endif %}
+    <p class="small">Посчитан на <strong>{{ coverage.n }}</strong> {{ 'тексте' if coverage.n % 10 == 1 and coverage.n % 100 != 11 else 'текстах' }} из {{ coverage.total }}
+      ({{ 'корпуса: ' ~ (all_corpora|selectattr('id', 'in', scope)|map(attribute='name')|join(', ')) if scope else 'все тексты' }}){% if not coverage.exact %} <span class="muted">— оценка: словарь пересчитан до версии 0.14.1</span>{% endif %}.</p>
+    <form method="post" action="/dictionaries/{{ d.id }}/rematch" class="row" style="align-items:flex-end">
+      <div><label>Пересчитать только корпус <span class="muted small">(остальные вхождения не меняются)</span></label>
+        <select name="corpus_id">{% for c in all_corpora if not scope or c.id in scope %}<option value="{{ c.id }}">{{ c.name }} ({{ c.texts|length }})</option>{% endfor %}</select></div>
+      <div class="shrink"><button class="secondary" type="submit">Пересчитать корпус</button></div>
+    </form>
     <p class="row">
-      <form class="inline shrink" method="post" action="/dictionaries/{{ d.id }}/rematch"><button class="secondary" type="submit">Пересчитать вхождения</button></form>
+      <form class="inline shrink" method="post" action="/dictionaries/{{ d.id }}/rematch"><button class="secondary" type="submit" title="все тексты области словаря">Пересчитать вхождения{{ ' (все тексты)' if not scope else '' }}</button></form>
       <a class="btn secondary shrink" href="/export/dictionary/{{ d.id }}.csv">Скачать словарь (CSV)</a>
       <form class="inline shrink" method="post" action="/dictionaries/{{ d.id }}/delete" onsubmit="return confirm('Удалить словарь целиком?')"><button class="danger" type="submit">Удалить словарь</button></form>
     </p>
