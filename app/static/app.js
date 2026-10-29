@@ -53,7 +53,7 @@ function drawChart(id, data, layout) {
 }
 
 // Не больше MAX_SERIES рядов на одном графике: дальше цвета неразличимы (все ряды остаются в тепловой карте и таблице).
-const MAX_SERIES = 12;
+const MAX_SERIES = 8;  // столько цветов в палитре: больше рядов — цвета повторяются
 
 // Столбцы «группа × слово (категория)» для обзора и отчёта. Подписи групп — короткие (g.label), полные — в подсказке (g.full).
 // Группировка «Текст» и больше 6 групп — горизонтальные столбцы: длинные подписи читаются без наклона.
@@ -79,6 +79,8 @@ function drawGroups(id, ov, metric, ytitle, extra, opts) {
         height: Math.max(320, 120 + labels.length * Math.max(22, 12 * words.length)), margin: { l: 20, r: 20, t: 50, b: 50 } }
     : { barmode: 'group', yaxis: Object.assign({ title: ytitle }, scale), xaxis: { automargin: true, tickangle: labels.length > 4 ? -30 : 0, tickfont: { size: 11 } },
         margin: { l: 60, r: 20, t: 50, b: 40 } };
+  // легенда — строкой над графиком (у горизонтальных столбцов справа она ложится на столбцы)
+  layout.legend = { orientation: 'h', x: 0, y: 1.02, yanchor: 'bottom' };
   if (words.length > 4) {  // много рядов — легенда под графиком, чтобы не закрывала заголовок
     layout.legend = { orientation: 'h', x: 0, y: horizontal ? -0.08 : -0.22, yanchor: 'top' };
     layout.margin = Object.assign({}, layout.margin, { b: horizontal ? 60 + 22 * Math.ceil(words.length / 4) : 110 + 22 * Math.ceil(words.length / 4) });
@@ -115,21 +117,25 @@ function similarityOrder(rows) {
 // Тепловая карта «строки × столбцы» с подписями любой длины: при длинных или многочисленных столбцах таблица
 // поворачивается (столбцы — по вертикали), высота — по числу строк, строки упорядочены по сходству.
 // rows, cols — короткие подписи; colsFull — полные (подсказка); z[row][col].
+// opts.raw — настоящие значения для подсказки, если z нормирован (той же формы, что z); opts.unit — подпись к ним.
 function drawHeat(id, rows, cols, colsFull, z, opts) {
   opts = opts || {};
   const vertical = opts.vertical !== undefined ? opts.vertical : cols.length > 6 || cols.some(c => c.length > 18);
-  let R = rows, C = cols, CF = colsFull || cols, Z = z;
+  const tr = m => cols.map((_, j) => rows.map((__, i) => m[i][j]));
+  let R = rows, C = cols, CF = colsFull || cols, Z = z, RAW = opts.raw || z;
   if (vertical) {  // транспонируем: столбцы становятся строками
-    R = cols; C = rows; Z = cols.map((_, j) => rows.map((__, i) => z[i][j]));
+    R = cols; C = rows; Z = tr(z); RAW = tr(RAW);
   }
   const ord = opts.sort === false ? [...R.keys()] : similarityOrder(Z);
   const RF = vertical ? CF : R;
-  const zz = ord.map(i => Z[i]), rr = ord.map(i => R[i]), rf = ord.map(i => RF[i]);
+  const zz = ord.map(i => Z[i]), rr = ord.map(i => R[i]), rf = ord.map(i => RF[i]), raw = ord.map(i => RAW[i]);
   const v2 = document.body && document.body.classList.contains('v2');  // новый интерфейс: шкала из токенов
+  const unit = opts.unit ? ' ' + opts.unit : '';
   const trace = { type: 'heatmap', z: zz, x: C, y: rr, colorscale: v2 ? [[0, cssVar('--surface-muted')], [1, cssVar('--cat-1')]] : 'Blues',
     reversescale: !v2, xgap: v2 ? 1 : 0, ygap: v2 ? 1 : 0,
-    customdata: vertical ? rf.map(f => C.map(() => f)) : rr.map(() => CF),
-    hovertemplate: vertical ? '%{customdata} — %{x}: %{z}<extra></extra>' : '%{y} — %{customdata}: %{z}<extra></extra>' };
+    customdata: raw.map((row, r) => row.map((v, c) => [vertical ? rf[r] : CF[c], v])),
+    hovertemplate: (vertical ? '%{customdata[0]} — %{x}' : '%{y} — %{customdata[0]}') + ': %{customdata[1]}' + unit + '<extra></extra>' };
+  if (opts.colorbar) trace.colorbar = opts.colorbar;
   const height = Math.max(200, 90 + 24 * rr.length);
   const el = document.getElementById(id);
   if (el) el.style.minHeight = height + 'px';
@@ -138,9 +144,14 @@ function drawHeat(id, rows, cols, colsFull, z, opts) {
 }
 
 // Тепловая карта «слово × группа» обзора.
-function drawGroupHeat(id, ov, metric) {
-  drawHeat(id, ov.words.map(w => w.word), ov.groups.map(g => g.label), ov.groups.map(g => g.full || g.label),
-           ov.words.map(w => w[metric]), { vertical: ov.dim === 'text' || ov.groups.length > 6, sort: ov.dim !== 'period' });
+// norm: каждое слово по своему максимуму (100 % — группа, где слово встречается чаще всего), иначе частое слово
+// («я») делает все остальные строки бледными; в подсказке — настоящие значения.
+function drawGroupHeat(id, ov, metric, norm) {
+  const raw = ov.words.map(w => w[metric]);
+  const z = norm ? raw.map(row => { const m = Math.max(...row) || 1; return row.map(v => Math.round(100 * v / m)); }) : raw;
+  drawHeat(id, ov.words.map(w => w.word), ov.groups.map(g => g.label), ov.groups.map(g => g.full || g.label), z,
+           { vertical: ov.dim === 'text' || ov.groups.length > 6, sort: ov.dim !== 'period', raw, unit: metric,
+             colorbar: norm ? { title: { text: '% от макс.<br>слова', font: { size: 10 } }, ticksuffix: '%' } : undefined });
 }
 
 async function setValid(hitId, value, btn) {

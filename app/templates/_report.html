@@ -45,10 +45,13 @@
 
 {% if rep.overviews %}
 <details class="rep-sec" {{ '' if rep_short else 'open' }}><summary><h3>2. Распределение по выборке</h3></summary>
-<div class="grid cols-2">
+{% set heat = rep.cards|length > REP_BARS_MAX %}
+<p class="help">{% if heat %}Слов много — вместо столбцов тепловая карта: строка — слово, цвет — насколько часто оно в группе по сравнению с группой, где встречается чаще всего (100 %). Наведите курсор — ipm.
+  {% else %}ipm — вхождений на миллион слов группы: так сравнимы группы разного объёма.{% endif %}</p>
+<div class="grid {{ '' if heat or rep.overviews|length == 1 else 'cols-2' }}">
   {% for dim, ov in rep.overviews.items() %}
-  <div class="panel"><h4 style="margin:0">ipm по группировке «{{ ov.dim_label }}»{% if dim == 'period' %} (шаг {{ ov.step }} лет){% endif %}</h4>
-    <div id="rep-ov-{{ dim }}" class="chart" style="min-height:320px"></div></div>
+  <div class="panel"{% if dim == 'text' %} style="grid-column:1/-1"{% endif %}><h4 style="margin:0">ipm по группировке «{{ ov.dim_label }}»{% if dim == 'period' %} (шаг {{ ov.step }} лет){% endif %}</h4>
+    <div id="rep-ov-{{ dim }}" class="chart"></div></div>
   {% endfor %}
 </div></details>
 {% endif %}

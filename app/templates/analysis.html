@@ -454,12 +454,15 @@
 {% if tab == 'report' and rep and rep.words %}
 (function () {
   const rep = {{ rep|tojson }};
-  const words = rep.cards;
+  const words = rep.cards, REP_BARS_MAX = {{ REP_BARS_MAX }};
   drawChart('rep-freq', [{ type: 'bar', x: words.map(w => w.word), y: words.map(w => w.ipm), text: words.map(w => w.count + ' вхожд.'),
     hovertemplate: '%{x}: %{y} ipm (%{text})<extra></extra>', marker: { color: cssVar('--accent') } }],
     { title: { text: 'ipm выбранных слов', font: { size: 14 } }, yaxis: { title: 'ipm' }, margin: { l: 60, r: 20, t: 40, b: 90 } });
+  // мало слов — столбцы (линии для периодов), много — тепловая карта «слово × группа»: не слипается при любом числе слов
   for (const [dim, ov] of Object.entries(rep.overviews)) {
-    drawGroups('rep-ov-' + dim, Object.assign({ dim }, ov), 'ipm', 'ipm', { legend: { orientation: 'h', y: 1.18 } });
+    const o = Object.assign({ dim }, ov);
+    if (ov.words.length > REP_BARS_MAX) drawGroupHeat('rep-ov-' + dim, o, 'ipm', true);
+    else drawGroups('rep-ov-' + dim, o, 'ipm', 'ipm');
   }
   const rm = rep.role_matrix;
   if (rm.roles.length) {
