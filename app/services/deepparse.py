@@ -90,6 +90,9 @@ def upgrade_sentences(sentence_ids: list[int], job_id: int | None = None, progre
                     for t, w in zip(toks, words):
                         tok_updates.append((t.id, w.lemma, norm(w.lemma), w.upos, format_feats(w.feats), w.head, w.deprel))
                 _apply(s, tok_updates, sent_updates)
+                from app.services.parse_edit import reapply
+
+                reapply(s, sentence_ids=[u[0] for u in sent_updates])  # ручные правки разбора — поверх нового разбора
                 s.commit()
                 done += len(sent_updates)
         if job_id:

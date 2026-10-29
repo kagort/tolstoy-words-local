@@ -223,6 +223,30 @@ class TokenRelation(Base):
     negated: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class TokenEdit(Base):
+    """Ручная правка разбора слова (часть речи, главное слово, тип связи) на странице предложения.
+
+    Привязана к тексту и номерам предложения и слова, а не к id строк: переживает точный разбор (ступень 2) и повторный
+    разбор текста — после них правка накладывается заново (parse_edit.reapply), если слово на месте (та же форма).
+    orig_* — что дал парсер (для «вернуть как было»)."""
+
+    __tablename__ = "token_edits"
+    __table_args__ = (UniqueConstraint("text_id", "sent_idx", "idx"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    text_id: Mapped[int] = mapped_column(ForeignKey("texts.id", ondelete="CASCADE"), index=True)
+    sent_idx: Mapped[int] = mapped_column(Integer)
+    idx: Mapped[int] = mapped_column(SmallInteger)
+    form: Mapped[str] = mapped_column(Text)
+    upos: Mapped[str] = mapped_column(String(8))
+    head: Mapped[int] = mapped_column(SmallInteger)
+    deprel: Mapped[str] = mapped_column(String(32))
+    orig_upos: Mapped[str] = mapped_column(String(8))
+    orig_head: Mapped[int] = mapped_column(SmallInteger)
+    orig_deprel: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class RelationOverride(Base):
     """Связь, убранная вручную на странице предложения: слова a и b не связаны (все типы связи, в обе стороны).
     Хранится по номерам слов в предложении, поэтому переживает пересчёт вхождений и точный разбор."""

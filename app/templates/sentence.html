@@ -20,6 +20,9 @@
     {% if precise_pending %}Точный разбор уже в очереди — обновите страницу через минуту.
     {% else %}<form class="inline" method="post" action="/sentences/{{ row.id }}/precise"><button class="small" type="submit">Точный разбор этого предложения</button></form>{% endif %}</div>
   {% endif %}
+  {% if edits %}<div class="flash info small" style="margin:8px 0 0">{{ icon('tag') }}Разбор исправлен вручную: {{ edits|length }} {{ 'слово' if edits|length % 10 == 1 and edits|length % 100 != 11 else 'слова' if edits|length % 10 in (2, 3, 4) and edits|length % 100 not in (12, 13, 14) else 'слов' }}
+    ({% for i in edits|sort %}<a href="?token={{ i }}#edit">{{ sent.tok(i).form }}</a>{{ ', ' if not loop.last }}{% endfor %}). Правки сохраняются и после точного и повторного разбора.
+    <form class="inline" method="post" action="/sentences/{{ row.id }}/edit/revert" onsubmit="return confirm('Вернуть разбор парсера для всех слов предложения?')"><button class="small secondary" type="submit">вернуть весь разбор парсера</button></form></div>{% endif %}
   <div class="small muted" style="margin-top:6px">Разбор: {{ 'точный' if row.parse_level == 2 else 'предварительный' }} · Тип: {{ SENT_TYPE_LABELS.get(row.sent_type, row.sent_type) }} · клауз: {{ row.n_clauses }} · глубина дерева: {{ row.tree_depth }} · слов: {{ row.n_words }}
     {% if groups %}· однородные ряды: {% for g in groups %}[{{ g.members|join(', ') }}] <span class="badge">{{ g.type }}</span> {% endfor %}{% endif %}</div>
 </div>
@@ -68,6 +71,25 @@
   </table>
   <p class="help">Ошибочную связь (например, однородные сказуемые при чужом подлежащем) можно убрать: она перестанет учитываться в профиле слова и коллокациях, в том числе после пересчёта вхождений.</p>
   {% else %}<p class="muted">Связей для этого слова не выделено.</p>{% endif %}
+  {% set ft = sent.tok(focus) %}{% set ed = edits.get(focus) %}
+  <details class="edit-parse no-print" id="edit" {{ 'open' if ed }}>
+    <summary><strong>Исправить разбор слова «{{ ft.form }}»</strong>{% if ed %} <span class="badge warn">исправлено вручную</span>{% endif %}</summary>
+    {% if ed %}<p class="small">Парсер: {{ pos_label(ed.orig_upos) }}, главное слово — {{ sent.tok(ed.orig_head).form if ed.orig_head else 'корень' }}{% if ed.orig_head %} ({{ ed.orig_head }}){% endif %}, связь <code>{{ ed.orig_deprel }}</code>.
+      <form class="inline" method="post" action="/sentences/{{ row.id }}/edit/revert"><input type="hidden" name="idx" value="{{ focus }}"><button class="small secondary" type="submit">вернуть как было</button></form></p>{% endif %}
+    <form method="post" action="/sentences/{{ row.id }}/edit" class="fgrid">
+      <input type="hidden" name="idx" value="{{ focus }}">
+      <div><label>Часть речи</label><select name="upos">{% for k in POS_LABELS %}<option value="{{ k }}" {{ 'selected' if k == ft.upos }}>{{ pos_label(k) }}</option>{% endfor %}</select></div>
+      <div><label>Главное слово (от него идёт стрелка)</label><select name="head" id="edit-head">
+        <option value="0" {{ 'selected' if ft.head == 0 }}>— корень предложения —</option>
+        {% for t in sent.tokens if t.idx != focus %}<option value="{{ t.idx }}" {{ 'selected' if t.idx == ft.head }}>{{ t.idx }}. {{ t.form }}</option>{% endfor %}</select></div>
+      <div><label>Тип связи UD</label><select name="deprel" id="edit-rel">
+        {% if ft.deprel not in UD_RELS %}<option value="{{ ft.deprel }}" selected>{{ ft.deprel }}</option>{% endif %}
+        {% for k, v in UD_RELS.items() %}<option value="{{ k }}" {{ 'selected' if k == ft.deprel }}>{{ k }} — {{ v }}</option>{% endfor %}</select></div>
+      <div class="act"><button type="submit">Сохранить правку</button></div>
+    </form>
+    <p class="help" style="margin-bottom:0">После сохранения предложение пересчитывается для всех словарей: роли, связи, профиль слова, коллокации (ваши отметки ✓ / ✗ сохраняются).
+      Правка помечается «вручную», в дереве — значком ✎, и накладывается заново после точного и повторного разбора. Главное слово «корень» — только со связью root.</p>
+  </details>
 </div>
 {% endif %}
 
@@ -90,7 +112,7 @@
     {% for t in sent.tokens %}
     <tr class="{{ 'focus' if t.idx == focus }}"><td class="num">{{ t.idx }}</td><td>{{ t.form }}</td><td>{{ t.lemma }}</td><td>{{ pos_label(t.upos) }}</td>
       <td class="small">{% for k, v in t.feats|dictsort %}{{ k }}={{ v }}{{ '|' if not loop.last }}{% endfor %}</td>
-      <td class="num">{{ t.head }}</td><td>{{ t.deprel }}</td><td class="role-{{ roles[t.idx].role }}">{{ role_label(roles[t.idx].role, t.deprel) }}</td></tr>
+      <td class="num">{{ t.head }}</td><td>{{ t.deprel }}{% if t.idx in edits %} <span title="исправлено вручную">✎</span>{% endif %}</td><td class="role-{{ roles[t.idx].role }}">{{ role_label(roles[t.idx].role, t.deprel) }}</td></tr>
     {% endfor %}
   </table>
   </div>
@@ -106,5 +128,12 @@ function showTree(v) {
   try { localStorage.setItem('treeView', v); } catch (e) {}
 }
 redrawTree();
+// корень ⇔ root: выбор одного подставляет другое
+(function () {
+  const h = document.getElementById('edit-head'), r = document.getElementById('edit-rel');
+  if (!h || !r) return;
+  h.addEventListener('change', () => { if (h.value === '0') r.value = 'root'; else if (r.value === 'root') r.value = 'dep'; });
+  r.addEventListener('change', () => { if (r.value === 'root') h.value = '0'; });
+})();
 try { const v = localStorage.getItem('treeView'); if (v) showTree(v); } catch (e) {}
 </script>{% endblock %}

@@ -196,12 +196,12 @@ function drawTree(containerId, tokens, focus, showPunct) {
     const x1 = pos[a.t.head], x2 = pos[a.t.i];
     const h = a.level * levelH;
     const hl = (a.t.i === focus || a.t.head === focus);
-    const color = hl ? accent : muted;
+    const color = hl ? accent : (a.t.manual ? cssVar('--warn') : muted);
     const r = Math.min(12, Math.abs(x2 - x1) / 2);
     const dir = x2 > x1 ? 1 : -1;
     // прямоугольная дуга со скруглёнными углами — подписи не налезают друг на друга
     svg += `<path d="M${x1},${y0} L${x1},${y0 - h + r} Q${x1},${y0 - h} ${x1 + dir * r},${y0 - h} L${x2 - dir * r},${y0 - h} Q${x2},${y0 - h} ${x2},${y0 - h + r} L${x2},${y0}" fill="none" stroke="${color}" stroke-width="${hl ? 2 : 1}" marker-end="url(#${hl ? 'arrA' : 'arr'})"/>`;
-    const label = esc(a.t.rel);
+    const label = (a.t.manual ? '✎ ' : '') + esc(a.t.rel);
     const lx = (x1 + x2) / 2, ly = y0 - h;
     const lw = label.length * 6.2 + 6;
     svg += `<rect x="${lx - lw / 2}" y="${ly - 7}" width="${lw}" height="13" fill="${cssVar('--panel')}"/>`;

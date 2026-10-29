@@ -1637,8 +1637,11 @@ def sentence_view(request: Request, sentence_id: int, token: int | None = None, 
     pairs = unlinked_pairs(db, [sentence_id]).get(sentence_id)
     unlinked = {r.related_idx for r in rels if is_unlinked(pairs, focus, r.related_idx)}
     rels.sort(key=lambda r: r.related_idx in unlinked)  # убранные вручную — в конце, с кнопкой «вернуть»
+    from app.services.parse_edit import UD_RELS, edits_for
+
+    edits = edits_for(db, sentence_id)  # ручные правки разбора
     tree = [{"i": t.idx, "form": t.form, "lemma": t.lemma, "upos": t.upos, "head": t.head, "rel": t.deprel,
-             "role": roles[t.idx].role} for t in sent.tokens]
+             "role": roles[t.idx].role, "manual": t.idx in edits} for t in sent.tokens]
     groups = [{"members": [sent.tok(m).form for m in g.members], "type": g.conj_type} for g in an.groups]
     # иерархическое дерево (вложенный список) — читается и для длинных предложений
     children: dict[int, list[int]] = {}
@@ -1652,7 +1655,7 @@ def sentence_view(request: Request, sentence_id: int, token: int | None = None, 
         select(Job.id).where(Job.kind == "deepparse", Job.status.in_(["queued", "running"]),
                              Job.params["sentence_ids"].contains([sentence_id]))))
     return render(request, "sentence.html", row=row, sent=sent, doc=doc, roles=roles, rels=rels, focus=focus,
-                  precise_pending=precise_pending, unlinked=unlinked,
+                  precise_pending=precise_pending, unlinked=unlinked, edits=edits, UD_RELS=UD_RELS,
                   tree_json=json.dumps(tree, ensure_ascii=False).replace("</", "<\\/"), groups=groups, hit_tokens=hit_tokens,
                   conllu=sent.to_conllu(sentence_id), prev_id=prev_id, next_id=next_id, context=context,
                   tree_children=tree_children)
@@ -1678,6 +1681,36 @@ def sentence_unlink(request: Request, sentence_id: int, focus: int = Form(...), 
         n = unlink(db, sentence_id, focus, other)
         flash(request, "Связь убрана" + (f" (из сохранённых связей вхождений: {n})" if n else "") + ". Её можно вернуть.")
     return redirect(f"/sentences/{sentence_id}?token={focus}#rels")
+
+
+@router.post("/sentences/{sentence_id}/edit")
+def sentence_edit(request: Request, sentence_id: int, idx: int = Form(...), upos: str = Form(...), head: int = Form(...),
+                  deprel: str = Form(...), db: Session = Depends(get_session)):
+    """Ручная правка разбора слова: часть речи, главное слово, тип связи. Предложение пересчитывается для всех словарей."""
+    from app.services.parse_edit import save_edit
+
+    if db.get(SentenceRow, sentence_id) is None:
+        raise HTTPException(404)
+    res = save_edit(db, sentence_id, idx, upos, head, deprel)
+    if res.get("error"):
+        flash(request, "Правка не сохранена: " + res["error"], "error")
+    elif not res["changed"]:
+        flash(request, "Разбор не изменился.")
+    else:
+        flash(request, f"Разбор исправлен вручную; предложение пересчитано (вхождений слов словарей: {res['hits']}).", "success")
+    return redirect(f"/sentences/{sentence_id}?token={idx}#edit")
+
+
+@router.post("/sentences/{sentence_id}/edit/revert")
+def sentence_edit_revert(request: Request, sentence_id: int, idx: str = Form(""), db: Session = Depends(get_session)):
+    """Вернуть разбор парсера: для одного слова (idx) или всего предложения."""
+    from app.services.parse_edit import revert
+
+    if db.get(SentenceRow, sentence_id) is None:
+        raise HTTPException(404)
+    n = revert(db, sentence_id, _int(idx))
+    flash(request, f"Возвращён разбор парсера (правок снято: {n})." if n else "Ручных правок нет.")
+    return redirect(f"/sentences/{sentence_id}" + (f"?token={idx}#edit" if _int(idx) else ""))
 
 
 @router.post("/sentences/{sentence_id}/precise")

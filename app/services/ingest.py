@@ -162,6 +162,9 @@ def run_ingest(job_id: int | None, text_id: int) -> None:
         raise
 
     with SessionLocal() as s:
+        from app.services.parse_edit import reapply
+
+        reapply(s, text_id=text_id)  # ручные правки разбора, сделанные до повторного разбора текста
         doc = s.get(TextDoc, text_id)
         doc.status = "ready"
         doc.n_sentences = sent_idx
