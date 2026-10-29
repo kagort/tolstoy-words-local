@@ -994,7 +994,7 @@ def _report_context(db: Session, request: Request, dict_id: int, sel) -> dict:
     rview = qp.get("rview")
     short = rview == "short" or (rview != "full" and (rep["n_texts"] >= REP_SHORT_TEXTS or len(rep["words"]) > REP_SHORT_WORDS))
     return {"rep": rep, "report_b": corpus_b, "report_b_name": A.corpus_label(db, _int(corpus_b)) if ids_b is not None else "",
-            "rep_short": short, "REP_SHORT_EXAMPLES": 2, "REP_SHORT_RELS": 5,
+            "rep_short": short, "REP_SHORT_EXAMPLES": 2, "REP_SHORT_RELS": 5, "REP_BARS_MAX": 5,
             "rep_default_words": not sel.words, "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
 
 

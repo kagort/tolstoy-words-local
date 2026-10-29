@@ -195,3 +195,19 @@ body.v2 { font: 15px/1.55 var(--font-sans); background: var(--bg); color: var(--
 .v2 .dv2-pick { display: inline-flex; align-items: center; gap: 8px; } .v2 .dv2-pick select { width: auto; max-width: 100%; }
 .v2 .an-head { margin-bottom: 14px; } .v2 .an-head h1 { margin: 2px 0 4px; }
 .v2 .role-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: -1px; }
+/* инструменты анализа по группам (вариант А): группы — пилюли, инструменты группы — подчёркнутые вкладки */
+.v2 .tool-groups { margin: 12px 0 18px; }
+.v2 .tg-groups { display: flex; gap: 6px; flex-wrap: wrap; }
+.v2 .tg-groups a { padding: 7px 14px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-muted); font-size: 13px; font-weight: 500; }
+.v2 .tg-groups a:hover { color: var(--text); border-color: var(--text-muted); text-decoration: none; }
+.v2 .tg-groups a.active { background: var(--cat-1); border-color: var(--cat-1); color: var(--surface); font-weight: 600; }
+.v2 .tg-groups a .n { margin-left: 5px; font-size: 11px; opacity: .7; }
+.v2 .tg-tools { display: flex; gap: 22px; flex-wrap: wrap; border-bottom: 1px solid var(--border); margin-top: 10px; padding: 0 4px; }
+.v2 .tg-tools a { padding: 8px 0; color: var(--text-muted); font-size: 14px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.v2 .tg-tools a:hover { color: var(--text); text-decoration: none; }
+.v2 .tg-tools a.active { color: var(--text); border-bottom-color: var(--cat-1); font-weight: 600; }
+@media (max-width: 760px) {
+  .v2 .tg-groups, .v2 .tg-tools { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+  .v2 .tg-groups a, .v2 .tg-tools a { flex-shrink: 0; min-height: 36px; display: inline-flex; align-items: center; }
+}
+@media print { .tool-groups { display: none !important; } }
