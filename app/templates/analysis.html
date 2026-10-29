@@ -118,11 +118,51 @@
 
 {% if propn_excluded %}<p class="help">Имена собственные не учитываются: {{ propn_excluded }} вхождений слов словаря внутри имён и названий
   («Чёрное море», «Белый дом») не посчитаны. Вернуть отдельное вхождение — ✓ в конкордансе.</p>{% endif %}
-<div class="tabs">
-  {% for key, label in [('overview', 'Обзор'), ('report', 'Отчёт'), ('freq', 'Частоты'), ('conc', 'Конкорданс'), ('portrait', 'Портрет сочетания'), ('profile', 'Профиль слова'), ('colloc', 'Коллокации'), ('keywords', 'Ключевые слова'), ('map', 'Карта текста'), ('entities', 'Имена'), ('geo', 'География'), ('semantic', 'Семантика'), ('topics', 'Темы'), ('stylo', 'Авторство'), ('textcmp', 'Сравнение текстов'), ('compare', 'Сравнение корпусов'), ('structure', 'Структура предложений')] %}
-  <a class="{{ 'active' if tab == key }}" href="/analysis?tab={{ key }}&dictionary_id={{ dict_id }}&{{ sel.query() }}{% if entry_id and key in ('profile','conc','portrait','structure','compare','colloc','semantic') %}&entry_id={{ entry_id }}{% endif %}">{{ label }}</a>
+{% set TOOL_GROUPS = [
+  ('Сводка', [('overview', 'Обзор'), ('report', 'Отчёт')]),
+  ('Слова словаря', [('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('portrait', 'Портрет сочетания'), ('colloc', 'Коллокации'), ('semantic', 'Семантика')]),
+  ('Тексты', [('keywords', 'Ключевые слова'), ('topics', 'Темы'), ('map', 'Карта текста'), ('structure', 'Структура предложений')]),
+  ('Имена и места', [('entities', 'Имена'), ('geo', 'География')]),
+  ('Сравнение', [('compare', 'Сравнение корпусов'), ('textcmp', 'Сравнение текстов'), ('stylo', 'Авторство')]),
+] %}
+{% macro tab_href(key) %}/analysis?tab={{ key }}&dictionary_id={{ dict_id }}&{{ sel.query() }}{% if entry_id and key in ('profile','conc','portrait','structure','compare','colloc','semantic') %}&entry_id={{ entry_id }}{% endif %}{% endmacro %}
+{% if ui_mode(request) == 'v2' %}
+{# инструменты по группам: вверху группы, под ними — инструменты выбранной группы #}
+<nav class="tool-groups" aria-label="Инструменты анализа">
+  <div class="tg-groups" role="tablist">
+    {% for gname, items in TOOL_GROUPS %}{% set on = tab in items|map('first') %}
+    <a class="{{ 'active' if on }}" href="{{ tab_href(items[0][0]) }}" data-group="{{ loop.index0 }}"
+       data-keys="{{ items|map('first')|join(',') }}" role="tab" aria-selected="{{ 'true' if on else 'false' }}">{{ gname }}<span class="n">{{ items|length }}</span></a>
+    {% endfor %}
+  </div>
+  {% for gname, items in TOOL_GROUPS if tab in items|map('first') %}
+  <div class="tg-tools">
+    {% for key, label in items %}<a class="{{ 'active' if tab == key }}" href="{{ tab_href(key) }}" data-tool="{{ key }}">{{ label }}</a>{% endfor %}
+  </div>
   {% endfor %}
+</nav>
+<script>
+// группа открывает инструмент, которым в ней пользовались последним (в этом браузере)
+(function () {
+  let last = {};
+  try { last = JSON.parse(localStorage.getItem('qv-tool-last') || '{}'); } catch (e) {}
+  const cur = '{{ tab }}';
+  document.querySelectorAll('.tg-groups a').forEach(a => {
+    const keys = a.dataset.keys.split(','), g = a.dataset.group;
+    if (keys.includes(cur)) { last[g] = cur; return; }
+    const k = last[g];
+    if (k && keys.includes(k)) a.href = a.href.replace(/([?&])tab=[^&]*/, '$1tab=' + k);
+  });
+  try { localStorage.setItem('qv-tool-last', JSON.stringify(last)); } catch (e) {}
+})();
+</script>
+{% else %}
+<div class="tabs">
+  {% for gname, items in TOOL_GROUPS %}{% for key, label in items %}
+  <a class="{{ 'active' if tab == key }}" href="{{ tab_href(key) }}">{{ label }}</a>
+  {% endfor %}{% endfor %}
 </div>
+{% endif %}
 
 {% set sq = 'dictionary_id=' ~ dict_id ~ '&' ~ sel.query() %}
 {# ============================================================== ОБЗОР #}
