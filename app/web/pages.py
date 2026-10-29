@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import json
 import re
+from collections import Counter
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
@@ -425,7 +426,7 @@ async def dictionary_create(request: Request, name: str = Form(...), description
     return redirect(f"/dictionaries/{d.id}/cognates" if suggest else f"/dictionaries/{d.id}")
 
 
-DICT_SORTS = {"hits": "по числу вхождений", "abc": "по алфавиту", "added": "по порядку добавления"}
+DICT_SORTS = {"hits": "по числу вхождений", "cats": "по категориям", "abc": "по алфавиту", "added": "по порядку добавления"}
 
 
 def _entry_hits(db: Session, dict_id: int) -> dict[int, int]:
@@ -438,6 +439,12 @@ def _sorted_entries(entries, hits: dict[int, int], sort: str = "hits") -> list:
         return sorted(entries, key=lambda e: e.surface.lower())
     if sort == "added":
         return sorted(entries, key=lambda e: e.id)
+    if sort == "cats":  # категории по числу вхождений, «без категории» — в конце; внутри — частые сверху
+        tot = Counter()
+        for e in entries:
+            tot[e.category or ""] += hits.get(e.id, 0)
+        return sorted(entries, key=lambda e: (not e.category, -tot[e.category or ""], (e.category or "").lower(),
+                                              -hits.get(e.id, 0), e.surface.lower()))
     return sorted(entries, key=lambda e: (-hits.get(e.id, 0), e.surface.lower()))  # частые сверху
 
 
@@ -468,12 +475,43 @@ def dictionary_detail(request: Request, dict_id: int, db: Session = Depends(get_
     from app.services.dictionaries import matched_texts
 
     categories = sorted({e.category for e in d.entries if e.category})
+    cat_stats: dict[str, list[int]] = {}  # категория → [слов, вхождений] — для заголовков в порядке «по категориям»
+    for e in d.entries:
+        st = cat_stats.setdefault(e.category or "", [0, 0])
+        st[0] += 1
+        st[1] += hits.get(e.id, 0)
     return render(request, "dictionary_detail.html", d=d, hits=hits, coverage=matched_texts(db, d), show=show,
-                  n_unverified=len(unverified), n_all=len(d.entries), categories=categories, entries=entries, sort=sort, DICT_SORTS=DICT_SORTS, in_names=in_names, opt_counts=opt_counts, pending=pending, stale=stale,
+                  n_unverified=len(unverified), n_all=len(d.entries), categories=categories, cat_stats=cat_stats, entries=entries, sort=sort, DICT_SORTS=DICT_SORTS, in_names=in_names, opt_counts=opt_counts, pending=pending, stale=stale,
                   no_category=no_category, has_categories=no_category < len(d.entries), dup_groups=dup_groups,
                   no_cats=bool((d.settings or {}).get("no_categories")),
                   all_corpora=list(db.scalars(select(Corpus).order_by(Corpus.name))), scope=set(scope_corpora(d)),
                   names_ok=set((d.settings or {}).get("names_ok_entries", [])))
+
+
+@router.post("/dictionaries/{dict_id}/category")
+def category_edit(request: Request, dict_id: int, name: str = Form(...), new_name: str = Form(""), action: str = Form("rename"),
+                  back: str = Form(""), db: Session = Depends(get_session)):
+    """Переименовать категорию (в существующее название — слияние) или удалить её: слова остаются, без категории."""
+    d = db.get(Dictionary, dict_id)
+    if d is None:
+        raise HTTPException(404)
+    url = back if back.startswith(f"/dictionaries/{dict_id}") else f"/dictionaries/{dict_id}?sort=cats"
+    target = [e for e in d.entries if (e.category or "") == name and name]
+    new = " ".join(new_name.split())[:120]
+    if not target:
+        flash(request, f"Категории «{name}» нет", "error")
+    elif action == "delete":
+        for e in target:
+            e.category = None
+        db.commit()
+        flash(request, f"Категория «{name}» удалена: {len(target)} слов — без категории", "success")
+    elif new and new != name:
+        merged = any((e.category or "") == new for e in d.entries)
+        for e in target:
+            e.category = new
+        db.commit()
+        flash(request, f"Категория «{name}» → «{new}»" + (" (слита с существующей)" if merged else ""), "success")
+    return redirect(url)
 
 
 @router.post("/dictionaries/{dict_id}/assign-category")
