@@ -196,7 +196,7 @@ def near_condition(lemma: str, window: int):
 
 
 
-def concordance(
+def concordance_query(
     session: Session,
     dictionary_id: int,
     text_ids: list[int],
@@ -212,10 +212,8 @@ def concordance(
     phrase_any_order: bool = False,
     names_only: bool = False,
     include_invalid: bool = False,
-    page: int = 1,
-    per_page: int = 50,
-    context_chars: int = 90,
-) -> dict:
+):
+    """Запрос вхождений по фильтрам конкорданса → (запрос, {sentence_id: найденные отрывки словосочетания})."""
     q = (
         select(Hit.id, Hit.sentence_id, Hit.role, Hit.role_subtype, Hit.is_valid, Hit.form,
                TokenRow.start_char, TokenRow.end_char, TokenRow.deprel, TokenRow.upos, SentenceRow.text, SentenceRow.idx,
@@ -268,6 +266,29 @@ def concordance(
                 if i in positions.get(sid, ())}
             q = q.where(or_(tuple_(Hit.sentence_id, Hit.token_idx).in_(inside),
                             Hit.sentence_id.in_([sid for sid in phrase_hits if sid not in have] or [-1])))
+    return q, phrase_hits
+
+
+def concordance_sentence_ids(session: Session, dictionary_id: int, text_ids: list[int], **filters) -> tuple[list[int], list[int]]:
+    """Предложения, найденные конкордансом с этими фильтрами, и токены самих вхождений (для «ключевых слов контекстов»)."""
+    q, _ = concordance_query(session, dictionary_id, text_ids, **filters)
+    sub = q.subquery()
+    rows = session.execute(select(sub.c.sentence_id, Hit.token_id).join(Hit, Hit.id == sub.c.id)).all()
+    return sorted({r[0] for r in rows}), sorted({r[1] for r in rows})
+
+
+def concordance(
+    session: Session,
+    dictionary_id: int,
+    text_ids: list[int],
+    *,
+    page: int = 1,
+    per_page: int = 50,
+    context_chars: int = 90,
+    phrase: str | None = None,
+    **filters,
+) -> dict:
+    q, phrase_hits = concordance_query(session, dictionary_id, text_ids, phrase=phrase, **filters)
     total = session.scalar(select(func.count()).select_from(q.subquery())) or 0
     rows = session.execute(q.order_by(TextDoc.id, SentenceRow.idx, Hit.token_idx).offset((page - 1) * per_page).limit(per_page)).all()
     items = []

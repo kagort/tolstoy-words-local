@@ -34,7 +34,7 @@ from app.services.metadata import parse_years
 from app.services.jobs import enqueue
 from app.services.stopwords import options as stop_options
 from app.services.matching import load_sentences
-from app.web.deps import flash, render, ui_mode
+from app.web.deps import conc_filters, flash, render, ui_mode
 
 router = APIRouter()
 
@@ -1051,6 +1051,44 @@ def _keywords_context(db: Session, request: Request, sel) -> dict:
             "kw_pos": pos, "kw_min": min_count, "POS_GROUPS": POS_GROUPS, "MAX_TFIDF_TEXTS": MAX_TFIDF_TEXTS}
 
 
+def _context_keywords(db: Session, request: Request, dict_id: int, sel, filters: dict) -> dict:
+    """Ключевые слова контекстов, найденных конкордансом, против остальной выборки."""
+    from app.nlp.tree import norm
+    from app.services.collocations import POS_GROUPS
+    from app.services.keywords import CONTEXT_UNITS, context_keywords
+
+    qp = request.query_params
+    unit = qp.get("ctxkw") if qp.get("ctxkw") in CONTEXT_UNITS else "sent"
+    pos = qp.get("pos") or "content"
+    min_count = _int(qp.get("min_count")) or 2
+    sids, nodes = A.concordance_sentence_ids(db, dict_id, sel.ids, **filters)
+    exclude = {norm(w) for w in (filters["related_lemma"], filters["near"]) if w}
+    if filters["phrase"]:
+        from app.services.phrases import parse
+
+        exclude |= {lemma for s in parse(filters["phrase"]) for lemma in s.get("lemmas", ())}
+    return {"ckw": context_keywords(db, sids, sel.ids, unit=unit, node_tokens=nodes, exclude=exclude, pos=pos,
+                                    min_count=min_count, stop=sel.stopset),
+            "CONTEXT_UNITS": CONTEXT_UNITS, "POS_GROUPS": POS_GROUPS, "kw_pos": pos, "kw_min": min_count}
+
+
+def _portrait_context(db: Session, request: Request, dict_id: int, sel, entry_id: int | None, scopes) -> dict:
+    """Портрет словосочетания: те же фильтры, что у конкорданса; без слова, связи или словосочетания — только форма."""
+    from app.services.collocations import POS_GROUPS
+    from app.services.keywords import CONTEXT_UNITS
+    from app.services.portrait import portrait
+
+    qp = request.query_params
+    filters = conc_filters(qp, entry_id, sel.words)
+    unit = qp.get("unit_ctx") if qp.get("unit_ctx") in CONTEXT_UNITS else "win"
+    pos = qp.get("pos") or "content"
+    min_count = _int(qp.get("min_count")) or 2
+    ready = bool(entry_id or filters["phrase"] or (filters["related_lemma"] and sel.words))
+    pt = portrait(db, dict_id, sel.ids, filters, unit=unit, page=_int(qp.get("page")) or 1, pos=pos, min_count=min_count,
+                  stop=sel.stopset, scopes=scopes) if ready else None
+    return {"pt": pt, "CONTEXT_UNITS": CONTEXT_UNITS, "POS_GROUPS": POS_GROUPS, "kw_pos": pos, "kw_min": min_count}
+
+
 def _map_context(db: Session, request: Request, dict_id: int, sel) -> dict:
     from app.services.textmap import SEGMENT_CHOICES, text_map
 
@@ -1496,14 +1534,12 @@ def _analysis_page(request: Request, db: Session):
         ctx["cats"] = None if ctx["no_cats"] else A.category_frequency(db, dict_id, text_ids, entry_ids=words, dim=qp.get("cat_dim") or "author")
         ctx["DIMENSIONS"] = A.DIMENSIONS
     elif tab == "conc":
-        ctx["conc"] = A.concordance(
-            db, dict_id, text_ids, entry_id=entry_id, entry_ids=sel.words, role=qp.get("role") or None,
-            rel_type=qp.get("rel_type") or None, related_lemma=qp.get("related") or None,
-            near=qp.get("near") or None, window=_int(qp.get("window")) or 3,
-            phrase=qp.get("phrase") or None, phrase_any_order=bool(qp.get("phrase_any")),
-            names_only=bool(qp.get("names")),
-            include_invalid=bool(qp.get("invalid")), page=_int(qp.get("page")) or 1,
-        )
+        filters = conc_filters(qp, entry_id, sel.words)
+        ctx["conc"] = A.concordance(db, dict_id, text_ids, page=_int(qp.get("page")) or 1, **filters)
+        if qp.get("ctxkw"):
+            ctx.update(_context_keywords(db, request, dict_id, sel, filters))
+    elif tab == "portrait":
+        ctx.update(_portrait_context(db, request, dict_id, sel, entry_id, scopes))
     elif tab == "profile":
         if not entry_id and ctx["entries"]:
             if sel.words:

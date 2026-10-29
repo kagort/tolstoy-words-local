@@ -20,6 +20,7 @@ from app.models import Dictionary, DictionaryEntry, Hit, SentenceRow, TextDoc
 from app.nlp.syntax import SYNTAX_VERSION
 from app.services import analytics as A
 from app.services.matching import load_sentences
+from app.web.deps import conc_filters
 
 router = APIRouter(prefix="/export")
 
@@ -142,18 +143,35 @@ def export_concordance(fmt: str, request: Request, db: Session = Depends(get_ses
         raise HTTPException(400)
     qp = request.query_params
     dict_id, ids = _ctx(db, request)
-    c = A.concordance(db, dict_id, ids, entry_id=_int(qp.get("entry_id")), entry_ids=_words(db, request), role=qp.get("role") or None,
-                      rel_type=qp.get("rel_type") or None, related_lemma=qp.get("related") or None,
-                      near=qp.get("near") or None, window=_int(qp.get("window")) or 3,
-            phrase=qp.get("phrase") or None, phrase_any_order=bool(qp.get("phrase_any")),
-            names_only=bool(qp.get("names")),
-                      include_invalid=bool(qp.get("invalid")), page=1, per_page=100_000, context_chars=10_000)
+    c = A.concordance(db, dict_id, ids, page=1, per_page=100_000, context_chars=10_000,
+                      **conc_filters(qp, _int(qp.get("entry_id")), _words(db, request)))
     df = pd.DataFrame([{
         "Слово словаря": i["word"], "Левый контекст": i["left"], "Словоформа": i["kw"], "Правый контекст": i["right"],
         "Роль": i["role_label"], "Связь UD": i["deprel"], "Часть речи UD": i["upos"], "Подтип роли": i["role_subtype"], "Источник": i["source"], "№ предложения": i["sentence_no"],
         "ID предложения": i["sentence_id"], "Словосочетание": " | ".join(i["phrase"]), "В имени": "да" if i["in_name"] else "", "Проверено": {None: "", True: "верно", False: "ложное"}[i["is_valid"]],
     } for i in c["items"]])
     return _send({"Конкорданс": df}, fmt, "concordance", _params(db, request) | {"Строк": c["total"]})
+
+
+@router.get("/portrait.{fmt}")
+def export_portrait(fmt: str, request: Request, db: Session = Depends(get_session)):
+    """Контексты портрета словосочетания: XLSX/CSV (с источником) или TXT (по контексту в абзаце)."""
+    from app.services.keywords import CONTEXT_UNITS
+    from app.services.portrait import export_rows
+
+    if fmt not in FORMATS | {"txt"}:
+        raise HTTPException(400)
+    qp = request.query_params
+    dict_id, ids = _ctx(db, request)
+    unit = qp.get("unit_ctx") if qp.get("unit_ctx") in CONTEXT_UNITS else "win"
+    rows = export_rows(db, dict_id, ids, conc_filters(qp, _int(qp.get("entry_id")), _words(db, request)), unit)
+    if fmt == "txt":
+        body = "\n\n".join(f"{r['text']}\n— {r['source']}, предложение № {r['sentence_no']}" for r in rows)
+        name = f"portrait-{datetime.now().strftime('%Y%m%d-%H%M')}.txt"
+        return Response(body.encode("utf-8"), media_type="text/plain; charset=utf-8", headers={"Content-Disposition": _disposition(name)})
+    df = pd.DataFrame([{"Контекст": r["text"], "Источник": r["source"], "№ предложения": r["sentence_no"],
+                        "ID предложения": r["sentence_id"], "Вхождений": r["hits"]} for r in rows])
+    return _send({"Контексты": df}, fmt, "portrait", _params(db, request) | {"Контекст": CONTEXT_UNITS[unit], "Контекстов": len(rows)})
 
 
 @router.get("/profile.{fmt}")

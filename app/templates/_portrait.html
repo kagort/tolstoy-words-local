@@ -1,0 +1,138 @@
+{# ============================================================== ПОРТРЕТ СЛОВОСОЧЕТАНИЯ (services/portrait.py). Переменная: pt. #}
+{% if tab == 'portrait' %}
+{% set qp = request.query_params %}
+<div class="panel">
+  <div class="fgrid">
+    <div><label>Главное слово</label><select name="entry_id" form="sel-form"><option value="">{{ 'выбранные слова (' ~ sel.words|length ~ ')' if sel.words else '— выберите —' }}</option>{% for e in entries %}{% set n = word_counts.get(e.id, 0) %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry_id }}{{ ' class=muted' if not n }}>{{ e.surface }} ({{ n }})</option>{% endfor %}</select></div>
+    <div><label>Тип связи</label><select name="rel_type" form="sel-form"><option value="">любой</option>{% for k in REL_LABELS %}<option value="{{ k }}" {{ 'selected' if qp.get('rel_type') == k }}>{{ rel_label(k) }}</option>{% endfor %}</select></div>
+    <div><label>Связанное слово (лемма)</label><input type="text" name="related" form="sel-form" value="{{ qp.get('related', '') }}" placeholder="например: русский"></div>
+    <div><label>или словосочетание {{ term('phrase') }}</label><input type="text" name="phrase" form="sel-form" value="{{ qp.get('phrase', '') }}" placeholder="русский мужик; закон * порядок"></div>
+    <div class="act"><button type="submit" form="sel-form">Построить портрет</button></div>
+  </div>
+  <p class="help" style="margin-bottom:0">Синтаксический поиск — главное слово + связанное слово (находит и «мужик, русский до мозга костей»); линейный — словосочетание подряд, как написано.
+    Портрет открывается и из профиля слова (ссылка «портрет» у связанного слова), и из конкорданса (кнопка «Портрет»).</p>
+</div>
+
+{% if pt is none %}<div class="panel muted">Выберите главное слово (и, если нужно, связанное слово) или введите словосочетание.</div>
+{% elif not pt.n %}<div class="panel muted">«{{ pt.title }}»: в выбранном корпусе не найдено.</div>
+{% else %}
+{% set s = pt.summary %}
+<h2 class="pt-title">«{{ pt.title }}»</h2>
+<div class="stat-tiles">
+  <div class="tile"><div class="tile-num">{{ s.hits }}</div><div class="tile-label">вхождений ({{ s.sentences }} предложений)</div></div>
+  <div class="tile"><div class="tile-num">{{ s.texts }}<span class="muted small">/{{ s.texts_total }}</span></div><div class="tile-label">текстов</div></div>
+  <div class="tile"><div class="tile-num">{{ s.ipm|string|replace('.', ',') }}</div><div class="tile-label">ipm (на миллион слов выборки){{ term('ipm') }}</div></div>
+  {% if s.share is not none %}<div class="tile"><div class="tile-num">{{ s.share|string|replace('.', ',') }}&thinsp;%</div><div class="tile-label">вхождений слова «{{ pt.head.surface }}» ({{ s.head_total }})</div></div>{% endif %}
+</div>
+<nav class="pt-toc small no-print">Разделы: <a href="#pt-where">где встречается</a> · <a href="#pt-ctx">контексты</a> · <a href="#pt-kw">окружение</a> · <a href="#pt-col">коллокаты</a>{% if pt.syntax %} · <a href="#pt-syn">синтаксис</a>{% endif %}{% if pt.compare %} · <a href="#pt-cmp">сравнение</a>{% endif %}</nav>
+
+{# 2. Где встречается #}
+{% set w = pt.where %}
+<section class="panel" id="pt-where">
+  <h3 style="margin-top:0">Где встречается</h3>
+  <div class="grid cols-2">
+    <div class="table-scroll"><table class="pt-bars"><tr><th>Текст</th><th class="num">Вхожд.</th><th>ipm</th></tr>
+      {% for r in w.by_text[:15] %}<tr><td class="small"><a href="/texts/{{ r.text_id }}">{% if r.author %}{{ r.author }}, {% endif %}«{{ r.title }}»</a>{% if r.year %}, {{ r.year }}{% endif %}</td><td class="num">{{ r.n }}</td>
+        <td class="nowrap"><span class="pt-bar"><i style="width:{{ (100 * r.ipm / (w.ipm_max or 1))|round(1) }}%"></i></span> <span class="small">{{ r.ipm }}</span></td></tr>{% endfor %}
+    </table>{% if w.by_text|length > 15 %}<p class="muted small">… и ещё {{ w.by_text|length - 15 }} текстов.</p>{% endif %}</div>
+    <div>
+      {% if w.by_author|length > 1 %}{% set am = (w.by_author|map(attribute='ipm')|max) or 1 %}
+      <table class="pt-bars"><tr><th>Автор</th><th class="num">Вхожд.</th><th>ipm</th></tr>
+        {% for r in w.by_author[:10] %}<tr><td class="small">{{ r.label }}</td><td class="num">{{ r.n }}</td><td class="nowrap"><span class="pt-bar"><i style="width:{{ (100 * r.ipm / am)|round(1) }}%"></i></span> <span class="small">{{ r.ipm }}</span></td></tr>{% endfor %}
+      </table>{% endif %}
+      {% if w.by_decade %}{% set dm = (w.by_decade|map(attribute='ipm')|max) or 1 %}
+      <table class="pt-bars"><tr><th>Десятилетие</th><th class="num">Вхожд.</th><th>ipm</th></tr>
+        {% for r in w.by_decade %}<tr><td class="small">{{ r.label }}</td><td class="num">{{ r.n }}</td><td class="nowrap"><span class="pt-bar"><i style="width:{{ (100 * r.ipm / dm)|round(1) }}%"></i></span> <span class="small">{{ r.ipm }}</span></td></tr>{% endfor %}
+      </table>{% if w.undated %}<p class="muted small">Без года: {{ w.undated }} вхожд.</p>{% endif %}{% endif %}
+      <h4>По ходу текста</h4>
+      <div class="pt-density" title="вхождения по {{ w.density|length }} отрезкам текста: от начала к концу">
+        {% for c in w.density %}<span style="height:{{ (100 * c / (w.density_max or 1))|round(1) }}%" title="{{ loop.index0 * 5 }}–{{ loop.index * 5 }}% текста: {{ c }}"></span>{% endfor %}</div>
+      <div class="pt-density-axis small muted"><span>начало</span><span>середина</span><span>конец</span></div>
+    </div>
+  </div>
+  <p class="help" style="margin-bottom:0">ipm — вхождений на миллион слов текста (группы): так сравнимы тексты разной длины. Полосы «по ходу текста» сложены по всем текстам: место предложения от начала (слева) к концу (справа).</p>
+</section>
+
+{# 3. Контексты #}
+<section class="panel" id="pt-ctx">
+  <div class="row" style="align-items:center">
+    <h3 style="margin:0">Контексты <span class="muted small">— {{ pt.n_contexts }}</span></h3><div class="spacer"></div>
+    <div class="shrink small">показывать —
+      {% for k, v in CONTEXT_UNITS.items() %}{% if k == pt.unit %}<strong>{{ v }}</strong>{% else %}<a href="/analysis{{ qs(request, unit_ctx=k, page=None) }}#pt-ctx">{{ v }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+    <div class="shrink small">Скачать: <a href="/export/portrait.xlsx{{ qs(request, page=None) }}">XLSX</a> · <a href="/export/portrait.txt{{ qs(request, page=None) }}">TXT</a></div>
+  </div>
+  <input type="hidden" name="unit_ctx" form="sel-form" value="{{ pt.unit }}">
+  <ol class="pt-ctx" start="{{ (pt.page - 1) * pt.per_page + 1 }}">
+    {% for c in pt.contexts %}<li>
+      <div>{% for sn in c.sentences %}<span class="{{ '' if sn.node else 'muted' }}">{% for t, k in sn.parts %}{% if k == 'kw' %}<mark>{{ t }}</mark>{% elif k == 'rel' %}<mark class="rel">{{ t }}</mark>{% else %}{{ t }}{% endif %}{% endfor %}</span> {% endfor %}</div>
+      <div class="small muted">{{ c.source }} · <a href="/sentences/{{ c.sentence_id }}" title="открыть разбор предложения">{{ icon('tree', 'разбор') }}№&nbsp;{{ c.sent_idx }}</a></div>
+    </li>{% endfor %}
+  </ol>
+  {% if pt.pages > 1 %}<div class="pager">Страница {{ pt.page }} из {{ pt.pages }}
+    {% if pt.page > 1 %}<a class="btn small secondary" href="/analysis{{ qs(request, page=pt.page - 1) }}#pt-ctx">← назад</a>{% endif %}
+    {% if pt.page < pt.pages %}<a class="btn small secondary" href="/analysis{{ qs(request, page=pt.page + 1) }}#pt-ctx">вперёд →</a>{% endif %}</div>{% endif %}
+  <p class="help" style="margin-bottom:0"><mark>Найденное слово</mark> и <mark class="rel">слово запроса</mark> подсвечены; соседние предложения — бледнее. В TXT найденное слово — в [квадратных], слово запроса — в {фигурных} скобках.</p>
+</section>
+
+<div class="grid cols-2">
+{# 4. Ключевые слова окружения #}
+{% set k = pt.keywords %}
+<section class="panel" id="pt-kw">
+  <div class="row" style="align-items:center"><h3 style="margin:0">Ключевые слова окружения{{ term('keyness') }}</h3><div class="spacer"></div>
+    <div class="shrink"><select name="pos" form="sel-form" title="части речи">{% for kk, v in POS_GROUPS.items() %}<option value="{{ kk }}" {{ 'selected' if kw_pos == kk }}>{{ v[0] }}</option>{% endfor %}</select></div>
+    <div class="shrink"><select name="min_count" form="sel-form" title="минимальная частота">{% for m in [2, 3, 5, 10] %}<option value="{{ m }}" {{ 'selected' if kw_min == m }}>от {{ m }}</option>{% endfor %}</select></div>
+    <div class="shrink"><button type="submit" form="sel-form" class="small">↻</button></div></div>
+  <p class="muted small">Контексты ({{ CONTEXT_UNITS[pt.unit] }}, {{ "{:,}".format(k.words_a).replace(",", " ") }} слов) против остальной выборки.{% if k.words_b %} Значимо чаще: {{ k.n_positive }}.{% endif %}</p>
+  {% if k.too_many %}<p class="muted">Слишком много контекстов — сузьте выборку.</p>
+  {% elif k.positive %}
+  <table><tr><th>Лемма</th><th class="num">В контекстах</th><th class="num">ipm</th><th class="num">ipm остальн.</th><th class="num">G²{{ term('g2') }}</th></tr>
+    {% for r in k.positive[:20] %}<tr class="{{ '' if r.significant or not k.words_b else 'muted' }}"><td><strong>{{ r.lemma }}</strong> <span class="muted small">{{ r.pos }}</span></td><td class="num">{{ r.count_a }}</td><td class="num">{{ r.ipm_a }}</td><td class="num">{{ r.ipm_b }}</td><td class="num">{{ r.ll }}</td></tr>{% endfor %}
+  </table>
+  {% else %}<p class="muted">Характерных слов нет — уменьшите минимальную частоту.</p>{% endif %}
+</section>
+
+{# 5. Коллокаты #}
+<section class="panel" id="pt-col">
+  <h3 style="margin-top:0">Коллокаты в окне ±5 слов</h3>
+  {% if pt.collocates %}
+  <table><tr><th>Лемма</th><th class="num">Рядом</th><th class="num">Всего в выборке</th><th class="num">logDice{{ term('logdice') }}</th></tr>
+    {% for r in pt.collocates[:20] %}<tr><td><a href="/analysis{{ qs(request, tab='conc', near=r.lemma, window=5, page=None, unit_ctx=None) }}">{{ r.lemma }}</a> <span class="muted small">{{ r.pos }}</span></td><td class="num">{{ r.count }}</td><td class="num">{{ r.freq }}</td><td class="num">{{ r.logdice }}</td></tr>{% endfor %}
+  </table>
+  <p class="help" style="margin-bottom:0">Слова не дальше 5 слов от найденного (знаки препинания не считаются), встретившиеся хотя бы дважды. logDice учитывает и частоту рядом, и общую частоту слова. Щелчок — такие контексты в конкордансе.</p>
+  {% else %}<p class="muted">Повторяющихся соседей нет.</p>{% endif %}
+</section>
+</div>
+
+{# 6. Синтаксис #}
+{% if pt.syntax %}
+<section class="panel" id="pt-syn">
+  <h3 style="margin-top:0">Синтаксис: с чем связано найденное слово</h3>
+  <div class="pt-syn">{% for b in pt.syntax %}
+    <div><h4>{{ b.label|capitalize }} <span class="muted small">— {{ b.total }}</span></h4>
+      <ul class="pt-list">{% for x in b['items'] %}<li><a href="/analysis{{ qs(request, tab='conc', rel_type=b.rel_type, related=x.lemma, phrase=None, page=None, unit_ctx=None) }}">{{ x.lemma }}</a> <span class="muted">{{ x.count }}</span></li>{% endfor %}
+        {% if b.distinct > b['items']|length %}<li class="muted small">… ещё {{ b.distinct - b['items']|length }}</li>{% endif %}</ul></div>{% endfor %}
+  </div>
+  <p class="help" style="margin-bottom:0">Сказуемые (что делает), управляющие слова, другие определения и прочие связи найденного слова в этих вхождениях. Слово запроса не показывается.</p>
+</section>
+{% endif %}
+
+{# 7. Сравнение #}
+{% if pt.compare %}{% set c = pt.compare %}
+<section class="panel" id="pt-cmp">
+  <h3 style="margin-top:0">«{{ pt.title }}» против «{{ c.head }}» без этого сочетания</h3>
+  <p class="muted small">{{ c.n_a }} вхождений сочетания против {{ c.n_b }} остальных вхождений слова «{{ c.head }}». Доля — у скольких вхождений есть такая связь.</p>
+  {% if c.n_b %}
+  <div class="grid cols-2">
+    {% for rows, label in [(c.more_a, 'Чаще в сочетании'), (c.more_b, 'Чаще без него')] %}
+    <div class="table-scroll"><h4>{{ label }}</h4>
+      {% if rows %}<table><tr><th>Связь</th><th>Слово</th><th class="num">Сочет., %</th><th class="num">Без, %</th><th class="num">G²</th></tr>
+        {% for r in rows %}<tr class="{{ '' if r.significant else 'muted' }}"><td class="small">{{ r.label }}</td><td><strong>{{ r.lemma }}</strong></td><td class="num">{{ r.pct_a }}</td><td class="num">{{ r.pct_b }}</td><td class="num">{{ r.ll }}</td></tr>{% endfor %}
+      </table>{% else %}<p class="muted small">Различий нет.</p>{% endif %}</div>
+    {% endfor %}
+  </div>
+  <p class="help" style="margin-bottom:0">Связи, встретившиеся хотя бы 3 раза. G² ≥ 3,84 — различие значимо; незначимые строки бледнее.</p>
+  {% else %}<p class="muted">У слова «{{ c.head }}» нет вхождений вне этого сочетания.</p>{% endif %}
+</section>
+{% endif %}
+{% endif %}
+{% endif %}

@@ -1,0 +1,31 @@
+{# Ключевые слова контекстов конкорданса: найденные предложения (или ±1, или абзацы) против остальной выборки. Переменная: ckw. #}
+<div class="panel" id="ctx-kw">
+  <div class="row" style="align-items:center">
+    <h3 style="margin:0;white-space:nowrap">Ключевые слова этих контекстов{{ term('keyness') }}</h3><div class="spacer"></div>
+    <div class="shrink small" role="group" aria-label="Контекст">контекст —
+      {% for k, v in CONTEXT_UNITS.items() %}{% if k == ckw.unit %}<strong>{{ v }}</strong>{% else %}<a href="/analysis{{ qs(request, ctxkw=k, page=None) }}#ctx-kw">{{ v }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+    <input type="hidden" name="ctxkw" form="sel-form" value="{{ ckw.unit }}">
+    <div class="shrink"><select name="pos" form="sel-form" title="части речи">{% for k, v in POS_GROUPS.items() %}<option value="{{ k }}" {{ 'selected' if kw_pos == k }}>{{ v[0] }}</option>{% endfor %}</select></div>
+    <div class="shrink"><select name="min_count" form="sel-form" title="минимальная частота в контекстах">{% for m in [2, 3, 5, 10] %}<option value="{{ m }}" {{ 'selected' if kw_min == m }}>от {{ m }} раз</option>{% endfor %}</select></div>
+    <div class="shrink"><button type="submit" form="sel-form" class="small">Пересчитать</button></div>
+    <div class="shrink"><a class="small" href="/analysis{{ qs(request, ctxkw=None, pos=None, min_count=None) }}">скрыть</a></div>
+  </div>
+  {% if ckw.too_many %}<p class="muted">Слишком много контекстов ({{ ckw.n_context }}): сузьте фильтр — выберите слово, связь или словосочетание.</p>
+  {% else %}
+  <p class="muted small">Мини-корпус: {{ ckw.n_context }} {{ 'предложений' if ckw.unit != 'para' else 'предложений в абзацах' }} ({{ "{:,}".format(ckw.words_a).replace(",", " ") }} слов) против остальной выборки ({{ "{:,}".format(ckw.words_b).replace(",", " ") }} слов).
+    Сами найденные слова и слова запроса не показываются.{% if ckw.words_b %} Значимо чаще в контекстах: {{ ckw.n_positive }} лемм.{% endif %}
+    {% if not sel.stop %}<span class="help">Выберите стоп-слова в панели выбора, чтобы убрать служебные слова.</span>{% endif %}</p>
+  {% if ckw.positive %}
+  <div class="kw-cloud">
+    {% set top = ckw.positive[:40] %}{% set mx = (top|map(attribute='ll')|max) or 1 %}{% set mf = (top|map(attribute='count_a')|max) or 1 %}
+    {% for r in top %}<a href="/analysis{{ qs(request, near=r.lemma, window=5, page=None, ctxkw=None) }}" style="font-size:{{ (12 + 22 * (((r.ll / mx) if ckw.words_b else (r.count_a / mf)) ** 0.5))|round(1) }}px" class="{{ '' if r.significant or not ckw.words_b else 'muted' }}" title="G² {{ r.ll }}; {{ r.count_a }} раз в контекстах ({{ r.ipm_a }} ipm) против {{ r.ipm_b }} ipm в остальной выборке — щёлкните, чтобы найти такие контексты">{{ r.lemma }}</a> {% endfor %}
+  </div>
+  <details class="small"><summary>Таблица ({{ ckw.positive|length }})</summary>
+    <div class="table-scroll"><table><tr><th>Лемма</th><th>Ч. р.</th><th class="num">В контекстах</th><th class="num">В остальной выборке</th><th class="num">ipm</th><th class="num">ipm остальн.</th><th class="num">G²{{ term('g2') }}</th><th class="num">Log-ratio{{ term('logratio') }}</th></tr>
+      {% for r in ckw.positive %}<tr class="{{ '' if r.significant or not ckw.words_b else 'muted' }}"><td><strong>{{ r.lemma }}</strong></td><td class="muted">{{ r.pos }}</td><td class="num">{{ r.count_a }}</td><td class="num">{{ r.count_b }}</td>
+        <td class="num">{{ r.ipm_a }}</td><td class="num">{{ r.ipm_b }}</td><td class="num">{{ r.ll }}</td><td class="num">{{ r.log_ratio if r.log_ratio is not none else '' }}</td></tr>{% endfor %}
+    </table></div></details>
+  <p class="help" style="margin-bottom:0">Размер слова — значимость (G²); бледные — различие незначимо. Щелчок по слову — контексты, где оно стоит рядом (±5 слов) с найденным.</p>
+  {% else %}<p class="muted">Характерных слов не найдено: уменьшите минимальную частоту или выберите «все части речи».</p>{% endif %}
+  {% endif %}
+</div>
