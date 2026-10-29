@@ -86,7 +86,7 @@
     <p class="shrink"><button type="submit">Применить выборку</button></p>
   </details>
 
-  <details class="sel-block" id="sel-words" {{ 'open' if tab == 'report' and not sel.words }}>
+  <details class="sel-block" id="sel-words" {{ 'open' if tab == 'report' and not sel.words and entries|length <= 60 }}>
     <summary><strong>Слова словаря:</strong> {% if sel.words %}выбрано {{ sel.words|length }} —
       {% set names = [] %}{% for e in entries if e.id in sel.words %}{% set _ = names.append(e.surface) %}{% endfor %}{{ names[:10]|join(', ') }}{{ '…' if names|length > 10 }}
       {% else %}<span class="muted">не выбраны — вкладки показывают все слова (обзор и отчёт — самые частые). Щёлкните, чтобы выбрать.</span>{% endif %}</summary>

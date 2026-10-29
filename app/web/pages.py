@@ -978,6 +978,9 @@ def _overview_context(db: Session, request: Request, dict_id: int, text_ids: lis
     return {"ov": ov, "spread": spread, "ov_params": p, "ov_entry_ids": entry_ids, "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
 
 
+REP_SHORT_TEXTS, REP_SHORT_WORDS = 30, 10  # выборка с этого размера — отчёт сразу в кратком виде
+
+
 def _report_context(db: Session, request: Request, dict_id: int, sel) -> dict:
     from app.services.report import build_report, default_words
 
@@ -987,7 +990,11 @@ def _report_context(db: Session, request: Request, dict_id: int, sel) -> dict:
     ids_b = A.corpus_text_ids(db, _int(corpus_b)) if corpus_b not in (None, "none") else None
     step = _int(qp.get("step")) or 10
     rep = build_report(db, dict_id, sel.ids, entry_ids, step=step if step in A.PERIOD_STEPS else 10, ids_b=ids_b, stop=sel.stopset)
+    # краткий вид (разделы 2–6 свёрнуты, меньше примеров и связей) — по умолчанию для большой выборки; rview=full|short
+    rview = qp.get("rview")
+    short = rview == "short" or (rview != "full" and (rep["n_texts"] >= REP_SHORT_TEXTS or len(rep["words"]) > REP_SHORT_WORDS))
     return {"rep": rep, "report_b": corpus_b, "report_b_name": A.corpus_label(db, _int(corpus_b)) if ids_b is not None else "",
+            "rep_short": short, "REP_SHORT_EXAMPLES": 2, "REP_SHORT_RELS": 5,
             "rep_default_words": not sel.words, "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
 
 

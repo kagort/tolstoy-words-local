@@ -26,14 +26,22 @@
 </div>
 
 <div class="grid cols-2">
-  <div class="panel"><h3 style="margin-top:0">2. Смысловая карта словаря</h3>
+  <div class="panel" {% if smap.points|length > 40 %}style="grid-column: 1 / -1"{% endif %}><h3 style="margin-top:0">2. Смысловая карта словаря</h3>
     {% if smap.points %}
-    <div class="row"><div class="shrink"><label>Групп</label><select name="groups" form="sel-form">{% for n in range(2, 13) %}<option {{ 'selected' if smap.k == n }}>{{ n }}</option>{% endfor %}</select></div>
-      <div class="shrink"><button type="submit" form="sel-form" class="small">Перестроить</button></div></div>
-    <div id="chart-smap" class="chart" style="min-height:440px"></div>
-    <table class="small">{% for g in smap.groups %}<tr><td class="nowrap"><strong>Группа {{ g.id }}</strong><div class="muted">связность {{ g.cohesion }}</div></td><td>{{ g.words|join(', ') }}</td></tr>{% endfor %}</table>
-    <p class="help">Близкие по смыслу слова оказываются рядом (проекция 300-мерных векторов на плоскость), цвет — автоматическая группа.
-      Группы помогают разбить словарь на категории. {% if smap.missing %}Нет в модели: {{ smap.missing|join(', ') }}.{% endif %}</p>
+    <div class="row" style="align-items:flex-end"><div class="shrink"><label>Групп</label><select name="groups" form="sel-form">{% for n in range(2, 13) %}<option {{ 'selected' if smap.k == n }}>{{ n }}</option>{% endfor %}</select></div>
+      <div class="shrink"><button type="submit" form="sel-form" class="small">Перестроить</button></div>
+      <div class="shrink small smap-labels" role="group" aria-label="Подписи на карте">Подписи:
+        <button type="button" class="link-btn" data-smap-labels="none">нет</button> ·
+        <button type="button" class="link-btn" data-smap-labels="top">частые</button> ·
+        <button type="button" class="link-btn" data-smap-labels="all">все</button></div></div>
+    <div id="chart-smap" class="chart" style="min-height:{{ 620 if smap.points|length > 40 else 460 }}px"></div>
+    {% set big = smap.points|length > 40 %}
+    <details class="small" {{ 'open' if not big }}><summary>Слова по группам ({{ smap.points|length }})</summary>
+    <table class="small">{% for g in smap.groups %}<tr><td class="nowrap"><strong>Группа {{ g.id }}</strong><div class="muted">связность {{ g.cohesion }}</div></td><td>{{ g.words|join(', ') }}</td></tr>{% endfor %}</table></details>
+    <p class="help">Близкие по смыслу слова оказываются рядом (проекция 300-мерных векторов на плоскость), цвет — автоматическая группа,
+      у центра группы — её самые типичные слова; размер точки — частота. Слово — при наведении; «частые» подписывают {{ ('15' if smap.points|length > 150 else '25') ~ ' самых частых слов' if big else 'все слова' }}.
+      Щелчок по группе в легенде скрывает её, двойной щелчок — оставляет только её. Группы помогают разбить словарь на категории.
+      {% if smap.missing %}Нет в модели: {{ smap.missing|join(', ') }}.{% endif %}</p>
     {% else %}<p class="muted">Для карты нужно хотя бы 2 слова словаря, известных модели.</p>{% endif %}
   </div>
 
@@ -66,11 +74,30 @@
 document.addEventListener('DOMContentLoaded', function () {
   {% if smap.points %}
   const sm = {{ smap|tojson }};
-  const groups = [...new Set(sm.points.map(p => p.group))];
-  drawChart('chart-smap', groups.map(g => { const ps = sm.points.filter(p => p.group === g);
-    return { type: 'scatter', mode: 'markers+text', name: 'группа ' + g, x: ps.map(p => p.x), y: ps.map(p => p.y), text: ps.map(p => p.word),
-      textposition: 'top center', marker: { size: 11 }, hovertemplate: '%{text}<extra>группа ' + g + '</extra>' }; }),
-    { xaxis: { visible: false }, yaxis: { visible: false }, legend: { orientation: 'h', y: -0.05 }, margin: { l: 10, r: 10, t: 10, b: 10 } });
+  const groups = [...new Set(sm.points.map(p => p.group))].sort((a, b) => a - b);
+  // подписи: «частые» — до 25 самых частых слов (у маленького словаря — все), «все», «нет»; слово всегда видно при наведении
+  const TOP = sm.points.length > 150 ? 15 : sm.points.length > 40 ? 25 : sm.points.length;
+  const topSet = new Set([...sm.points].sort((a, b) => b.count - a.count).slice(0, TOP).map(p => p.entry_id));
+  const maxC = Math.max(1, ...sm.points.map(p => p.count));
+  function drawSmap(mode) {
+    const traces = groups.map(g => { const ps = sm.points.filter(p => p.group === g);
+      return { type: 'scatter', mode: mode === 'none' ? 'markers' : 'markers+text', name: 'группа ' + g,
+        x: ps.map(p => p.x), y: ps.map(p => p.y), text: ps.map(p => mode === 'all' || topSet.has(p.entry_id) ? p.word : ''),
+        customdata: ps.map(p => [p.word, p.count, p.category]), textposition: 'top center', textfont: { size: 10 },
+        marker: { size: ps.map(p => 6 + 10 * Math.sqrt(p.count / maxC)), opacity: 0.8 },
+        hovertemplate: '<b>%{customdata[0]}</b><br>вхождений: %{customdata[1]}<br>%{customdata[2]}<extra>группа ' + g + '</extra>' }; });
+    const muted = cssVar('--text-muted') || cssVar('--muted');
+    drawChart('chart-smap', traces, { height: sm.points.length > 40 ? 620 : 460, xaxis: { visible: false }, yaxis: { visible: false }, legend: { orientation: 'h', y: -0.05 },
+      margin: { l: 10, r: 10, t: 10, b: 10 }, hovermode: 'closest',
+      annotations: sm.groups.map(g => ({ x: g.x, y: g.y, text: '<b>' + g.label + '</b>', showarrow: false, opacity: 0.85,
+        font: { size: 12, color: muted }, bgcolor: cssVar('--surface') || cssVar('--panel'), borderpad: 2 })) });
+    document.querySelectorAll('[data-smap-labels]').forEach(b => b.classList.toggle('on', b.dataset.smapLabels === mode));
+    try { localStorage.setItem('qv-smap-labels', mode); } catch (e) {}
+  }
+  let smapMode = 'top';
+  try { smapMode = localStorage.getItem('qv-smap-labels') || 'top'; } catch (e) {}
+  drawSmap(smapMode);
+  document.querySelectorAll('[data-smap-labels]').forEach(b => b.addEventListener('click', () => drawSmap(b.dataset.smapLabels)));
   {% endif %}
   {% if senses and senses.clusters %}
   const sn = {{ senses|tojson }};

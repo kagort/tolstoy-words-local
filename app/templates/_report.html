@@ -7,6 +7,9 @@
     <select name="report_b" form="sel-form"><option value="none">— без сравнения —</option><option value="" {{ 'selected' if report_b == '' }}>Все тексты</option>
       {% for c in corpora %}<option value="{{ c.id }}" {{ 'selected' if report_b == c.id|string }}>{{ c.name }}</option>{% endfor %}</select></div>
   <div class="shrink"><button type="submit" form="sel-form">Обновить отчёт</button></div>
+  <div class="shrink small rep-view">Вид:
+    {% if rep_short %}<strong>кратко</strong> · <a href="/analysis{{ qs(request, rview='full') }}">полностью</a>
+    {% else %}<a href="/analysis{{ qs(request, rview='short') }}">кратко</a> · <strong>полностью</strong>{% endif %}</div>
   <div class="shrink">Скачать отчёт: <a href="/export/report.xlsx{{ qs(request) }}">XLSX</a> · <a href="/export/report.json{{ qs(request) }}">JSON</a>
     · <a href="#" onclick="window.print(); return false;" title="печать или сохранение в PDF средствами браузера">{{ icon('print') }}печать / PDF</a></div>
 </div>
@@ -41,22 +44,22 @@
 </div>
 
 {% if rep.overviews %}
-<h3>2. Распределение по выборке</h3>
+<details class="rep-sec" {{ '' if rep_short else 'open' }}><summary><h3>2. Распределение по выборке</h3></summary>
 <div class="grid cols-2">
   {% for dim, ov in rep.overviews.items() %}
   <div class="panel"><h4 style="margin:0">ipm по группировке «{{ ov.dim_label }}»{% if dim == 'period' %} (шаг {{ ov.step }} лет){% endif %}</h4>
     <div id="rep-ov-{{ dim }}" class="chart" style="min-height:320px"></div></div>
   {% endfor %}
-</div>
+</div></details>
 {% endif %}
 
 {% if rep.role_matrix.roles %}
-<h3>3. Роль в предложении</h3>
+<details class="rep-sec" {{ '' if rep_short else 'open' }}><summary><h3>3. Роль в предложении</h3></summary>
 <div class="panel"><div id="rep-roles" class="chart" style="min-height:{{ 120 + 34 * rep.cards|length }}px"></div>
-  <p class="help">Доля вхождений слова в каждой роли (член предложения по академической грамматике, в скобках — связь UD).</p></div>
+  <p class="help">Доля вхождений слова в каждой роли (член предложения по академической грамматике, в скобках — связь UD).</p></div></details>
 {% endif %}
 
-<h3>4. Связи и примеры по каждому слову</h3>
+<details class="rep-sec" {{ '' if rep_short else 'open' }}><summary><h3>4. Связи и примеры по каждому слову</h3>{% if rep_short %} <span class="muted small">— по {{ REP_SHORT_EXAMPLES }} примера, первые {{ REP_SHORT_RELS }} связанных слов</span>{% endif %}</summary>
 {% for c in rep.cards %}
 <div class="panel word-card">
   <h4 style="margin:0 0 6px">«{{ c.word }}» <span class="muted small">— {{ c.count }} вхождений, {{ c.ipm }} ipm, в {{ c.texts }} текстах</span>
@@ -65,22 +68,23 @@
   <div class="rel-grid">
     {% for rt, block in c.relations.items() %}
     <div><div class="muted small"><strong>{{ block.label|capitalize }}</strong> ({{ block.total }})</div>
-      {% for x in block['items'] %}<a class="chip" title="{{ x.count }} раз, logDice {{ x.logdice }}" href="/analysis?tab=conc&{{ sq }}&entry_id={{ c.entry_id }}&rel_type={{ rt }}&related={{ x.lemma|urlencode }}">{{ x.lemma }} <span class="muted">{{ x.count }}</span></a>{% endfor %}
+      {% for x in (block['items'][:REP_SHORT_RELS] if rep_short else block['items']) %}<a class="chip" title="{{ x.count }} раз, logDice {{ x.logdice }}" href="/analysis?tab=conc&{{ sq }}&entry_id={{ c.entry_id }}&rel_type={{ rt }}&related={{ x.lemma|urlencode }}">{{ x.lemma }} <span class="muted">{{ x.count }}</span></a>{% endfor %}
     </div>
     {% endfor %}
   </div>
   {% else %}<div class="muted small">Связей не найдено.</div>{% endif %}
   {% if c.examples %}
   <div class="examples">
-    {% for i in c.examples %}<div class="example"><a href="/sentences/{{ i.sentence_id }}" class="muted small no-print">{{ icon('tree', 'разбор') }}{{ i.sentence_id }}</a> {{ i.left }}<strong>{{ i.kw }}</strong>{{ i.right }} <span class="muted small">— {{ i.source }}</span></div>{% endfor %}
+    {% for i in (c.examples[:REP_SHORT_EXAMPLES] if rep_short else c.examples) %}<div class="example"><a href="/sentences/{{ i.sentence_id }}" class="muted small no-print">{{ icon('tree', 'разбор') }}{{ i.sentence_id }}</a> {{ i.left }}<strong>{{ i.kw }}</strong>{{ i.right }} <span class="muted small">— {{ i.source }}</span></div>{% endfor %}
   </div>
   {% endif %}
 </div>
 {% endfor %}
+</details>
 
 {% if rep.structure and rep.structure.hits.n %}
 {% set h, a = rep.structure.hits, rep.structure.all %}
-<h3>5. Предложения с выбранными словами</h3>
+<details class="rep-sec" {{ '' if rep_short else 'open' }}><summary><h3>5. Предложения с выбранными словами</h3></summary>
 <div class="grid cols-2">
   <div class="panel">
     <table>
@@ -91,11 +95,11 @@
     </table>
   </div>
   <div class="panel"><div id="rep-len" class="chart" style="min-height:280px"></div></div>
-</div>
+</div></details>
 {% endif %}
 
 {% if rep.compare %}
-<h3>6. Сравнение с корпусом «{{ report_b_name }}»</h3>
+<details class="rep-sec" {{ '' if rep_short else 'open' }}><summary><h3>6. Сравнение с корпусом «{{ report_b_name }}»</h3></summary>
 <div class="panel table-scroll">
   <p class="muted small" style="margin-top:0">A — текущая выборка ({{ rep.compare.words_a }} слов), B — «{{ report_b_name }}» ({{ rep.compare.words_b }} слов). G² ≥ 3,84 — различие значимо (p &lt; 0,05); log-ratio &gt; 0 — чаще в A.</p>
   <table>
@@ -103,7 +107,7 @@
     {% for r in rep.compare.rows %}<tr><td>{{ r.word }}</td><td class="num">{{ r.ipm_a }}</td><td class="num">{{ r.ipm_b }}</td><td class="num">{{ r.ll }}</td><td class="num">{{ r.log_ratio }}</td>
       <td>{% if r.significant %}<span class="badge warn">{{ 'чаще в A' if r.log_ratio > 0 else 'чаще в B' }}</span>{% endif %}</td></tr>{% endfor %}
   </table>
-</div>
+</div></details>
 {% endif %}
 {% else %}
 <div class="panel muted">В выборке нет вхождений выбранных слов. Выберите другие слова или ослабьте фильтры.</div>
