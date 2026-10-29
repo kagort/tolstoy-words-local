@@ -32,6 +32,16 @@ def _qs(request: Request, **changes) -> str:
     return "?" + urlencode(params)
 
 
+def conc_filters(qp, entry_id: int | None, words: list[int] | None) -> dict:
+    """Фильтры конкорданса из адреса — одни и те же для таблицы, выгрузок, «ключевых слов контекстов» и портрета."""
+    window = qp.get("window") or ""
+    return {"entry_id": entry_id, "entry_ids": words, "role": qp.get("role") or None,
+            "rel_type": qp.get("rel_type") or None, "related_lemma": qp.get("related") or None,
+            "near": qp.get("near") or None, "window": int(window) if window.isdigit() else 3,
+            "phrase": qp.get("phrase") or None, "phrase_any_order": bool(qp.get("phrase_any")),
+            "names_only": bool(qp.get("names")), "include_invalid": bool(qp.get("invalid"))}
+
+
 def _asset_version() -> str:
     """Метка версии для /static/app.js и app.css: меняется при любом изменении файлов,
     поэтому браузер после обновления программы не берёт старые скрипты из кэша."""

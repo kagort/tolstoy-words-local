@@ -242,3 +242,21 @@ details.rep-sec > summary::-webkit-details-marker { display: none; }
 details.rep-sec > summary h3 { display: inline; }
 details.rep-sec > summary::before { content: "▸"; display: inline-block; width: 1.1em; color: var(--muted); transition: transform .15s; }
 details.rep-sec[open] > summary::before { transform: rotate(90deg); }
+/* портрет словосочетания */
+.kw-cloud a { display: inline-block; margin: 0 8px 2px 0; color: var(--accent); text-decoration: none; }
+.kw-cloud a:hover { text-decoration: underline; }
+.pt-title { margin: 6px 0 10px; }
+.pt-toc { margin: 4px 0 12px; }
+.pt-bars { width: 100%; margin-bottom: 10px; }
+.pt-bar { display: inline-block; width: 110px; height: 8px; background: var(--border); border-radius: 4px; vertical-align: middle; overflow: hidden; }
+.pt-bar i { display: block; height: 100%; background: var(--accent); }
+.pt-density { display: flex; align-items: flex-end; gap: 2px; height: 70px; border-bottom: 1px solid var(--border); }
+.pt-density span { flex: 1; background: var(--accent); min-height: 1px; border-radius: 2px 2px 0 0; }
+.pt-density-axis { display: flex; justify-content: space-between; }
+ol.pt-ctx { padding-left: 2.2em; }
+ol.pt-ctx li { margin-bottom: 10px; line-height: 1.5; }
+mark.rel { background: var(--accent-soft); }
+.pt-syn { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 4px 18px; }
+.pt-syn h4 { margin: 6px 0 4px; }
+ul.pt-list { list-style: none; padding: 0; margin: 0; }
+ul.pt-list li { padding: 1px 0; }

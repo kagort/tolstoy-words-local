@@ -80,3 +80,44 @@ def test_context_keywords_page(client, corpus):
     assert r.status_code == 200 and "Ключевые слова этих контекстов" in r.text
     r = client.get(q + "&ctxkw=para")
     assert r.status_code == 200 and 'id="ctx-kw"' in r.text and "земля" in r.text
+
+
+def test_portrait_service(corpus):
+    from app.db import SessionLocal
+    from app.services.portrait import portrait
+
+    ids, eid = corpus["text_ids"], corpus["entries"]["мужик"]
+    f = {"entry_id": eid, "related_lemma": "русский", "rel_type": "attribute"}
+    with SessionLocal() as s:
+        pt = portrait(s, corpus["dict_id"], ids, f)
+        assert pt["title"] == "русский → мужик" and pt["n"] == 4
+        sm = pt["summary"]
+        assert sm["hits"] == 4 and sm["texts"] == 1 and sm["head_total"] == 6 and sm["share"] == 66.7
+        assert pt["where"]["by_text"][0]["n"] == 4 and sum(pt["where"]["density"]) == 4
+        # контексты ±1: найденное слово и слово запроса подсвечены
+        c = pt["contexts"][0]
+        kinds = {k for sn in c["sentences"] for _, k in sn["parts"]}
+        assert {"kw", "rel"} <= kinds
+        assert "пахать" in [r["lemma"] for r in pt["keywords"]["positive"]]
+        assert "пахать" in [r["lemma"] for r in pt["collocates"]] and "мужик" not in [r["lemma"] for r in pt["collocates"]]
+        # сравнение: «пить» — у мужика без «русский»
+        cmp = pt["compare"]
+        assert cmp["n_a"] == 4 and cmp["n_b"] == 2
+        # линейный поиск по словосочетанию
+        pt2 = portrait(s, corpus["dict_id"], ids, {"phrase": "русский мужик"}, unit="sent")
+        assert pt2["n"] == 4 and pt2["head"].surface == "мужик"
+
+
+def test_portrait_page_and_export(client, corpus):
+    base = f"/analysis?tab=portrait&dictionary_id={corpus['dict_id']}"
+    r = client.get(base)
+    assert r.status_code == 200 and "Построить портрет" in r.text
+    q = base + f"&entry_id={corpus['entries']['мужик']}&rel_type=attribute&related=русский"
+    r = client.get(q)
+    assert r.status_code == 200 and "«русский → мужик»" in r.text and 'id="pt-cmp"' in r.text
+    r = client.get(q + "&unit_ctx=para&page=1")
+    assert r.status_code == 200
+    r = client.get(q.replace("/analysis?tab=portrait", "/export/portrait.txt?tab=portrait"))
+    assert r.status_code == 200 and "[мужик]" in r.text.lower() and "{русский}" in r.text.lower()
+    r = client.get(q.replace("/analysis?tab=portrait", "/export/portrait.xlsx?tab=portrait"))
+    assert r.status_code == 200 and r.content[:2] == b"PK"

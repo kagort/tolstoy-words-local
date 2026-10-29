@@ -88,10 +88,12 @@ def context_sentences(session: Session, sentence_ids: list[int], unit: str = "se
 
 def context_keywords(session: Session, sentence_ids: list[int], text_ids: list[int], *, unit: str = "sent",
                      node_tokens: list[int] | None = None, exclude: set[str] | frozenset[str] = frozenset(),
-                     pos: str = "content", min_count: int = 3, stop: frozenset[str] = frozenset(), top: int = 100) -> dict:
+                     pos: str = "content", min_count: int = 3, stop: frozenset[str] = frozenset(), top: int = 100,
+                     totals: tuple[Counter, dict] | None = None) -> dict:
     """Ключевые слова контекстов (мини-корпус найденных предложений/абзацев) против остальной выборки.
 
     Леммы самих вхождений (node_tokens) и запроса (exclude) не показываются: иначе они всегда наверху.
+    totals — уже посчитанные частоты лемм выборки (_lemma_counts с тем же pos), чтобы не считать их дважды.
     """
     ctx_ids = context_sentences(session, sentence_ids, unit)
     too_many = len(ctx_ids) > MAX_CONTEXT_SENTENCES
@@ -114,7 +116,7 @@ def context_keywords(session: Session, sentence_ids: list[int], text_ids: list[i
                     continue
                 ta[lemma] += 1
                 by_pos[lemma][upos] += 1
-    total, pos_all = _lemma_counts(session, text_ids, pos_set) if ta else (Counter(), {})
+    total, pos_all = (totals or _lemma_counts(session, text_ids, pos_set)) if ta else (Counter(), {})
     nb = max(0, A.corpus_words(session, text_ids) - na) if ta else 0
     rows = []
     for lemma, a in ta.items():
