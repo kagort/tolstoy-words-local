@@ -8,9 +8,10 @@
   <div class="dv2-eyebrow">Анализ · корпус × словарь</div>
   <h1>{{ corpus_name }} <span class="dv2-x">×</span> {{ cur_dict.name if cur_dict else '' }}</h1>
   <div class="muted small">{{ n_texts }} {{ 'текст' if n_texts % 10 == 1 and n_texts % 100 != 11 else ('текста' if n_texts % 10 in [2, 3, 4] and n_texts % 100 not in [12, 13, 14] else 'текстов') }}{% if sel.filtered %} · {{ sel.describe() }}{% endif %}
-    · <a href="/dashboard?dictionary_id={{ dict_id }}&{{ sel.query(False) }}">дашборд этой выборки</a></div>
+    · <a href="/dashboard?dictionary_id={{ dict_id }}&{{ sel.query(False) }}">дашборд этой выборки</a>
+    {% if request.cookies.get('qv_sel') %}· <a href="/analysis?reset=1&tab={{ tab }}" title="словарь, корпус, стоп-слова и флажки запоминаются в этом браузере и подставляются при следующем открытии «Анализа»">сбросить запомненный выбор</a>{% endif %}</div>
 </header>
-{% else %}<h1>Анализ</h1>{% endif %}
+{% else %}<h1>Анализ</h1>{% if request.cookies.get('qv_sel') and dictionaries %}<p class="small muted" style="margin-top:-10px">Выбор запоминается в этом браузере · <a href="/analysis?reset=1&tab={{ tab }}">сбросить</a></p>{% endif %}{% endif %}
 {% if not dictionaries %}
 <div class="panel">Для анализа нужен словарь. <a href="/dictionaries">Создайте словарь</a> и загрузите <a href="/texts">тексты</a>.</div>
 {% else %}

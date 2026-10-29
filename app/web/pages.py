@@ -1348,8 +1348,64 @@ def entities_extract(request: Request, text_ids: list[str] = Form([]), back: str
     return redirect(back if back.startswith("/") else "/analysis?tab=entities")
 
 
+# Последний выбор на страницах анализа и дашборда запоминается в браузере (cookie): словарь, корпус, стоп-слова,
+# флажки. Отобранные тексты и слова не запоминаются. Открыли «Анализ» без параметров — подставляется сохранённое.
+REMEMBER_KEYS = ("dictionary_id", "corpus_id", "stop", "noprop", "unit")
+REMEMBER_COOKIE = "qv_sel"
+
+
+def _recall_selection(request: Request, db: Session):
+    """Перенаправление на сохранённый выбор, если в адресе нет ни словаря, ни корпуса (?reset=1 — забыть выбор)."""
+    from urllib.parse import parse_qsl, urlencode
+
+    qp = request.query_params
+    if qp.get("reset"):
+        resp = redirect(request.url.path + (f"?tab={qp['tab']}" if qp.get("tab") else ""))
+        resp.delete_cookie(REMEMBER_COOKIE)
+        return resp
+    saved = request.cookies.get(REMEMBER_COOKIE)
+    if not saved or "dictionary_id" in qp or "corpus_id" in qp:
+        return None
+    pairs = [(k, v) for k, v in parse_qsl(saved) if k in REMEMBER_KEYS]
+    keep = []  # удалённые с тех пор словарь и корпус не подставляются
+    for k, v in pairs:
+        if k == "dictionary_id" and not (v.isdigit() and db.get(Dictionary, int(v))):
+            continue
+        if k == "corpus_id" and v and not (v.isdigit() and db.get(Corpus, int(v))):
+            continue
+        keep.append((k, v))
+    if not keep:
+        return None
+    return redirect(request.url.path + "?" + urlencode(list(qp.multi_items()) + keep))
+
+
+def _remember_selection(resp, request: Request, dict_id: int | None):
+    from urllib.parse import urlencode
+
+    qp = request.query_params
+    pairs = [(k, v) for k in REMEMBER_KEYS for v in qp.getlist(k) if k != "dictionary_id"]
+    if dict_id:
+        pairs.insert(0, ("dictionary_id", str(dict_id)))
+    if "corpus_id" not in qp:
+        pairs.append(("corpus_id", ""))  # «Все тексты» — тоже выбор
+    resp.set_cookie(REMEMBER_COOKIE, urlencode(pairs), max_age=180 * 24 * 3600, samesite="lax", httponly=True)
+    return resp
+
+
 @router.get("/analysis")
 def analysis(request: Request, db: Session = Depends(get_session)):
+    back = _recall_selection(request, db)
+    if back is not None:
+        return back
+    resp = _analysis_page(request, db)
+    if request.query_params.get("tab") != "compare":  # во «Сравнении корпусов» корпус A — свой
+        dict_id = _int(request.query_params.get("dictionary_id"))
+        if dict_id or request.query_params:
+            _remember_selection(resp, request, dict_id)
+    return resp
+
+
+def _analysis_page(request: Request, db: Session):
     ctx = _analysis_context(db, request)
     qp = request.query_params
     dict_id, tab, sel = ctx["dict_id"], ctx["tab"], ctx["sel"]
@@ -1743,7 +1799,11 @@ def _dashboard_data(db: Session, request: Request) -> tuple[dict, object, int | 
 @router.get("/dashboard")
 def dashboard_page(request: Request, db: Session = Depends(get_session)):
     """Обзорный дашборд по выборке: корпус (corpus_id), отмеченные тексты (texts) или один текст."""
+    back = _recall_selection(request, db)
+    if back is not None:
+        return back
     dash, sel, dict_id, dictionaries = _dashboard_data(db, request)
-    return render(request, "dashboard_view.html", dash=dash, selq=sel.query(False), sel_pairs=sel.pairs(False),
+    resp = render(request, "dashboard_view.html", dash=dash, selq=sel.query(False), sel_pairs=sel.pairs(False),
                   dict_id=dict_id, dictionaries=dictionaries)
+    return _remember_selection(resp, request, dict_id)
 
