@@ -540,3 +540,13 @@ document.addEventListener('DOMContentLoaded', () => {
     setTheme(order[(order.indexOf(currentTheme()) + 1) % order.length]);
   }));
 });
+
+// Графики внутри свёрнутого блока (<details>) строятся с нулевой шириной: при раскрытии — подогнать по размеру.
+// Перед печатью раскрываются все блоки, чтобы в PDF попал весь отчёт.
+document.addEventListener('toggle', ev => {
+  const d = ev.target;
+  if (d.tagName === 'DETAILS' && d.open && typeof Plotly !== 'undefined') {
+    d.querySelectorAll('.js-plotly-plot').forEach(el => Plotly.Plots.resize(el));
+  }
+}, true);
+window.addEventListener('beforeprint', () => document.querySelectorAll('details.rep-sec').forEach(d => { d.open = true; }));

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import json
 import re
+from collections import Counter
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
@@ -425,7 +426,7 @@ async def dictionary_create(request: Request, name: str = Form(...), description
     return redirect(f"/dictionaries/{d.id}/cognates" if suggest else f"/dictionaries/{d.id}")
 
 
-DICT_SORTS = {"hits": "по числу вхождений", "abc": "по алфавиту", "added": "по порядку добавления"}
+DICT_SORTS = {"hits": "по числу вхождений", "cats": "по категориям", "abc": "по алфавиту", "added": "по порядку добавления"}
 
 
 def _entry_hits(db: Session, dict_id: int) -> dict[int, int]:
@@ -438,6 +439,12 @@ def _sorted_entries(entries, hits: dict[int, int], sort: str = "hits") -> list:
         return sorted(entries, key=lambda e: e.surface.lower())
     if sort == "added":
         return sorted(entries, key=lambda e: e.id)
+    if sort == "cats":  # категории по числу вхождений, «без категории» — в конце; внутри — частые сверху
+        tot = Counter()
+        for e in entries:
+            tot[e.category or ""] += hits.get(e.id, 0)
+        return sorted(entries, key=lambda e: (not e.category, -tot[e.category or ""], (e.category or "").lower(),
+                                              -hits.get(e.id, 0), e.surface.lower()))
     return sorted(entries, key=lambda e: (-hits.get(e.id, 0), e.surface.lower()))  # частые сверху
 
 
@@ -468,12 +475,43 @@ def dictionary_detail(request: Request, dict_id: int, db: Session = Depends(get_
     from app.services.dictionaries import matched_texts
 
     categories = sorted({e.category for e in d.entries if e.category})
+    cat_stats: dict[str, list[int]] = {}  # категория → [слов, вхождений] — для заголовков в порядке «по категориям»
+    for e in d.entries:
+        st = cat_stats.setdefault(e.category or "", [0, 0])
+        st[0] += 1
+        st[1] += hits.get(e.id, 0)
     return render(request, "dictionary_detail.html", d=d, hits=hits, coverage=matched_texts(db, d), show=show,
-                  n_unverified=len(unverified), n_all=len(d.entries), categories=categories, entries=entries, sort=sort, DICT_SORTS=DICT_SORTS, in_names=in_names, opt_counts=opt_counts, pending=pending, stale=stale,
+                  n_unverified=len(unverified), n_all=len(d.entries), categories=categories, cat_stats=cat_stats, entries=entries, sort=sort, DICT_SORTS=DICT_SORTS, in_names=in_names, opt_counts=opt_counts, pending=pending, stale=stale,
                   no_category=no_category, has_categories=no_category < len(d.entries), dup_groups=dup_groups,
                   no_cats=bool((d.settings or {}).get("no_categories")),
                   all_corpora=list(db.scalars(select(Corpus).order_by(Corpus.name))), scope=set(scope_corpora(d)),
                   names_ok=set((d.settings or {}).get("names_ok_entries", [])))
+
+
+@router.post("/dictionaries/{dict_id}/category")
+def category_edit(request: Request, dict_id: int, name: str = Form(...), new_name: str = Form(""), action: str = Form("rename"),
+                  back: str = Form(""), db: Session = Depends(get_session)):
+    """Переименовать категорию (в существующее название — слияние) или удалить её: слова остаются, без категории."""
+    d = db.get(Dictionary, dict_id)
+    if d is None:
+        raise HTTPException(404)
+    url = back if back.startswith(f"/dictionaries/{dict_id}") else f"/dictionaries/{dict_id}?sort=cats"
+    target = [e for e in d.entries if (e.category or "") == name and name]
+    new = " ".join(new_name.split())[:120]
+    if not target:
+        flash(request, f"Категории «{name}» нет", "error")
+    elif action == "delete":
+        for e in target:
+            e.category = None
+        db.commit()
+        flash(request, f"Категория «{name}» удалена: {len(target)} слов — без категории", "success")
+    elif new and new != name:
+        merged = any((e.category or "") == new for e in d.entries)
+        for e in target:
+            e.category = new
+        db.commit()
+        flash(request, f"Категория «{name}» → «{new}»" + (" (слита с существующей)" if merged else ""), "success")
+    return redirect(url)
 
 
 @router.post("/dictionaries/{dict_id}/assign-category")
@@ -940,6 +978,9 @@ def _overview_context(db: Session, request: Request, dict_id: int, text_ids: lis
     return {"ov": ov, "spread": spread, "ov_params": p, "ov_entry_ids": entry_ids, "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
 
 
+REP_SHORT_TEXTS, REP_SHORT_WORDS = 30, 10  # выборка с этого размера — отчёт сразу в кратком виде
+
+
 def _report_context(db: Session, request: Request, dict_id: int, sel) -> dict:
     from app.services.report import build_report, default_words
 
@@ -949,7 +990,11 @@ def _report_context(db: Session, request: Request, dict_id: int, sel) -> dict:
     ids_b = A.corpus_text_ids(db, _int(corpus_b)) if corpus_b not in (None, "none") else None
     step = _int(qp.get("step")) or 10
     rep = build_report(db, dict_id, sel.ids, entry_ids, step=step if step in A.PERIOD_STEPS else 10, ids_b=ids_b, stop=sel.stopset)
+    # краткий вид (разделы 2–6 свёрнуты, меньше примеров и связей) — по умолчанию для большой выборки; rview=full|short
+    rview = qp.get("rview")
+    short = rview == "short" or (rview != "full" and (rep["n_texts"] >= REP_SHORT_TEXTS or len(rep["words"]) > REP_SHORT_WORDS))
     return {"rep": rep, "report_b": corpus_b, "report_b_name": A.corpus_label(db, _int(corpus_b)) if ids_b is not None else "",
+            "rep_short": short, "REP_SHORT_EXAMPLES": 2, "REP_SHORT_RELS": 5,
             "rep_default_words": not sel.words, "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
 
 
@@ -1348,8 +1393,64 @@ def entities_extract(request: Request, text_ids: list[str] = Form([]), back: str
     return redirect(back if back.startswith("/") else "/analysis?tab=entities")
 
 
+# Последний выбор на страницах анализа и дашборда запоминается в браузере (cookie): словарь, корпус, стоп-слова,
+# флажки. Отобранные тексты и слова не запоминаются. Открыли «Анализ» без параметров — подставляется сохранённое.
+REMEMBER_KEYS = ("dictionary_id", "corpus_id", "stop", "noprop", "unit")
+REMEMBER_COOKIE = "qv_sel"
+
+
+def _recall_selection(request: Request, db: Session):
+    """Перенаправление на сохранённый выбор, если в адресе нет ни словаря, ни корпуса (?reset=1 — забыть выбор)."""
+    from urllib.parse import parse_qsl, urlencode
+
+    qp = request.query_params
+    if qp.get("reset"):
+        resp = redirect(request.url.path + (f"?tab={qp['tab']}" if qp.get("tab") else ""))
+        resp.delete_cookie(REMEMBER_COOKIE)
+        return resp
+    saved = request.cookies.get(REMEMBER_COOKIE)
+    if not saved or "dictionary_id" in qp or "corpus_id" in qp:
+        return None
+    pairs = [(k, v) for k, v in parse_qsl(saved) if k in REMEMBER_KEYS]
+    keep = []  # удалённые с тех пор словарь и корпус не подставляются
+    for k, v in pairs:
+        if k == "dictionary_id" and not (v.isdigit() and db.get(Dictionary, int(v))):
+            continue
+        if k == "corpus_id" and v and not (v.isdigit() and db.get(Corpus, int(v))):
+            continue
+        keep.append((k, v))
+    if not keep:
+        return None
+    return redirect(request.url.path + "?" + urlencode(list(qp.multi_items()) + keep))
+
+
+def _remember_selection(resp, request: Request, dict_id: int | None):
+    from urllib.parse import urlencode
+
+    qp = request.query_params
+    pairs = [(k, v) for k in REMEMBER_KEYS for v in qp.getlist(k) if k != "dictionary_id"]
+    if dict_id:
+        pairs.insert(0, ("dictionary_id", str(dict_id)))
+    if "corpus_id" not in qp:
+        pairs.append(("corpus_id", ""))  # «Все тексты» — тоже выбор
+    resp.set_cookie(REMEMBER_COOKIE, urlencode(pairs), max_age=180 * 24 * 3600, samesite="lax", httponly=True)
+    return resp
+
+
 @router.get("/analysis")
 def analysis(request: Request, db: Session = Depends(get_session)):
+    back = _recall_selection(request, db)
+    if back is not None:
+        return back
+    resp = _analysis_page(request, db)
+    if request.query_params.get("tab") != "compare":  # во «Сравнении корпусов» корпус A — свой
+        dict_id = _int(request.query_params.get("dictionary_id"))
+        if dict_id or request.query_params:
+            _remember_selection(resp, request, dict_id)
+    return resp
+
+
+def _analysis_page(request: Request, db: Session):
     ctx = _analysis_context(db, request)
     qp = request.query_params
     dict_id, tab, sel = ctx["dict_id"], ctx["tab"], ctx["sel"]
@@ -1743,7 +1844,11 @@ def _dashboard_data(db: Session, request: Request) -> tuple[dict, object, int | 
 @router.get("/dashboard")
 def dashboard_page(request: Request, db: Session = Depends(get_session)):
     """Обзорный дашборд по выборке: корпус (corpus_id), отмеченные тексты (texts) или один текст."""
+    back = _recall_selection(request, db)
+    if back is not None:
+        return back
     dash, sel, dict_id, dictionaries = _dashboard_data(db, request)
-    return render(request, "dashboard_view.html", dash=dash, selq=sel.query(False), sel_pairs=sel.pairs(False),
+    resp = render(request, "dashboard_view.html", dash=dash, selq=sel.query(False), sel_pairs=sel.pairs(False),
                   dict_id=dict_id, dictionaries=dictionaries)
+    return _remember_selection(resp, request, dict_id)
 

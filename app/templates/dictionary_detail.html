@@ -28,7 +28,7 @@
     <div class="shrink small seg-links">Показать:
       {% if show == 'all' %}<strong>все ({{ n_all }})</strong>{% else %}<a href="/dictionaries/{{ d.id }}?sort={{ sort }}">все ({{ n_all }})</a>{% endif %} ·
       {% if show == 'unverified' %}<strong>непроверенные ({{ n_unverified }})</strong>{% elif n_unverified %}<a href="/dictionaries/{{ d.id }}?sort={{ sort }}&show=unverified" title="неоднозначные слова, разбор которых ещё не подтверждён: проверьте вариант и нажмите «Сохранить»">непроверенные ({{ n_unverified }})</a>{% else %}<span class="muted">непроверенных нет</span>{% endif %}</div>
-    <div class="shrink small">Порядок: {% for k, v in DICT_SORTS.items() %}{% if k == sort %}<strong>{{ v }}</strong>{% else %}<a href="/dictionaries/{{ d.id }}?sort={{ k }}{{ showq }}">{{ v }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+    <div class="shrink small">Порядок: {% for k, v in DICT_SORTS.items() if not (k == 'cats' and no_cats) %}{% if k == sort %}<strong>{{ v }}</strong>{% else %}<a href="/dictionaries/{{ d.id }}?sort={{ k }}{{ showq }}">{{ v }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>
   </div>
   {% if show == 'unverified' %}<p class="flash info">Показаны только непроверенные неоднозначные слова. Выберите верный разбор и нажмите «Сохранить» — слово станет проверенным и уйдёт из этого списка.</p>{% endif %}
   <form method="post" action="/dictionaries/{{ d.id }}/assign-category" id="catform" class="row cat-bar" style="align-items:flex-end">
@@ -44,7 +44,22 @@
     Режим «по формам» ищет перечисленные словоформы, а не лемму: полезно, если парсер лемматизирует слово иначе.</p>
   <table>
     <tr><th><input type="checkbox" title="отметить все слова в таблице" onchange="document.querySelectorAll('.cat-check').forEach(c => c.checked = this.checked); catCount()"></th><th>Слово</th><th>Разбор (лемма · часть речи)</th><th>Режим</th>{% if not no_cats %}<th>Категория</th>{% endif %}<th class="num">Вхождений{{ ' ↓' if sort == 'hits' }}</th><th></th></tr>
+    {% set ncols = 6 if no_cats else 7 %}
     {% for e in entries %}
+    {% if sort == 'cats' and not no_cats and (loop.first or (e.category or '') != (loop.previtem.category or '')) %}
+    {% set cname = e.category or '' %}
+    <tr class="cat-head" id="cat-{{ loop.index }}"><td colspan="{{ ncols }}">
+      <div class="row" style="align-items:center;gap:10px">
+        <div class="shrink"><input type="checkbox" title="отметить все слова категории" onchange="this.closest('tr').dataset.on = this.checked; let r = this.closest('tr').nextElementSibling; while (r && !r.classList.contains('cat-head')) { const c = r.querySelector('.cat-check'); if (c) c.checked = this.checked; r = r.nextElementSibling; } catCount()"></div>
+        <div><strong>{{ cname or 'Без категории' }}</strong> <span class="muted small">— {{ cat_stats[cname][0] }} слов, {{ cat_stats[cname][1] }} вхожд.</span></div>
+        {% if cname %}<form class="shrink inline-form" method="post" action="/dictionaries/{{ d.id }}/category">
+          <input type="hidden" name="name" value="{{ cname }}"><input type="hidden" name="back" value="/dictionaries/{{ d.id }}?sort=cats{{ showq }}">
+          <input type="text" name="new_name" value="{{ cname }}" aria-label="новое название категории" style="width:200px">
+          <button class="small secondary" type="submit" name="action" value="rename">Переименовать</button>
+          <button class="small danger" type="submit" name="action" value="delete" onclick='return confirm({{ ("Удалить категорию «" ~ cname ~ "»? Слова останутся в словаре без категории.")|tojson }})'>Удалить категорию</button>
+        </form>{% endif %}
+      </div></td></tr>
+    {% endif %}
     <tr id="e{{ e.id }}" class="{{ 'ambiguous' if e.ambiguous and not e.verified }}">
       <td><input type="checkbox" class="cat-check" form="catform" name="entry_ids" value="{{ e.id }}" onchange="catCount()"></td>
       <td><form id="f{{ e.id }}" method="post" action="/dictionaries/{{ d.id }}/entries/{{ e.id }}"></form><strong>{{ e.surface }}</strong>{% if e.phrase %} <span class="badge" title="словосочетание: ищется по главному слову «{{ e.lemma }}», остальные слова проверяются рядом">словосочетание</span>{% endif %}{% if e.verified %} <span class="badge ready" title="проверено">✓</span>{% elif e.ambiguous %} <span class="badge warn">проверить</span>{% endif %}</td>

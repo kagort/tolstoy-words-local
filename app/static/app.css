@@ -232,3 +232,13 @@ tr.rel-off td:not(:last-child) { text-decoration: line-through; }
 /* линейные значки вместо эмодзи (deps.icon) */
 .ic { width: 1.05em; height: 1.05em; vertical-align: -0.17em; margin-right: 0.35em; flex-shrink: 0; }
 .icon-btn .ic, a > .ic:only-child { margin-right: 0; }
+tr.cat-head td { background: var(--accent-soft); border-top: 2px solid var(--border); padding-top: 8px; padding-bottom: 8px; }
+.inline-form { display: inline-flex; gap: 6px; align-items: center; margin: 0; }
+.smap-labels .link-btn, .kw-size .link-btn { text-decoration: underline dotted; }
+.smap-labels .link-btn.on { color: var(--text); font-weight: 600; text-decoration: none; }
+details.rep-sec { margin: 4px 0 10px; }
+details.rep-sec > summary { cursor: pointer; list-style: none; }
+details.rep-sec > summary::-webkit-details-marker { display: none; }
+details.rep-sec > summary h3 { display: inline; }
+details.rep-sec > summary::before { content: "▸"; display: inline-block; width: 1.1em; color: var(--muted); transition: transform .15s; }
+details.rep-sec[open] > summary::before { transform: rotate(90deg); }

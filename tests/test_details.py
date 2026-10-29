@@ -104,3 +104,25 @@ def test_no_emoji_in_pages(client):
             client.cookies.set("qv_ui", ui)
             assert not EMOJI.search(client.get(url).text), (url, ui)
     client.cookies.set("qv_ui", "v2")
+
+
+def test_categories_view_rename_delete(client):
+    from app.db import SessionLocal
+    from app.models import Dictionary
+
+    ids = {k: str(v) for k, v in client.entries.items()}
+    client.post(f"/dictionaries/{client.dict_id}/assign-category", data={"category": "", "entry_ids": list(ids.values())})
+    client.post(f"/dictionaries/{client.dict_id}/assign-category", data={"category": "ЗАПАХ", "entry_ids": [ids["запах"]]})
+    client.post(f"/dictionaries/{client.dict_id}/assign-category", data={"category": "ЦВЕТЫ", "entry_ids": [ids["сирень"]]})
+    page = client.get(f"/dictionaries/{client.dict_id}?sort=cats").text
+    assert page.count('class="cat-head"') == 3 and "Без категории" in page and "Удалить категорию" in page
+    # переименование в существующее название — слияние
+    client.post(f"/dictionaries/{client.dict_id}/category", data={"name": "ЦВЕТЫ", "new_name": "ЗАПАХ", "action": "rename"})
+    with SessionLocal() as s:
+        cats = {e.surface: e.category for e in s.get(Dictionary, client.dict_id).entries}
+    assert cats["сирень"] == "ЗАПАХ" and cats["запах"] == "ЗАПАХ"
+    r = client.post(f"/dictionaries/{client.dict_id}/category", data={"name": "ЗАПАХ", "action": "delete"}, follow_redirects=False)
+    assert "удалена: 2 слов" in client.get(r.headers["location"]).text
+    with SessionLocal() as s:
+        d = s.get(Dictionary, client.dict_id)
+        assert len(d.entries) == 3 and all(e.category is None for e in d.entries)  # слова остались, без категории

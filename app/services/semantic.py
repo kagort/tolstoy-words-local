@@ -162,8 +162,18 @@ def dictionary_map(session: Session, dictionary_id: int, k: int | None = None) -
         members.sort(key=lambda i: -float(xn[i] @ centroid))
         groups.append({"id": j + 1, "words": [have[i].surface for i in members],
                        "cohesion": round(float(np.mean([xn[i] @ centroid for i in members]) / (np.linalg.norm(centroid) or 1)), 3)})
+    # вхождения слова (по всем текстам) — подписи на карте получают только частые слова; центр группы — для её названия
+    from app.models import Hit
+    from app.services import analytics as A
+
+    counts = dict(session.execute(select(Hit.entry_id, func.count()).where(Hit.dictionary_id == dictionary_id, A.valid())
+                                  .group_by(Hit.entry_id)).all())
     points = [{"word": e.surface, "entry_id": e.id, "category": e.category or "", "group": int(labels[i]) + 1,
-               "x": round(float(xy[i, 0]), 4), "y": round(float(xy[i, 1]), 4)} for i, e in enumerate(have)]
+               "x": round(float(xy[i, 0]), 4), "y": round(float(xy[i, 1]), 4), "count": counts.get(e.id, 0)} for i, e in enumerate(have)]
+    for g in groups:
+        ps = [p for p in points if p["group"] == g["id"]]
+        g["x"], g["y"] = round(sum(p["x"] for p in ps) / len(ps), 4), round(sum(p["y"] for p in ps) / len(ps), 4)
+        g["label"] = ", ".join(g["words"][:3])  # самые типичные слова группы (ближе всего к её центру)
     return {"points": points, "groups": groups, "missing": missing, "k": k}
 
 
