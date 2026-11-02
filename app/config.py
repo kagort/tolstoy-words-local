@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     nlp_backend: str = "stanza"  # stanza | natasha
     stanza_dir: str = ""
     parse_batch_size: int = 64
+    # точный разбор (Stanza): предложений за один вызов — крупнее пачка, меньше накладных расходов; разбор тот же
+    precise_batch_size: int = 256
+    # потоков PyTorch на один обработчик: 0 — по числу ядер, доступных контейнеру (учитывает ограничение Docker cpus);
+    # при нескольких обработчиках (docker compose up --scale worker=N) — ядра / N
+    torch_threads: int = 0
     # two_stage — весь текст быстро разбирается FAST_PARSER (Natasha), а основным парсером (NLP_BACKEND, Stanza)
     #             только предложения со словами словарей и по кнопке «Точный разбор»; full — всё основным парсером
     processing_mode: str = "two_stage"

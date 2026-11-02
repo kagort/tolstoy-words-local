@@ -57,7 +57,7 @@ def upgrade_sentences(sentence_ids: list[int], job_id: int | None = None, progre
     if not sentence_ids:
         return 0
     parser = get_parser()
-    batch = max(8, settings.parse_batch_size)
+    batch = max(8, settings.precise_batch_size)
     done = 0
     lo, hi = progress
     for k in range(0, len(sentence_ids), batch):
