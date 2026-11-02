@@ -24,6 +24,26 @@
   <div class="tile"><div class="tile-num">{{ s.ipm|string|replace('.', ',') }}</div><div class="tile-label">ipm (на миллион слов выборки){{ term('ipm') }}</div></div>
   {% if s.share is not none %}<div class="tile"><div class="tile-num">{{ s.share|string|replace('.', ',') }}&thinsp;%</div><div class="tile-label">вхождений слова «{{ pt.head.surface }}» ({{ s.head_total }})</div></div>{% endif %}
 </div>
+{% if pt.pair %}{% set pr = pt.pair %}
+<div class="panel pt-pair pt-pair-{{ pr.verdict }}">
+  <div class="row" style="align-items:baseline">
+    <h3 style="margin:0">Устойчивость сочетания</h3>
+    <div class="spacer"></div>
+    <div class="shrink small muted">{{ {'syntax': 'синтаксическая связь', 'phrase': 'слова подряд'}.get(pr.how, 'в окне ±' ~ (pr.span // 2) ~ ' слов') }}</div>
+  </div>
+  <p class="pt-verdict"><strong>{{ pr.verdict_text|capitalize }}.</strong>
+    {% if pr.ratio %}Вместе — {{ pr.count }} раз, при случайном соседстве ожидалось бы {{ pr.expected|round(1)|string|replace('.', ',') }}{% if pr.ratio >= 1.5 %}: в {{ pr.ratio|string|replace('.', ',') }} раза чаще{% endif %}.{% endif %}</p>
+  <div class="pt-measures small">
+    <span title="сила связи до 14: чем выше, тем характернее сочетание для обоих слов">logDice{{ term('logdice') }} <b>{{ pr.logdice if pr.logdice is not none else '—' }}</b></span>
+    <span title="значимость: ≥ 3,84 — p &lt; 0,05; ≥ 10,83 — p &lt; 0,001; отрицательное — реже ожидаемого">G²{{ term('g2') }} <b>{{ pr.g2 }}</b></span>
+    <span title="во сколько раз (по логарифму 2) чаще случайного; завышает редкие сочетания">PMI{{ term('pmi') }} <b>{{ pr.pmi if pr.pmi is not none else '—' }}</b></span>
+    <span title="t-score: уверенность, что сочетание неслучайно; высок у частых сочетаний">t-score{{ term('tscore') }} <b>{{ pr.tscore if pr.tscore is not none else '—' }}</b></span>
+    <span class="muted">«{{ pt.head.surface }}» — {{ pr.fx }}, «{{ pr.partner }}» — {{ pr.fy }}, слов в выборке — {{ "{:,}".format(pt.summary.words).replace(",", " ") }}</span>
+  </div>
+  <p class="help" style="margin-bottom:0">Те же меры, что во вкладке «Коллокации». Устойчивое — G² ≥ 10,83 (p &lt; 0,001) и logDice ≥ 7; слабая связь — значимо (G² ≥ 3,84), но ниже этих порогов; меньше трёх вхождений — судить рано.
+    {% if pr.how != 'phrase' %}<a href="/analysis{{ qs(request, tab='colloc', mode=('syntax' if pr.how == 'syntax' else 'window'), page=None, unit_ctx=None, related=None, near=None, phrase=None, rel_type=None) }}">Все коллокаты «{{ pt.head.surface }}»</a>{% endif %}</p>
+</div>
+{% endif %}
 <nav class="pt-toc small no-print">Разделы: <a href="#pt-where">где встречается</a> · <a href="#pt-ctx">контексты</a> · <a href="#pt-kw">окружение</a> · <a href="#pt-col">коллокаты</a>{% if pt.syntax %} · <a href="#pt-syn">синтаксис</a>{% endif %}{% if pt.compare %} · <a href="#pt-cmp">сравнение</a>{% endif %}</nav>
 
 {# 2. Где встречается #}

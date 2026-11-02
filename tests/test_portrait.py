@@ -121,3 +121,23 @@ def test_portrait_page_and_export(client, corpus):
     assert r.status_code == 200 and "[мужик]" in r.text.lower() and "{русский}" in r.text.lower()
     r = client.get(q.replace("/analysis?tab=portrait", "/export/portrait.xlsx?tab=portrait"))
     assert r.status_code == 200 and r.content[:2] == b"PK"
+
+
+def test_pair_stats_and_colloc_link(client, corpus):
+    from app.db import SessionLocal
+    from app.services.portrait import portrait
+
+    ids, eid = corpus["text_ids"], corpus["entries"]["мужик"]
+    with SessionLocal() as s:
+        pr = portrait(s, corpus["dict_id"], ids, {"entry_id": eid, "related_lemma": "русский", "rel_type": "attribute"})["pair"]
+        assert pr["partner"] == "русский" and pr["how"] == "syntax" and pr["count"] == 4 and pr["fx"] == 6
+        assert pr["expected"] < pr["count"] and pr["verdict"] in ("strong", "weak")
+        pr = portrait(s, corpus["dict_id"], ids, {"entry_id": eid, "near": "пахать", "window": 3})["pair"]
+        assert pr["how"] == "window3" and pr["span"] == 6 and pr["count"] == 4
+        pr = portrait(s, corpus["dict_id"], ids, {"phrase": "русский мужик"})["pair"]
+        assert pr["partner"] == "русский" and pr["how"] == "phrase"
+        assert portrait(s, corpus["dict_id"], ids, {"entry_id": eid})["pair"] is None  # одно слово — пары нет
+    q = f"/analysis?tab=portrait&dictionary_id={corpus['dict_id']}&entry_id={eid}&rel_type=attribute&related=русский"
+    assert "Устойчивость сочетания" in client.get(q).text
+    r = client.get(f"/analysis?tab=colloc&dictionary_id={corpus['dict_id']}&entry_id={eid}&mode=syntax&min_count=1")
+    assert "tab=portrait" in r.text and "related=" in r.text
