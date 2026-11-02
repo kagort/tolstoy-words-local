@@ -8,6 +8,8 @@
   seed-demo                            демо: 3 текста из data/raw + словарь запахов
   run-jobs                             выполнить задачи из очереди и выйти
   check-nlp ["предложение"]            проверить, что парсер работает (печатает разбор и связи)
+  bench-parse [--text-id N] [--sentences 400] [--threads 1,2,4] [--batch 64,256]
+        замер скорости разбора (слов в секунду) при разных настройках и проверка, что разбор не меняется
 """
 
 from __future__ import annotations
@@ -153,6 +155,12 @@ def main() -> None:
     sub.add_parser("run-jobs")
     p3 = sub.add_parser("check-nlp")
     p3.add_argument("sentence", nargs="?", default="Сладкий запах сирени, который шёл из сада, наполнял комнату и кружил голову.")
+    p4 = sub.add_parser("bench-parse")
+    p4.add_argument("--text-id", type=int)
+    p4.add_argument("--sentences", type=int, default=400)
+    p4.add_argument("--threads", default="", help="потоки PyTorch через запятую (0 — по доступным ядрам)")
+    p4.add_argument("--batch", default="", help="предложений за вызов парсера через запятую")
+    p4.add_argument("--backend", default="", help="natasha, stanza или оба через запятую")
     a = ap.parse_args()
     if a.cmd == "import-dir":
         n = import_dir(a.folder, a.meta, a.corpus, a.type)
@@ -174,6 +182,14 @@ def main() -> None:
         else:
             run_download(None)
             print("Модели Stanza скачаны.")
+    elif a.cmd == "bench-parse":
+        from app.services.bench import bench
+
+        def ints(v):
+            return [int(x) for x in v.split(",") if x.strip().isdigit()] or None
+
+        with session_scope() as s:
+            bench(s, a.text_id, a.sentences, ints(a.threads), ints(a.batch), [b for b in a.backend.split(",") if b] or None)
     elif a.cmd == "run-jobs":
         print(f"Выполнено задач: {run_pending()}")
 

@@ -264,3 +264,10 @@ ul.pt-list li { padding: 1px 0; }
 details.edit-parse { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
 details.edit-parse > summary { cursor: pointer; }
 details.edit-parse form.fgrid { margin-top: 8px; }
+.pt-pair { border-left: 4px solid var(--border); }
+.pt-pair-strong { border-left-color: var(--ok); }
+.pt-pair-weak { border-left-color: var(--warn); }
+.pt-pair-random { border-left-color: var(--err); }
+.pt-verdict { margin: 8px 0; }
+.pt-measures { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; }
+.pt-measures b { font-size: 15px; }

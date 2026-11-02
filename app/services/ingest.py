@@ -132,7 +132,8 @@ def run_ingest(job_id: int | None, text_id: int) -> None:
     sent_idx = 0
     n_tokens = n_words = 0
     try:
-        for batch in process_text(content, parser, settings.parse_batch_size):
+        size = settings.precise_batch_size if level == PARSE_PRECISE else settings.parse_batch_size
+        for batch in process_text(content, parser, size):
             with SessionLocal() as s:
                 ids = _alloc_ids(s, "sentences_id_seq", len(batch))
                 srows, trows = [], []

@@ -290,6 +290,60 @@ def _compare(rels_a: Counter, rels_b: Counter, na: int, nb: int, exclude: set[st
     return {"more_a": more_a, "more_b": more_b, "n_a": na, "n_b": nb}
 
 
+# ------------------------------------------------------------------ статистика пары
+
+
+def _partner(filters: dict, head: DictionaryEntry | None) -> tuple[str | None, int, str]:
+    """Второе слово пары и ширина окна: (лемма, span, как найдено). span как в «Коллокациях»: связь — 1, окно — 2·окно,
+    словосочетание из двух слов — 1 (соседняя позиция). Нет второго слова — (None, …)."""
+    if filters.get("related_lemma"):
+        return norm(filters["related_lemma"]), 1, "syntax"
+    if filters.get("near"):
+        w = int(filters.get("window") or 3)
+        return norm(filters["near"]), 2 * w, f"window{w}"
+    if filters.get("phrase") and head is not None:
+        from app.services.phrases import parse
+
+        words = [s for s in parse(filters["phrase"]) if "gap" not in s]
+        if len(words) == 2:
+            other = [s for s in words if head.lemma_norm not in s["lemmas"]]
+            if len(other) == 1:
+                return other[0]["lemmas"][0] if len(other[0]["lemmas"]) == 1 else other[0]["form"], 1, "phrase"
+    return None, 1, ""
+
+
+PAIR_VERDICTS = {
+    "strong": "устойчивое сочетание: встречается намного чаще, чем при случайном соседстве",
+    "weak": "сочетание чаще случайного, но связь слабая",
+    "random": "не чаще, чем при случайном соседстве: отдельного сочетания, по-видимому, нет",
+    "rare": "слишком редко, чтобы судить об устойчивости",
+}
+
+
+def pair_stats(session: Session, filters: dict, head: DictionaryEntry | None, c: int, fx: int, text_ids: list[int],
+               words: int) -> dict | None:
+    """Устойчивость пары «главное слово + второе слово» — теми же мерами, что вкладка «Коллокации» (stats.association)."""
+    from app.services.collocations import _lemma_freq
+    from app.services.stats import association
+
+    lemma, span, how = _partner(filters, head)
+    if not lemma or not head or not fx:
+        return None
+    fy = _lemma_freq(session, {lemma}, text_ids).get(lemma, c)
+    m = association(c, fx, fy, words, span)
+    g2, ld = m["g2"], m["logdice"] or 0
+    if c < 3:
+        verdict = "rare"
+    elif g2 >= 10.83 and ld >= 7:
+        verdict = "strong"
+    elif g2 >= SIGNIFICANCE_LL:
+        verdict = "weak"
+    else:
+        verdict = "random"
+    return {"partner": lemma, "how": how, "span": span, "fx": fx, "fy": fy, **m, "verdict": verdict,
+            "verdict_text": PAIR_VERDICTS[verdict], "ratio": round(c / m["expected"], 1) if m["expected"] else None}
+
+
 # ------------------------------------------------------------------ портрет
 
 
@@ -312,6 +366,7 @@ def portrait(session: Session, dictionary_id: int, text_ids: list[int], filters:
                       "texts_total": len(text_ids), "ipm": round(ipm(len(ns), words), 2), "words": words,
                       "head_total": len(head_hits),
                       "share": round(100 * sum(1 for n in ns if n["entry_id"] == head_id) / len(head_hits), 1) if head_hits else None}
+    out["pair"] = pair_stats(session, filters, head, len(ns), len(head_hits), text_ids, words)
     out["where"] = _where(session, ns, text_ids)
     ctx_all = contexts(session, ns, filters, unit) if len(ns) <= per_page * 5 else None
     if ctx_all is None:  # много вхождений — контексты считаем только для узлов страницы (порядок тот же)
