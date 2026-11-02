@@ -3,6 +3,7 @@
 {% block content %}
 <p><a href="/texts">← Все тексты</a></p>
 <h1>{{ doc.title }} <span class="badge {{ doc.status }}">{{ STATUS_LABELS.get(doc.status, doc.status) }}</span></h1>
+{% if doc.created_by %}<p class="muted small" style="margin-top:-6px">Загрузил(а): {{ doc.created_by }}{% if doc.created_at %} · {{ doc.created_at.strftime('%d.%m.%Y') }}{% endif %}</p>{% endif %}
 {% if doc.error %}<div class="flash error"><strong>Ошибка разбора:</strong> {{ doc.error }}</div>{% endif %}
 
 <div class="grid cols-2">
@@ -51,7 +52,7 @@
         <button class="secondary" type="submit" {{ 'disabled' if precise_pending }}>{{ 'Точный разбор в очереди…' if precise_pending else 'Точный разбор всего текста (' ~ levels.fast ~ ' предл.)' }}</button></form>
       {% endif %}
       <form class="inline shrink" method="post" action="/texts/{{ doc.id }}/reparse"><button class="secondary" type="submit">Разобрать заново</button></form>
-      <form class="inline shrink" method="post" action="/texts/{{ doc.id }}/delete" onsubmit="return confirm('Удалить текст вместе со всей разметкой, вхождениями словарей, именами и портретом? Отменить нельзя.')"><button class="danger" type="submit">{{ icon('trash') }}Удалить текст со всеми связями</button></form>
+      <form class="inline shrink" method="post" action="/texts/{{ doc.id }}/delete" onsubmit="return confirm('{{ owner_note(doc, user) }}Удалить текст вместе со всей разметкой, вхождениями словарей, именами и портретом? Отменить нельзя.')"><button class="danger" type="submit">{{ icon('trash') }}Удалить текст со всеми связями</button></form>
     </p>
   </div>
 </div>

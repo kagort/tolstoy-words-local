@@ -3,6 +3,7 @@
 {% block content %}
 <p><a href="/dictionaries">← Все словари</a></p>
 <h1>Словарь «{{ d.name }}»</h1>
+{% if d.created_by %}<p class="muted small" style="margin-top:-6px">Создал(а): {{ d.created_by }}{% if d.created_at %} · {{ d.created_at.strftime('%d.%m.%Y') }}{% endif %}</p>{% endif %}
 {% if scope %}<p class="muted">Сопоставляется только с корпусами: {% for c in all_corpora if c.id in scope %}{{ c.name }}{% if not loop.last %}, {% endif %}{% endfor %} (настройки ниже).</p>{% endif %}
 <div class="row" style="margin-bottom:10px">
   <a class="btn secondary shrink" href="/dictionaries/{{ d.id }}/cognates" title="однокоренные слова из текстов: «милосердие» → «милосердный», «немилосердно»">{{ icon('sprout') }}Однокоренные из корпуса</a>
@@ -128,7 +129,7 @@
     <p class="row">
       <form class="inline shrink" method="post" action="/dictionaries/{{ d.id }}/rematch"><button class="secondary" type="submit" title="все тексты области словаря">Пересчитать вхождения{{ ' (все тексты)' if not scope else '' }}</button></form>
       <a class="btn secondary shrink" href="/export/dictionary/{{ d.id }}.csv">Скачать словарь (CSV)</a>
-      <form class="inline shrink" method="post" action="/dictionaries/{{ d.id }}/delete" onsubmit="return confirm('Удалить словарь целиком?')"><button class="danger" type="submit">Удалить словарь</button></form>
+      <form class="inline shrink" method="post" action="/dictionaries/{{ d.id }}/delete" onsubmit="return confirm('{{ owner_note(d, user, 'Этот словарь создал(а)') }}Удалить словарь целиком?')"><button class="danger" type="submit">Удалить словарь</button></form>
     </p>
   </div>
 </div>

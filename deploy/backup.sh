@@ -1,7 +1,6 @@
 #!/bin/sh
-# Резервная копия базы: ./deploy/backup.sh  (запускать из папки проекта)
-# Для ежедневного запуска на VPS добавьте в crontab (crontab -e):
-#   15 3 * * * cd /opt/quotverba && ./deploy/backup.sh >> backups/backup.log 2>&1
+# Резервная копия базы вручную: ./deploy/backup.sh  (запускать из папки проекта)
+# Ежедневные копии делает контейнер backup (docker-compose.yml, deploy/backup-loop.sh) — cron больше не нужен.
 set -e
 cd "$(dirname "$0")/.."
 . ./.env 2>/dev/null || true

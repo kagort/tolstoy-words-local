@@ -5,6 +5,10 @@
 <p class="help">Разбор текстов и пересчёт словарей выполняются в фоне. Страница обновляется сама, пока есть активные задачи.
   Задачу в очереди можно отменить сразу, выполняющуюся — она остановится на ближайшем шаге. Если обработчик упал или его перезапустили,
   брошенная задача сама вернётся в очередь через несколько минут.</p>
+{% if backup is not none %}<p class="small {{ 'flash error' if not backup.n or backup.stale else 'muted' }}">Резервные копии базы:
+  {% if backup.n %}последняя — {{ backup.when }} ({{ backup.size_mb|string|replace('.', ',') }} МБ), хранится {{ backup.n }}.
+    {% if backup.stale %}Больше двух суток новых копий нет — проверьте контейнер backup (<code>docker compose logs backup</code>).{% endif %}
+  {% else %}ещё не сделано ни одной — проверьте контейнер backup (<code>docker compose logs backup</code>).{% endif %}</p>{% endif %}
 <div class="row" style="margin-bottom:10px">
   <form class="inline shrink" method="post" action="/jobs/clear"><input type="hidden" name="what" value="finished"><button class="small secondary" type="submit">Удалить выполненные и отменённые</button></form>
   <form class="inline shrink" method="post" action="/jobs/clear"><input type="hidden" name="what" value="errors"><button class="small secondary" type="submit">Удалить задачи с ошибкой</button></form>

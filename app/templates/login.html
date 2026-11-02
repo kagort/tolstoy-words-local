@@ -8,11 +8,13 @@
   {% endif %}
   <form method="post" action="/login">
     <input type="hidden" name="next" value="{{ next }}">
-    <label for="u">Логин</label>
-    <input id="u" type="text" name="username" autocomplete="username" required autofocus>
+    <label for="u">{{ 'Ваше имя (или логин администратора)' if testers else 'Логин' }}</label>
+    <input id="u" type="text" name="username" autocomplete="username" required autofocus{% if testers %} placeholder="например: Анна Петрова"{% endif %}>
     <label for="p">Пароль</label>
     <input id="p" type="password" name="password" autocomplete="current-password" required>
     <p><button type="submit">Войти</button></p>
+    {% if testers %}<p class="help">Тестовый режим: войдите под своим именем с общим паролем тестировщиков. Имя будет видно у загруженных
+      вами текстов, словарей и отзывов. Не удаляйте чужие тексты без договорённости — при удалении программа предупредит, кто их загрузил.</p>{% endif %}
   </form>
 </div>
 {% endblock %}

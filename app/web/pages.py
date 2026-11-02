@@ -55,16 +55,24 @@ def _int(v: str | None) -> int | None:
 
 @router.get("/login")
 def login_form(request: Request, next: str = "/"):
-    return render(request, "login.html", next=next, no_password=not settings.admin_password)
+    return render(request, "login.html", next=next, no_password=not settings.admin_password,
+                  testers=bool(settings.tester_password))
 
 
 @router.post("/login")
 def login(request: Request, username: str = Form(...), password: str = Form(...), next: str = Form("/")):
-    ok_user = hmac.compare_digest(username.strip(), settings.admin_username)
-    ok_pass = bool(settings.admin_password) and hmac.compare_digest(password, settings.admin_password)
-    if ok_user and ok_pass:
-        request.session["user"] = username.strip()
-        return redirect(next if next.startswith("/") else "/")
+    def same(a: str, b: str) -> bool:  # сравнение без утечки по времени; байты — чтобы работала кириллица
+        return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+
+    name = " ".join(username.split())[:60]
+    ok_admin = (bool(settings.admin_password) and same(name, settings.admin_username)
+                and same(password, settings.admin_password))
+    # тестировщики: любое имя + общий пароль TESTER_PASSWORD (имя администратора с этим паролем не подходит)
+    ok_tester = (bool(settings.tester_password) and bool(name) and not same(name.lower(), settings.admin_username.lower())
+                 and same(password, settings.tester_password))
+    if ok_admin or ok_tester:
+        request.session["user"] = name
+        return redirect(next if next.startswith("/") and not next.startswith("//") else "/")
     flash(request, "Неверный логин или пароль", "error")
     return redirect(f"/login?next={next}")
 
@@ -1772,6 +1780,24 @@ async def check_submit(request: Request, text: str = Form(""), file: UploadFile 
 # ------------------------------------------------------------------ задачи
 
 
+def backup_status() -> dict | None:
+    """Последняя резервная копия базы (папка BACKUP_DIR): None — папки нет (копии не настроены в этом запуске)."""
+    import os
+    from datetime import datetime
+
+    d = settings.backup_dir
+    if not d or not os.path.isdir(d):
+        return None
+    files = sorted((f for f in os.listdir(d) if f.startswith("tolstoy-") and f.endswith(".dump")),
+                   key=lambda f: os.path.getmtime(os.path.join(d, f)), reverse=True)
+    if not files:
+        return {"n": 0}
+    path = os.path.join(d, files[0])
+    when = datetime.fromtimestamp(os.path.getmtime(path))
+    return {"n": len(files), "name": files[0], "when": when.strftime("%d.%m.%Y %H:%M"),
+            "size_mb": round(os.path.getsize(path) / 1_048_576, 1), "stale": (datetime.now() - when).days >= 2}
+
+
 @router.get("/jobs")
 def jobs_page(request: Request, db: Session = Depends(get_session)):
     from app.services.jobs import eta_seconds, human_duration, queue_estimate
@@ -1780,7 +1806,8 @@ def jobs_page(request: Request, db: Session = Depends(get_session)):
     active = any(j.status in ("queued", "running") for j in jobs)
     q = queue_estimate(db) if active else {"n": 0, "seconds": None}
     return render(request, "jobs.html", jobs=jobs, active=active, etas={j.id: human_duration(eta_seconds(j)) for j in jobs},
-                  queue_eta=human_duration(q["seconds"]), queue_n=q["n"], queue_unknown=q.get("unknown", 0))
+                  queue_eta=human_duration(q["seconds"]), queue_n=q["n"], queue_unknown=q.get("unknown", 0),
+                  backup=backup_status())
 
 
 @router.get("/api/jobs")
@@ -1855,6 +1882,57 @@ __all__ = ["router", "TokenRow", "TokenRelation"]
 
 
 # ------------------------------------------------------------------ база знаний
+
+
+# ------------------------------------------------------------------ отзывы тестировщиков
+
+
+def _safe_page(page: str) -> str:
+    """Только путь внутри приложения (без перехода на чужой сайт)."""
+    page = (page or "").strip()
+    return page if page.startswith("/") and not page.startswith("//") else "/"
+
+
+@router.post("/feedback")
+def feedback_create(request: Request, text: str = Form(""), kind: str = Form("other"), page: str = Form("/"),
+                    db: Session = Depends(get_session)):
+    from app.models import FEEDBACK_KINDS, Feedback
+
+    page = _safe_page(page)
+    if not text.strip():
+        flash(request, "Отзыв пустой — напишите, что заметили.", "error")
+        return redirect(page)
+    db.add(Feedback(text=text.strip()[:10_000], kind=kind if kind in FEEDBACK_KINDS else "other", page=page[:1000]))
+    db.commit()
+    flash(request, "Спасибо! Отзыв сохранён.", "success")
+    return redirect(page)
+
+
+@router.get("/feedback")
+def feedback_list(request: Request, status: str = "", db: Session = Depends(get_session)):
+    from app.models import FEEDBACK_KINDS, FEEDBACK_STATUSES, Feedback
+
+    q = select(Feedback).order_by(Feedback.created_at.desc())
+    if status in FEEDBACK_STATUSES:
+        q = q.where(Feedback.status == status)
+    counts = dict(db.execute(select(Feedback.status, func.count()).group_by(Feedback.status)).all())
+    return render(request, "feedback.html", items=list(db.scalars(q.limit(1000))), status=status, counts=counts,
+                  KINDS=FEEDBACK_KINDS, STATUSES=FEEDBACK_STATUSES)
+
+
+@router.post("/feedback/{fid}")
+def feedback_update(request: Request, fid: int, status: str = Form("seen"), reply: str = Form(""),
+                    back: str = Form(""), db: Session = Depends(get_session)):
+    from app.models import FEEDBACK_STATUSES, Feedback
+
+    fb = db.get(Feedback, fid)
+    if fb is None:
+        raise HTTPException(404)
+    if status in FEEDBACK_STATUSES:
+        fb.status = status
+    fb.reply = reply.strip() or None
+    db.commit()
+    return redirect("/feedback" + (f"?status={back}" if back in FEEDBACK_STATUSES else "") + f"#fb{fid}")
 
 
 @router.get("/help")
