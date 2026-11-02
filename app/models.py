@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from datetime import datetime
 
 from sqlalchemy import (
@@ -33,6 +34,16 @@ corpus_texts = Table(
 )
 
 
+# кто сейчас работает (имя, введённое при входе): ставит AuthMiddleware на время запроса; сохраняется в created_by
+# текстов, корпусов и словарей — чтобы при удалении было видно, что данные загрузил другой человек
+CURRENT_USER: ContextVar[str | None] = ContextVar("current_user", default=None)
+
+
+def _current_user() -> str | None:
+    u = CURRENT_USER.get()
+    return u[:100] if u else None
+
+
 class TextDoc(Base):
     __tablename__ = "texts"
 
@@ -55,6 +66,7 @@ class TextDoc(Base):
     n_tokens: Mapped[int] = mapped_column(Integer, default=0)
     n_words: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by: Mapped[str | None] = mapped_column(String(100), default=_current_user)
 
     corpora: Mapped[list[Corpus]] = relationship(secondary=corpus_texts, back_populates="texts")
 
@@ -72,6 +84,7 @@ class Corpus(Base):
     name: Mapped[str] = mapped_column(String(255), unique=True)
     description: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by: Mapped[str | None] = mapped_column(String(100), default=_current_user)
 
     texts: Mapped[list[TextDoc]] = relationship(secondary=corpus_texts, back_populates="corpora", order_by="TextDoc.id")
 
@@ -134,6 +147,7 @@ class Dictionary(Base):
     # include_participles / include_gerunds / merge_propn
     settings: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by: Mapped[str | None] = mapped_column(String(100), default=_current_user)
     matched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     entries: Mapped[list[DictionaryEntry]] = relationship(
@@ -347,3 +361,22 @@ class Job(Base):
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # скорость выполнения для оценки оставшегося времени: {"t", "p", "rate"} (см. services/jobs.set_progress)
     eta: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
+
+
+FEEDBACK_KINDS = {"error": "ошибка", "idea": "предложение", "question": "вопрос", "other": "другое"}
+FEEDBACK_STATUSES = {"new": "новый", "seen": "прочитан", "done": "сделано"}
+
+
+class Feedback(Base):
+    """Отзыв тестировщика: кнопка «Отзыв» на каждой странице (страница, на которой его оставили, сохраняется)."""
+
+    __tablename__ = "feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    author: Mapped[str | None] = mapped_column(String(100), default=_current_user)
+    page: Mapped[str | None] = mapped_column(String(1000))
+    kind: Mapped[str] = mapped_column(String(16), default="other")
+    text: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="new", server_default="new")
+    reply: Mapped[str | None] = mapped_column(Text)  # заметка администратора

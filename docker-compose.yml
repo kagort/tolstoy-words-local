@@ -37,6 +37,7 @@ services:
       - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8000}:8000"
     volumes:
       - ./data:/app/data:ro
+      - ./backups:/app/backups:ro
     depends_on:
       db:
         condition: service_healthy
@@ -64,6 +65,26 @@ services:
         condition: service_healthy
       web:
         condition: service_started
+
+  # ежедневная резервная копия базы в ./backups (последние BACKUP_KEEP, по умолчанию 7) — см. deploy/backup-loop.sh
+  backup:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGUSER: ${DB_USER:-postgres}
+      PGPASSWORD: ${DB_PASSWORD:?Задайте DB_PASSWORD в файле .env}
+      PGDATABASE: ${DB_NAME:-tolstoy}
+      TZ: ${TIMEZONE:-Europe/Moscow}
+      BACKUP_HOUR: ${BACKUP_HOUR:-3}
+      BACKUP_KEEP: ${BACKUP_KEEP:-7}
+    entrypoint: ["/bin/sh", "/backup-loop.sh"]
+    volumes:
+      - ./backups:/backups
+      - ./deploy/backup-loop.sh:/backup-loop.sh:ro
+    depends_on:
+      db:
+        condition: service_healthy
 
   caddy:
     image: caddy:2

@@ -108,6 +108,7 @@ templates.env.globals.update(
     role_label=role_label_ud,
     rel_label=rel_label_ud,
     term=lambda tid: Markup(_term_html(tid)),
+    owner_note=lambda *a, **k: owner_note(*a, **k),
 )
 
 
@@ -125,8 +126,35 @@ def pop_flash(request: Request) -> list[dict]:
     return request.session.pop("flash", [])
 
 
+def _feedback_new() -> int:
+    """Число новых отзывов — для счётчика в меню (ошибка базы не должна ломать страницу)."""
+    try:
+        from sqlalchemy import func, select
+
+        from app.db import SessionLocal
+        from app.models import Feedback
+
+        with SessionLocal() as s:
+            return int(s.scalar(select(func.count()).select_from(Feedback).where(Feedback.status == "new")) or 0)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def owner_note(obj, user: str | None, what: str = "Этот текст загрузил(а)") -> str:
+    """Предупреждение для подтверждения удаления, если данные загрузил другой человек (по имени при входе).
+    Без кавычек — подставляется в confirm('…')."""
+    by = getattr(obj, "created_by", None)
+    if not by or (user and by.strip().lower() == user.strip().lower()):
+        return ""
+    when = obj.created_at.strftime("%d.%m.%Y") if getattr(obj, "created_at", None) else ""
+    name = by.replace("'", "").replace('"', "").replace("\\", "")
+    return f"{what} другой человек: {name}{', ' + when if when else ''}. "
+
+
 def render(request: Request, name: str, **ctx):
     ctx.setdefault("user", request.session.get("user"))
+    if ctx["user"]:
+        ctx.setdefault("feedback_new", _feedback_new())
     ctx["flashes"] = pop_flash(request)
     ctx["request"] = request
     return templates.TemplateResponse(request, name, ctx)

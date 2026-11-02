@@ -153,6 +153,24 @@ def export_concordance(fmt: str, request: Request, db: Session = Depends(get_ses
     return _send({"Конкорданс": df}, fmt, "concordance", _params(db, request) | {"Строк": c["total"]})
 
 
+@router.get("/feedback.{fmt}")
+def export_feedback(fmt: str, request: Request, db: Session = Depends(get_session)):
+    """Отзывы тестировщиков — для обобщения пользовательского опыта."""
+    from app.models import FEEDBACK_KINDS, FEEDBACK_STATUSES, Feedback
+
+    if fmt not in FORMATS:
+        raise HTTPException(400)
+    q = select(Feedback).order_by(Feedback.created_at)
+    status = request.query_params.get("status")
+    if status in FEEDBACK_STATUSES:
+        q = q.where(Feedback.status == status)
+    df = pd.DataFrame([{"Дата": f.created_at.strftime("%d.%m.%Y %H:%M") if f.created_at else "", "Кто": f.author or "",
+                        "Тип": FEEDBACK_KINDS.get(f.kind, f.kind), "Отзыв": f.text, "Страница": f.page or "",
+                        "Статус": FEEDBACK_STATUSES.get(f.status, f.status), "Заметка": f.reply or ""} for f in db.scalars(q)],
+                      columns=["Дата", "Кто", "Тип", "Отзыв", "Страница", "Статус", "Заметка"])
+    return _send({"Отзывы": df}, fmt, "feedback", {"Отзывов": len(df), "Статус": FEEDBACK_STATUSES.get(status, "все")})
+
+
 @router.get("/portrait.{fmt}")
 def export_portrait(fmt: str, request: Request, db: Session = Depends(get_session)):
     """Контексты портрета словосочетания: XLSX/CSV (с источником) или TXT (по контексту в абзаце)."""

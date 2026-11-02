@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     secret_key: str = "change-me"
     admin_username: str = "admin"
     admin_password: str = ""
+    # общий пароль тестировщиков (пусто — вход только администратора): с ним входят под своим именем (любое имя),
+    # имя сохраняется у загруженных текстов, корпусов, словарей и у отзывов
+    tester_password: str = ""
     upload_max_mb: int = 50
     site_title: str = "Quotverba"
     # интерфейс по умолчанию: v2 — новый (боковое меню, токены DESIGN_TOKENS.md), classic — прежний (откат: UI_DEFAULT=classic);
@@ -37,6 +40,8 @@ class Settings(BaseSettings):
     # потоков PyTorch на один обработчик: 0 — по числу ядер, доступных контейнеру (учитывает ограничение Docker cpus);
     # при нескольких обработчиках (docker compose up --scale worker=N) — ядра / N
     torch_threads: int = 0
+    # папка с резервными копиями базы (контейнер backup, docker-compose.yml) — для строки «последняя копия» на «Задачах»
+    backup_dir: str = "/app/backups"
     # two_stage — весь текст быстро разбирается FAST_PARSER (Natasha), а основным парсером (NLP_BACKEND, Stanza)
     #             только предложения со словами словарей и по кнопке «Точный разбор»; full — всё основным парсером
     processing_mode: str = "two_stage"

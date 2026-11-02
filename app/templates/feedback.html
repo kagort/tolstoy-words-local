@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Отзывы{% endblock %}
+{% block content %}
+<h1>Отзывы тестировщиков</h1>
+<div class="row" style="align-items:center;margin-bottom:10px">
+  <div class="tabs" style="margin:0">
+    <a class="{{ 'active' if not status }}" href="/feedback">все ({{ counts.values()|sum }})</a>
+    {% for k, v in STATUSES.items() %}<a class="{{ 'active' if status == k }}" href="/feedback?status={{ k }}">{{ v }} ({{ counts.get(k, 0) }})</a>{% endfor %}
+  </div>
+  <div class="spacer"></div>
+  <div class="shrink"><button type="button" class="small secondary" data-feedback>Написать отзыв</button>
+    <a class="btn small secondary" href="/export/feedback.xlsx{{ '?status=' ~ status if status }}">{{ icon('download') }}XLSX</a></div>
+</div>
+<div class="panel table-scroll">
+{% if items %}
+<table class="fb-table">
+  <tr><th>Когда</th><th>Кто</th><th>Тип</th><th>Отзыв</th><th>Страница</th><th>Статус и заметка</th></tr>
+  {% for f in items %}
+  <tr id="fb{{ f.id }}" class="{{ 'fb-new' if f.status == 'new' }}">
+    <td class="small nowrap">{{ f.created_at.strftime('%d.%m.%Y %H:%M') if f.created_at }}</td>
+    <td class="small">{{ f.author or '—' }}</td>
+    <td><span class="badge {{ 'warn' if f.kind == 'error' }}">{{ KINDS.get(f.kind, f.kind) }}</span></td>
+    <td style="white-space:pre-wrap;max-width:46ch">{{ f.text }}</td>
+    <td class="small"><a href="{{ f.page }}" title="{{ f.page }}">{{ f.page|truncate(40, True) }}</a></td>
+    <td><form method="post" action="/feedback/{{ f.id }}" class="fb-status">
+      <input type="hidden" name="back" value="{{ status }}">
+      <select name="status">{% for k, v in STATUSES.items() %}<option value="{{ k }}" {{ 'selected' if f.status == k }}>{{ v }}</option>{% endfor %}</select>
+      <input type="text" name="reply" value="{{ f.reply or '' }}" placeholder="заметка (что сделано)">
+      <button class="small secondary" type="submit">Сохранить</button></form></td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}<p class="muted">Отзывов пока нет. Кнопка «Отзыв» есть на каждой странице.</p>{% endif %}
+</div>
+{% endblock %}

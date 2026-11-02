@@ -24,6 +24,8 @@
       <a href="/help" class="{{ 'active' if p.startswith('/help') }}">Справка</a>
     </nav>
     <div class="spacer"></div>
+    <button type="button" class="small" data-feedback style="margin-right:6px">Отзыв</button>
+    <a class="small" href="/feedback" style="margin-right:10px">отзывы{% if feedback_new %} ({{ feedback_new }}){% endif %}</a>
     <form class="inline" method="post" action="/logout"><button class="secondary small" type="submit">Выйти ({{ user }})</button></form>
     {% endif %}
   </div>
@@ -33,6 +35,7 @@
   {% block content %}{% endblock %}
 </main>
 <footer class="wrap muted small" style="padding-bottom:24px">{{ site_title }} · версия {{ app_version }}{% if user %} · <a href="/ui/v2?next={{ request.url.path|urlencode }}">новый интерфейс</a>{% endif %}</footer>
+{% if user %}{% include "_feedback.html" %}{% endif %}
 <script src="/static/app.js?v={{ asset_version }}"></script>
 {% block scripts %}{% endblock %}
 </body>

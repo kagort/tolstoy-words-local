@@ -15,6 +15,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app import __version__
 from app.config import settings
+from app.models import CURRENT_USER
 from app.web import export, pages
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -31,7 +32,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if path.startswith("/api/") or path.startswith("/export/"):
                 return JSONResponse({"error": "Требуется вход"}, status_code=401)
             return RedirectResponse(f"/login?next={request.url.path}", status_code=303)
-        return await call_next(request)
+        token = CURRENT_USER.set(request.session.get("user"))  # «кто загрузил» у новых текстов, корпусов, словарей
+        try:
+            return await call_next(request)
+        finally:
+            CURRENT_USER.reset(token)
 
 
 def create_app() -> FastAPI:

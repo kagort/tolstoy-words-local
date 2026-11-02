@@ -1,0 +1,25 @@
+{# Окно «Отзыв» — на каждой странице (base_v2 и base_classic). Страница, с которой открыли, сохраняется вместе с отзывом. #}
+<dialog id="fb-dialog" class="fb-dialog" aria-labelledby="fb-title">
+  <form method="post" action="/feedback">
+    <h3 id="fb-title" style="margin-top:0">Отзыв о программе</h3>
+    <p class="muted small" style="margin-top:0">Что не работает, что неудобно, чего не хватает. Страница, на которой вы сейчас, сохранится вместе с отзывом.</p>
+    <div class="fb-kinds" role="radiogroup" aria-label="Тип отзыва">
+      {% for k, v in [('error', 'ошибка'), ('idea', 'предложение'), ('question', 'вопрос'), ('other', 'другое')] %}
+      <label class="check"><input type="radio" name="kind" value="{{ k }}" {{ 'checked' if k == 'idea' }}> {{ v }}</label>{% endfor %}
+    </div>
+    <textarea name="text" rows="6" required placeholder="Например: в конкордансе не нашлось «запах» при выборе корпуса «Чехов» — хотя слово там есть"></textarea>
+    <input type="hidden" name="page" value="/">
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:10px">
+      <button type="button" class="secondary" onclick="this.closest('dialog').close()">Отмена</button>
+      <button type="submit">Отправить</button>
+    </div>
+  </form>
+</dialog>
+<script>
+document.querySelectorAll('[data-feedback]').forEach(b => b.addEventListener('click', () => {
+  const d = document.getElementById('fb-dialog');
+  d.querySelector('[name=page]').value = location.pathname + location.search;
+  if (d.showModal) d.showModal(); else d.setAttribute('open', '');
+  d.querySelector('textarea').focus();
+}));
+</script>
