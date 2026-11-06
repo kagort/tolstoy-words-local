@@ -9,20 +9,29 @@
   <link rel="stylesheet" href="/static/fonts.css?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/app.css?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/v2.css?v={{ asset_version }}">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 44'%3E%3Cline x1='1' y1='24' x2='15' y2='21.5' stroke='%233E4F94' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M19 15 C22 3, 33 2, 41 14 L34 16 Z' fill='%23A8732A'/%3E%3Cpath d='M13 21 C21 13, 40 13, 50 20.5 C40 28, 21 29, 13 21 Z' fill='%233E4F94'/%3E%3Cpath d='M48 20.5 L62 9 L56.5 20.5 L62 32 Z' fill='%233E4F94'/%3E%3Ccircle cx='19' cy='20' r='2' fill='%23fff'/%3E%3Cpath d='M2 38 q5 -4 10 0 t10 0 t10 0 t10 0 t10 0 t10 0' fill='none' stroke='%233E4F94' stroke-width='2.5' stroke-linecap='round' opacity='.6'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 44'%3E%3Cpath d='M19 15 C22 3, 33 2, 41 14 L34 16 Z' fill='%23A8732A'/%3E%3Cline x1='1' y1='24' x2='15' y2='21.5' stroke='%233E4F94' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M41 16.5 C42.5 11.5, 45.5 11, 47.5 17.5 Z' fill='%233E4F94'/%3E%3Cpath d='M13 21 C21 13, 40 13, 50 20.5 C40 28, 21 29, 13 21 Z' fill='%233E4F94'/%3E%3Cpath d='M48 20.5 L62 9 L56.5 20.5 L62 32 Z' fill='%233E4F94'/%3E%3Ccircle cx='19' cy='20' r='2' fill='%23fff'/%3E%3Cpath d='M2 38 q5 -4 10 0 t10 0 t10 0 t10 0 t10 0 t10 0' fill='none' stroke='%233E4F94' stroke-width='2.5' stroke-linecap='round' opacity='.6'/%3E%3C/svg%3E">
   {% block head %}{% endblock %}
 </head>
 <body class="v2">
 {% set p = request.url.path %}
-{# логотип — марлин над волной (отсылка к «Старику и морю» Хемингуэя: корпус — море, слова — улов) #}
+{# логотип — марлин над волной (отсылка к «Старику и морю» Хемингуэя: корпус — море, слова — улов). Солнце над горизонтом
+   неподвижно; при наведении на логотип в меню марлин по дуге ныряет — над водой остаётся хвост (анимация в v2.css). #}
 {% macro logo(size=40) -%}
 <svg class="logo" width="{{ size }}" height="{{ (size * 0.69)|round|int }}" viewBox="0 0 64 44" aria-hidden="true">
-  <line x1="1" y1="24" x2="15" y2="21.5" stroke="var(--cat-1)" stroke-width="2.4" stroke-linecap="round"></line>
-  <path d="M19 15 C22 3, 33 2, 41 14 L34 16 Z" fill="var(--cat-2)"></path>
-  <path d="M13 21 C21 13, 40 13, 50 20.5 C40 28, 21 29, 13 21 Z" fill="var(--cat-1)"></path>
-  <path d="M48 20.5 L62 9 L56.5 20.5 L62 32 Z" fill="var(--cat-1)"></path>
-  <circle cx="19" cy="20" r="1.8" fill="var(--surface)"></circle>
-  <path d="M2 38 q5 -4 10 0 t10 0 t10 0 t10 0 t10 0 t10 0" fill="none" stroke="var(--cat-1)" stroke-width="2" stroke-linecap="round" opacity=".55"></path>
+  <defs><clipPath id="qv-above-{{ size }}"><rect x="-20" y="-30" width="110" height="66"></rect></clipPath></defs>
+  <path class="sun" d="M19 15 C22 3, 33 2, 41 14 L34 16 Z" fill="var(--cat-2)"></path>
+  <g clip-path="url(#qv-above-{{ size }})"><g class="fish">
+    <line x1="1" y1="24" x2="15" y2="21.5" stroke="var(--cat-1)" stroke-width="2.4" stroke-linecap="round"></line>
+    <path d="M41 16.5 C42.5 11.5, 45.5 11, 47.5 17.5 Z" fill="var(--cat-1)"></path>
+    <path d="M13 21 C21 13, 40 13, 50 20.5 C40 28, 21 29, 13 21 Z" fill="var(--cat-1)"></path>
+    <path d="M48 20.5 L62 9 L56.5 20.5 L62 32 Z" fill="var(--cat-1)"></path>
+    <circle cx="19" cy="20" r="1.8" fill="var(--surface)"></circle>
+  </g></g>
+  <g class="splash" fill="var(--cat-1)">
+    <circle cx="27" cy="36" r="2.4" style="--dx:-7px;--dy:-10px"></circle><circle cx="29.2" cy="36" r="2" style="--dx:-3px;--dy:-13px"></circle>
+    <circle cx="31.4" cy="36" r="2.2" style="--dx:1px;--dy:-11px"></circle><circle cx="33.6" cy="36" r="1.8" style="--dx:5px;--dy:-9px"></circle>
+    <circle cx="35.8" cy="36" r="1.5" style="--dx:8px;--dy:-12px"></circle></g>
+  <path class="wave" d="M-3 38 q5 -4 10 0 t10 0 t10 0 t10 0 t10 0 t10 0 t10 0" fill="none" stroke="var(--cat-1)" stroke-width="2" stroke-linecap="round" opacity=".55"></path>
 </svg>
 {%- endmacro %}
 {% set NAV = [
@@ -38,7 +47,7 @@
 <div class="app">
   {% if user %}
   <aside class="side" aria-label="Разделы">
-    <a class="side-brand" href="/">{{ logo(44) }}<span><span class="side-name">{{ site_title }}</span><span class="side-sub" lang="en">Words are your element</span></span></a>
+    <a class="side-brand dive" href="/">{{ logo(44) }}<span><span class="side-name">{{ site_title }}</span><span class="side-sub"><span class="ru">Море слов — твоя стихия</span><span class="en" lang="en">Words are your element</span></span></span></a>
     <nav class="side-nav">
       {% for href, label, icon, prefixes in NAV %}
       {% set on = namespace(v=false) %}{% for pr in prefixes %}{% if p.startswith(pr) %}{% set on.v = true %}{% endif %}{% endfor %}

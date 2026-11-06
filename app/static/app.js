@@ -561,3 +561,10 @@ document.addEventListener('toggle', ev => {
   }
 }, true);
 window.addEventListener('beforeprint', () => document.querySelectorAll('details.rep-sec').forEach(d => { d.open = true; }));
+
+// логотип: марлин выныривает только после того, как нырнул (без анимации при загрузке страницы)
+document.querySelectorAll('.side-brand.dive').forEach(b => {
+  const t = () => b.classList.add('touched');
+  b.addEventListener('mouseenter', t, { once: true });
+  b.addEventListener('focus', t, { once: true });
+});

@@ -211,3 +211,30 @@ body.v2 { font: 15px/1.55 var(--font-sans); background: var(--bg); color: var(--
   .v2 .tg-groups a, .v2 .tg-tools a { flex-shrink: 0; min-height: 36px; display: inline-flex; align-items: center; }
 }
 @media print { .tool-groups { display: none !important; } }
+
+/* логотип: при наведении на него в меню марлин по дуге ныряет (солнце неподвижно), над водой — хвост; подпись по-русски
+   сменяется английской. Выныривает — когда курсор уходит (класс touched ставит app.js, чтобы не играть при загрузке) */
+.v2 .logo { overflow: visible; }
+.v2 .logo .fish { transform-origin: 52px 20px; }
+.v2 .side-brand.dive:hover .fish, .v2 .side-brand.dive:focus-visible .fish { animation: qv-dive .9s cubic-bezier(.4,0,.5,1) forwards; }
+.v2 .side-brand.dive.touched:not(:hover):not(:focus-visible) .fish { animation: qv-surface .8s cubic-bezier(.4,0,.4,1) forwards; }
+@keyframes qv-dive {
+  0% { transform: translate(0,0) rotate(0deg); } 30% { transform: translate(-7px,-2px) rotate(9deg); }
+  62% { transform: translate(-11px,2px) rotate(-50deg); } 100% { transform: translate(-8px,6px) rotate(-90deg); } }
+@keyframes qv-surface {
+  0% { transform: translate(-8px,6px) rotate(-90deg); } 40% { transform: translate(-11px,2px) rotate(-50deg); }
+  72% { transform: translate(-7px,-2px) rotate(9deg); } 100% { transform: translate(0,0) rotate(0deg); } }
+.v2 .logo .wave { transform-box: fill-box; }
+.v2 .side-brand.dive:hover .wave, .v2 .side-brand.dive:focus-visible .wave { animation: qv-ripple 1.6s ease-in-out .6s infinite; }
+@keyframes qv-ripple { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(-3px); } }
+.v2 .logo .splash circle { opacity: 0; transform-box: fill-box; transform-origin: center; }
+.v2 .side-brand.dive:hover .splash circle, .v2 .side-brand.dive:focus-visible .splash circle { animation: qv-splash .7s ease-out .5s 1 forwards; }
+.v2 .side-brand.dive:hover .splash circle:nth-child(2n) { animation-delay: .56s; }
+@keyframes qv-splash { 0% { opacity: .95; transform: translate(0,0) scale(.5); } 60% { opacity: .85; }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(1); } }
+.v2 .side-brand .side-sub { display: grid; white-space: nowrap; }
+.v2 .side-sub > span { grid-area: 1 / 1; transition: opacity .35s ease, transform .35s ease; }
+.v2 .side-sub .en { opacity: 0; transform: translateY(4px); }
+.v2 .side-brand.dive:hover .side-sub .ru, .v2 .side-brand.dive:focus-visible .side-sub .ru { opacity: 0; transform: translateY(-4px); }
+.v2 .side-brand.dive:hover .side-sub .en, .v2 .side-brand.dive:focus-visible .side-sub .en { opacity: 1; transform: none; transition-delay: .25s; }
+@media (prefers-reduced-motion: reduce) { .v2 .logo .fish, .v2 .logo .wave, .v2 .logo .splash circle { animation: none !important; } }
