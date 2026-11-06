@@ -9,17 +9,20 @@
   <link rel="stylesheet" href="/static/fonts.css?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/app.css?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/v2.css?v={{ asset_version }}">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 44'%3E%3Cpolyline points='27,6 12,22 27,38' fill='none' stroke='%233E4F94' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolyline points='41,6 26,22 41,38' fill='none' stroke='%233E4F94' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M43 22 L59 9 L59 35 Z' fill='%23A8732A'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 44'%3E%3Cline x1='1' y1='24' x2='15' y2='21.5' stroke='%233E4F94' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M19 15 C22 3, 33 2, 41 14 L34 16 Z' fill='%23A8732A'/%3E%3Cpath d='M13 21 C21 13, 40 13, 50 20.5 C40 28, 21 29, 13 21 Z' fill='%233E4F94'/%3E%3Cpath d='M48 20.5 L62 9 L56.5 20.5 L62 32 Z' fill='%233E4F94'/%3E%3Ccircle cx='19' cy='20' r='2' fill='%23fff'/%3E%3Cpath d='M2 38 q5 -4 10 0 t10 0 t10 0 t10 0 t10 0 t10 0' fill='none' stroke='%233E4F94' stroke-width='2.5' stroke-linecap='round' opacity='.6'/%3E%3C/svg%3E">
   {% block head %}{% endblock %}
 </head>
 <body class="v2">
 {% set p = request.url.path %}
+{# логотип — марлин над волной (отсылка к «Старику и морю» Хемингуэя: корпус — море, слова — улов) #}
 {% macro logo(size=40) -%}
 <svg class="logo" width="{{ size }}" height="{{ (size * 0.69)|round|int }}" viewBox="0 0 64 44" aria-hidden="true">
-  <polyline points="27,6 12,22 27,38" fill="none" stroke="var(--cat-1)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></polyline>
-  <polyline points="41,6 26,22 41,38" fill="none" stroke="var(--cat-1)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></polyline>
-  <path d="M43 22 L59 9 L59 35 Z" fill="var(--cat-2)"></path>
-  <circle cx="19" cy="15" r="2" fill="var(--text)"></circle>
+  <line x1="1" y1="24" x2="15" y2="21.5" stroke="var(--cat-1)" stroke-width="2.4" stroke-linecap="round"></line>
+  <path d="M19 15 C22 3, 33 2, 41 14 L34 16 Z" fill="var(--cat-2)"></path>
+  <path d="M13 21 C21 13, 40 13, 50 20.5 C40 28, 21 29, 13 21 Z" fill="var(--cat-1)"></path>
+  <path d="M48 20.5 L62 9 L56.5 20.5 L62 32 Z" fill="var(--cat-1)"></path>
+  <circle cx="19" cy="20" r="1.8" fill="var(--surface)"></circle>
+  <path d="M2 38 q5 -4 10 0 t10 0 t10 0 t10 0 t10 0 t10 0" fill="none" stroke="var(--cat-1)" stroke-width="2" stroke-linecap="round" opacity=".55"></path>
 </svg>
 {%- endmacro %}
 {% set NAV = [
@@ -35,7 +38,7 @@
 <div class="app">
   {% if user %}
   <aside class="side" aria-label="Разделы">
-    <a class="side-brand" href="/">{{ logo(44) }}<span><span class="side-name">{{ site_title }}</span><span class="side-sub">корпусный анализ русских текстов</span></span></a>
+    <a class="side-brand" href="/">{{ logo(44) }}<span class="side-name">{{ site_title }}</span></a>
     <nav class="side-nav">
       {% for href, label, icon, prefixes in NAV %}
       {% set on = namespace(v=false) %}{% for pr in prefixes %}{% if p.startswith(pr) %}{% set on.v = true %}{% endif %}{% endfor %}
