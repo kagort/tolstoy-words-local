@@ -38,7 +38,7 @@
 <div class="app">
   {% if user %}
   <aside class="side" aria-label="Разделы">
-    <a class="side-brand" href="/">{{ logo(44) }}<span class="side-name">{{ site_title }}</span></a>
+    <a class="side-brand" href="/">{{ logo(44) }}<span><span class="side-name">{{ site_title }}</span><span class="side-sub" lang="en">Words are your element</span></span></a>
     <nav class="side-nav">
       {% for href, label, icon, prefixes in NAV %}
       {% set on = namespace(v=false) %}{% for pr in prefixes %}{% if p.startswith(pr) %}{% set on.v = true %}{% endif %}{% endfor %}
