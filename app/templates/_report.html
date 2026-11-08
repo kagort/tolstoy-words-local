@@ -66,7 +66,7 @@
 {% for c in rep.cards %}
 <div class="panel word-card">
   <h4 style="margin:0 0 6px">«{{ c.word }}» <span class="muted small">— {{ c.count }} вхождений, {{ c.ipm }} ipm, в {{ c.texts }} текстах</span>
-    <span class="small no-print"> · <a href="/analysis?tab=profile&{{ sq }}&entry_id={{ c.entry_id }}">полный профиль</a> · <a href="/analysis?tab=conc&{{ sq }}&entry_id={{ c.entry_id }}">все примеры</a></span></h4>
+    <span class="small no-print"> · <a href="/analysis?tab=profile&{{ sq }}&entry_id={{ c.entry_id }}">полный портрет</a> · <a href="/analysis?tab=conc&{{ sq }}&entry_id={{ c.entry_id }}">все примеры</a></span></h4>
   {% if c.relations %}
   <div class="rel-grid">
     {% for rt, block in c.relations.items() %}

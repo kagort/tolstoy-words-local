@@ -281,3 +281,11 @@ dialog.fb-dialog textarea { width: 100%; box-sizing: border-box; }
 .fb-table tr.fb-new td:first-child { border-left: 3px solid var(--accent); }
 .fb-status { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 0; }
 .fb-status input[type=text] { min-width: 180px; flex: 1; }
+/* значок ▸ «профиль сочетания» у связанного слова (портрет слова, коллокации): плашка при наведении */
+a.pt-link { position: relative; display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: 4px; font-size: 11px;
+  line-height: 1.5; color: var(--muted); text-decoration: none; vertical-align: 1px; }
+a.pt-link:hover, a.pt-link:focus-visible { color: var(--accent); background: var(--accent-soft); text-decoration: none; }
+a.pt-link::after { content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 6px); transform: translateX(-50%);
+  white-space: nowrap; background: var(--text); color: var(--panel); font-size: 12px; padding: 3px 8px; border-radius: 6px;
+  opacity: 0; pointer-events: none; transition: opacity .12s ease .15s; z-index: 20; }
+a.pt-link:hover::after, a.pt-link:focus-visible::after { opacity: 1; }

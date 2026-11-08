@@ -7,10 +7,10 @@
     <div><label>Тип связи</label><select name="rel_type" form="sel-form"><option value="">любой</option>{% for k in REL_LABELS %}<option value="{{ k }}" {{ 'selected' if qp.get('rel_type') == k }}>{{ rel_label(k) }}</option>{% endfor %}</select></div>
     <div><label>Связанное слово (лемма)</label><input type="text" name="related" form="sel-form" value="{{ qp.get('related', '') }}" placeholder="например: русский"></div>
     <div><label>или словосочетание {{ term('phrase') }}</label><input type="text" name="phrase" form="sel-form" value="{{ qp.get('phrase', '') }}" placeholder="русский мужик; закон * порядок"></div>
-    <div class="act"><button type="submit" form="sel-form">Построить портрет</button></div>
+    <div class="act"><button type="submit" form="sel-form">Построить профиль</button></div>
   </div>
   <p class="help" style="margin-bottom:0">Синтаксический поиск — главное слово + связанное слово (находит и «мужик, русский до мозга костей»); линейный — словосочетание подряд, как написано.
-    Портрет открывается и из профиля слова (ссылка «портрет» у связанного слова), и из конкорданса (кнопка «Портрет»).</p>
+    Профиль сочетания открывается из портрета слова и из «Коллокаций» (значок ▸ у связанного слова), и из конкорданса (кнопка «Профиль сочетания»).</p>
 </div>
 
 {% if pt is none %}<div class="panel muted">Выберите главное слово (и, если нужно, связанное слово) или введите словосочетание.</div>
