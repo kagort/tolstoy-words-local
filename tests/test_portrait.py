@@ -1,4 +1,4 @@
-"""Портрет словосочетания: ключевые слова контекстов конкорданса."""
+"""Профиль сочетания (прежде «портрет сочетания»): ключевые слова контекстов конкорданса, страница, выгрузка."""
 
 import io
 import os
@@ -111,7 +111,7 @@ def test_portrait_service(corpus):
 def test_portrait_page_and_export(client, corpus):
     base = f"/analysis?tab=portrait&dictionary_id={corpus['dict_id']}"
     r = client.get(base)
-    assert r.status_code == 200 and "Построить портрет" in r.text
+    assert r.status_code == 200 and "Построить профиль" in r.text
     q = base + f"&entry_id={corpus['entries']['мужик']}&rel_type=attribute&related=русский"
     r = client.get(q)
     assert r.status_code == 200 and "«русский → мужик»" in r.text and 'id="pt-cmp"' in r.text
@@ -141,3 +141,14 @@ def test_pair_stats_and_colloc_link(client, corpus):
     assert "Устойчивость сочетания" in client.get(q).text
     r = client.get(f"/analysis?tab=colloc&dictionary_id={corpus['dict_id']}&entry_id={eid}&mode=syntax&min_count=1")
     assert "tab=portrait" in r.text and "related=" in r.text
+
+
+def test_tool_nav_names_and_overview_order(client, corpus):
+    # навигация «Все инструменты» (вариант Б), новые названия, значок ▸ вместо «портрет», таблица обзора по Σ
+    base = f"/analysis?dictionary_id={corpus['dict_id']}"
+    r = client.get(base + f"&tab=profile&entry_id={corpus['entries']['мужик']}")
+    assert 'class="tool-nav"' in r.text and "Все инструменты" in r.text and "Слова словаря › <b>Портрет слова</b>" in r.text
+    assert "Профиль сочетания" in r.text and "Профиль слова" not in r.text and "Портрет сочетания" not in r.text
+    assert 'class="pt-link"' in r.text and 'data-tip="профиль сочетания"' in r.text
+    r = client.get(base + "&tab=overview&dim=text")
+    assert "Таблица: текст × слова" in r.text and "Σ выбранных ↓" in r.text

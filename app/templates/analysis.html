@@ -21,8 +21,8 @@
 {% endmacro %}
 
 {% if stale %}
-<div class="flash info">{% if stale_pending %}Идёт пересчёт вхождений словаря: пока он не закончится, связи в профиле слова, коллокациях и ролях — по прежней версии разбора.
-  {% else %}Вхождения словаря ({{ stale }}) посчитаны прежней версией синтаксического разбора: в профиле слова, коллокациях и ролях — старые связи (страница предложения уже показывает новые).
+<div class="flash info">{% if stale_pending %}Идёт пересчёт вхождений словаря: пока он не закончится, связи в портрете слова, коллокациях и ролях — по прежней версии разбора.
+  {% else %}Вхождения словаря ({{ stale }}) посчитаны прежней версией синтаксического разбора: в портрете слова, коллокациях и ролях — старые связи (страница предложения уже показывает новые).
   <form class="inline" method="post" action="/dictionaries/{{ dict_id }}/rematch"><button class="small" type="submit">Пересчитать вхождения</button></form>{% endif %}</div>
 {% endif %}
 {% if scope_out %}
@@ -118,48 +118,52 @@
 
 {% if propn_excluded %}<p class="help">Имена собственные не учитываются: {{ propn_excluded }} вхождений слов словаря внутри имён и названий
   («Чёрное море», «Белый дом») не посчитаны. Вернуть отдельное вхождение — ✓ в конкордансе.</p>{% endif %}
+{# группы инструментов: (название, цвет-токен, [(вкладка, название, значок)]); названия «Сравнения» короткие — группа уже говорит «Сравнение» #}
 {% set TOOL_GROUPS = [
-  ('Сводка', [('overview', 'Обзор'), ('report', 'Отчёт')]),
-  ('Слова словаря', [('freq', 'Частоты'), ('conc', 'Конкорданс'), ('profile', 'Профиль слова'), ('portrait', 'Портрет сочетания'), ('colloc', 'Коллокации'), ('semantic', 'Семантика')]),
-  ('Тексты', [('keywords', 'Ключевые слова'), ('topics', 'Темы'), ('map', 'Карта текста'), ('structure', 'Структура предложений')]),
-  ('Имена и места', [('entities', 'Имена'), ('geo', 'География')]),
-  ('Сравнение', [('compare', 'Сравнение корпусов'), ('textcmp', 'Сравнение текстов'), ('stylo', 'Авторство')]),
+  ('Сводка', '--cat-1', [('overview', 'Обзор', 'M4 20V10M10 20V4M16 20v-7'), ('report', 'Отчёт', 'M6 3h9l4 4v14H6zM9 12h7M9 16h7')]),
+  ('Слова словаря', '--cat-2', [('freq', 'Частоты', 'M4 20V12M9 20V6M14 20V9M19 20V3'), ('conc', 'Конкорданс', 'M3 7h18M3 12h18M3 17h18M10 4v16'),
+    ('profile', 'Портрет слова', 'M12 4a3 3 0 1 0 0 6a3 3 0 1 0 0-6M5 20a7 7 0 0 1 14 0'), ('portrait', 'Профиль сочетания', 'M4 6h7v12H4zM13 6h7v12h-7z'),
+    ('colloc', 'Коллокации', 'M9 12a3 3 0 1 0 6 0a3 3 0 1 0-6 0M4 6l5 4M20 6l-5 4M4 18l5-4M20 18l-5-4'), ('semantic', 'Семантика', 'M5 5l4 4M15 15l4 4M5 19l14-14M8 12a4 4 0 1 0 8 0')]),
+  ('Тексты', '--cat-4', [('keywords', 'Ключевые слова', 'M7 14a4 4 0 1 1 3-7l9 9-2 2-2-2-2 2-2-2'), ('topics', 'Темы', 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z'),
+    ('map', 'Карта текста', 'M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z'), ('structure', 'Структура предложений', 'M12 4v6M12 10l-6 6M12 10l6 6M6 16v4M18 16v4')]),
+  ('Имена и места', '--cat-3', [('entities', 'Имена', 'M8 8a3 3 0 1 0 6 0a3 3 0 1 0-6 0M3 20a8 8 0 0 1 16 0'), ('geo', 'География', 'M12 21s-7-6-7-11a7 7 0 0 1 14 0c0 5-7 11-7 11zM10 10a2 2 0 1 0 4 0a2 2 0 1 0-4 0')]),
+  ('Сравнение', '--cat-5', [('compare', 'Корпусов', 'M4 6h6v14H4zM14 4h6v16h-6z'), ('textcmp', 'Текстов', 'M5 4h5v16H5zM14 4h5v16h-5zM10 12h4'), ('stylo', 'Авторство', 'M4 20l4-1 11-11-3-3L5 16zM14 6l3 3')]),
 ] %}
 {% macro tab_href(key) %}/analysis?tab={{ key }}&dictionary_id={{ dict_id }}&{{ sel.query() }}{% if entry_id and key in ('profile','conc','portrait','structure','compare','colloc','semantic') %}&entry_id={{ entry_id }}{% endif %}{% endmacro %}
+{% macro tool_icon(d) %}<svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ d }}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg>{% endmacro %}
 {% if ui_mode(request) == 'v2' %}
-{# инструменты по группам: вверху группы, под ними — инструменты выбранной группы #}
-<nav class="tool-groups" aria-label="Инструменты анализа">
-  <div class="tg-groups" role="tablist">
-    {% for gname, items in TOOL_GROUPS %}{% set on = tab in items|map('first') %}
-    <a class="{{ 'active' if on }}" href="{{ tab_href(items[0][0]) }}" data-group="{{ loop.index0 }}"
-       data-keys="{{ items|map('first')|join(',') }}" role="tab" aria-selected="{{ 'true' if on else 'false' }}">{{ gname }}<span class="n">{{ items|length }}</span></a>
+{# инструменты: строка «где я» (группа › инструмент, соседи по группе) + кнопка «Все инструменты» — сетка из 5 столбцов #}
+{% set cur = namespace(group=None, color='--cat-1', label='', items=[]) %}
+{% for gname, color, items in TOOL_GROUPS %}{% for key, label, d in items if key == tab %}{% set cur.group = gname %}{% set cur.color = color %}{% set cur.label = label %}{% set cur.items = items %}{% endfor %}{% endfor %}
+<nav class="tool-nav" aria-label="Инструменты анализа">
+  <div class="tn-bar">
+    <button type="button" class="tn-all" aria-expanded="false" aria-controls="tn-grid">
+      <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"></path></svg>
+      Все инструменты</button>
+    {% if cur.group %}<span class="tn-path" style="--g:var({{ cur.color }})"><span class="tn-dot"></span>{{ cur.group }} › <b>{{ cur.label }}</b></span>
+    {% if cur.items|length > 1 %}<span class="tn-near">рядом: {% for key, label, d in cur.items if key != tab %}<a href="{{ tab_href(key) }}">{{ label }}</a>{{ ' · ' if not loop.last }}{% endfor %}</span>{% endif %}{% endif %}
+  </div>
+  <div class="tn-grid" id="tn-grid" hidden>
+    {% for gname, color, items in TOOL_GROUPS %}
+    <div class="tn-col" style="--g:var({{ color }})"><div class="tn-head">{{ gname }}</div>
+      {% for key, label, d in items %}<a class="{{ 'active' if tab == key }}" href="{{ tab_href(key) }}"{{ ' aria-current=page' if tab == key }}>{{ tool_icon(d) }}{{ label }}</a>{% endfor %}
+    </div>
     {% endfor %}
   </div>
-  {% for gname, items in TOOL_GROUPS if tab in items|map('first') %}
-  <div class="tg-tools">
-    {% for key, label in items %}<a class="{{ 'active' if tab == key }}" href="{{ tab_href(key) }}" data-tool="{{ key }}">{{ label }}</a>{% endfor %}
-  </div>
-  {% endfor %}
 </nav>
 <script>
-// группа открывает инструмент, которым в ней пользовались последним (в этом браузере)
 (function () {
-  let last = {};
-  try { last = JSON.parse(localStorage.getItem('qv-tool-last') || '{}'); } catch (e) {}
-  const cur = '{{ tab }}';
-  document.querySelectorAll('.tg-groups a').forEach(a => {
-    const keys = a.dataset.keys.split(','), g = a.dataset.group;
-    if (keys.includes(cur)) { last[g] = cur; return; }
-    const k = last[g];
-    if (k && keys.includes(k)) a.href = a.href.replace(/([?&])tab=[^&]*/, '$1tab=' + k);
-  });
-  try { localStorage.setItem('qv-tool-last', JSON.stringify(last)); } catch (e) {}
+  const nav = document.querySelector('.tool-nav'), btn = nav.querySelector('.tn-all'), grid = nav.querySelector('.tn-grid');
+  const set = open => { grid.hidden = !open; btn.setAttribute('aria-expanded', open ? 'true' : 'false'); };
+  btn.addEventListener('click', e => { e.stopPropagation(); set(grid.hidden); });
+  document.addEventListener('click', e => { if (!grid.hidden && !nav.contains(e.target)) set(false); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !grid.hidden) { set(false); btn.focus(); } });
 })();
 </script>
 {% else %}
 <div class="tabs">
-  {% for gname, items in TOOL_GROUPS %}{% for key, label in items %}
-  <a class="{{ 'active' if tab == key }}" href="{{ tab_href(key) }}">{{ label }}</a>
+  {% for gname, color, items in TOOL_GROUPS %}{% for key, label, d in items %}
+  <a class="{{ 'active' if tab == key }}" href="{{ tab_href(key) }}">{{ 'Сравнение ' ~ label|lower if gname == 'Сравнение' and key != 'stylo' else label }}</a>
   {% endfor %}{% endfor %}
 </div>
 {% endif %}
@@ -207,16 +211,17 @@
   <p class="help">Точка — текст (ipm {{ 'категории' if ov.by == 'cat' else 'слова' }} в тексте), ящик — середина распределения в группе «{{ spread.group_label|lower }}» (половина текстов), черта — медиана. Верхняя строка — все тексты выборки. Тексты без вхождений — в нуле.</p></div>
 {% endif %}
 <div class="panel table-scroll">
+  <h3 style="margin-top:0">Таблица: {{ ov.dim_label|lower }} × {{ 'категории' if ov.by == 'cat' else 'слова' }} ({{ mlabel }})</h3>
   <table>
     <tr><th>{{ ov.dim_label }}</th><th class="num">Слов</th><th class="num">Текстов</th>
-      {% for w in ov.words %}<th class="num">{{ w.word }}</th>{% endfor %}<th class="num">Σ выбранных</th></tr>
-    {% for g in ov.groups %}{% set gi = loop.index0 %}
+      {% for w in ov.words %}<th class="num">{{ w.word }}</th>{% endfor %}<th class="num">Σ выбранных ↓</th></tr>
+    {% for gi in ov_order %}{% set g = ov.groups[gi] %}
     <tr><td title="{{ g.full }}">{{ g.full }}</td><td class="num">{{ g.n_words }}</td><td class="num">{{ g.n_texts }}</td>
       {% for w in ov.words %}<td class="num" title="вхождений: {{ w.count[gi] }}; ipm: {{ w.ipm[gi] }}; текстов со словом: {{ w.share[gi] }}%">{{ w[p.metric][gi] }}</td>{% endfor %}
       <td class="num"><strong>{{ ov.total[p.metric][gi] }}</strong></td></tr>
     {% endfor %}
   </table>
-  <p class="help">Значение в ячейке — {{ mlabel }}. Наведите на ячейку, чтобы увидеть все три показателя.</p>
+  <p class="help">Значение в ячейке — {{ mlabel }}; строки — по убыванию «Σ выбранных»{% if ov.hidden_groups %} («остальные» — в конце){% endif %}. Наведите на ячейку, чтобы увидеть все три показателя.</p>
 </div>
 {% else %}<div class="panel muted">Нет данных: выберите слова или ослабьте фильтры выборки.</div>{% endif %}
 {% endif %}
@@ -280,7 +285,7 @@
       <td class="num">{{ r.count }}</td><td class="num">{{ r.ipm }}</td><td class="num">{{ r.sentences }}</td><td class="num">{{ r.texts }}</td>
       <td class="num">{{ r.share }}</td>
       <td class="num">{{ r.dp if r.dp is not none else '' }}</td>
-      <td class="small nowrap">{% if r.count %}<a href="/analysis?tab=profile&{{ sq }}&entry_id={{ r.entry_id }}">профиль</a> ·
+      <td class="small nowrap">{% if r.count %}<a href="/analysis?tab=profile&{{ sq }}&entry_id={{ r.entry_id }}">портрет</a> ·
         <a href="/analysis?tab=conc&{{ sq }}&entry_id={{ r.entry_id }}">примеры</a>{% endif %}</td>
       <td class="small nowrap">{% if r.count %}<a href="/export/concordance.xlsx?{{ sq }}&entry_id={{ r.entry_id }}" title="все {{ r.count }} предложений в XLSX">XLSX</a> ·
         <a href="/export/concordance.csv?{{ sq }}&entry_id={{ r.entry_id }}">CSV</a> ·
@@ -326,7 +331,7 @@
   <form class="shrink" method="get" action="/go/sentence" style="display:flex;gap:6px;align-items:center"><input type="text" name="id" placeholder="ID предложения" style="width:150px"><button class="small secondary" type="submit">Открыть разбор</button></form>
   <div class="shrink">Скачать: <a href="/export/concordance.xlsx{{ qs(request, page=None, ctxkw=None) }}">XLSX</a> · <a href="/export/concordance.csv{{ qs(request, page=None, ctxkw=None) }}">CSV</a> · <a href="/export/hits.conllu{{ qs(request, page=None, ctxkw=None) }}">CoNLL-U</a></div>
   {% if conc.total and not ckw %}<div class="shrink"><a class="btn small secondary" href="/analysis{{ qs(request, page=None, ctxkw='sent') }}" title="какие слова чаще встречаются в найденных предложениях, чем в остальной выборке">Ключевые слова этих контекстов</a></div>{% endif %}
-  {% if conc.total and (entry_id or request.query_params.get('phrase')) %}<div class="shrink"><a class="btn small secondary" href="/analysis{{ qs(request, page=None, ctxkw=None, tab='portrait') }}" title="сводка, распределение, контексты, окружение, синтаксис и сравнение для найденного">Портрет</a></div>{% endif %}
+  {% if conc.total and (entry_id or request.query_params.get('phrase')) %}<div class="shrink"><a class="btn small secondary" href="/analysis{{ qs(request, page=None, ctxkw=None, tab='portrait') }}" title="сводка, распределение, контексты, окружение, синтаксис и сравнение для найденного">Профиль сочетания</a></div>{% endif %}
 </div>
 {% if ckw %}{% include "_context_keywords.html" %}{% endif %}
 <div class="panel table-scroll">
@@ -377,14 +382,14 @@
     {% for k, vals in forms.feats.items() %}<div class="small" style="margin-top:6px"><span class="muted">{{ k }}:</span> {% for v, c in vals %}{{ v }} {{ c }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endfor %}
   </div>
 </div>
-<p class="help">logDice — сила связи (до 14): чем выше, тем характернее сочетание именно для этого слова. Связи через однородные ряды учтены как «общий член ряда» (§5.6 ТЗ). Щелчок по слову открывает примеры, «портрет» — всё о сочетании на одной странице.</p>
+<p class="help">logDice — сила связи (до 14): чем выше, тем характернее сочетание именно для этого слова. Связи через однородные ряды учтены как «общий член ряда» (§5.6 ТЗ). Щелчок по слову открывает примеры, значок ▸ — профиль сочетания: всё о нём на одной странице.</p>
 <div class="grid cols-2">
   {% for rt, block in profile.relations.items() %}
   <div class="panel">
     <h3 style="margin-top:0">{{ block.label|capitalize }} <span class="muted small">— {{ block.total }} связей, {{ block.distinct }} разных слов</span></h3>
     {% macro rel_rows(items, rt, sq, entry_id) %}{% for x in items %}
       <tr><td><a href="/analysis?tab=conc&{{ sq }}&entry_id={{ entry_id }}&rel_type={{ rt }}&related={{ x.lemma|urlencode }}">{{ x.lemma }}</a>{% if rt != 'case' and x.count >= 2 %}
-        <a class="small muted" href="/analysis?tab=portrait&{{ sq }}&entry_id={{ entry_id }}&rel_type={{ rt }}&related={{ x.lemma|urlencode }}" title="портрет сочетания: где встречается, контексты, окружение, сравнение">портрет</a>{% endif %}</td>
+        <a class="pt-link" href="/analysis?tab=portrait&{{ sq }}&entry_id={{ entry_id }}&rel_type={{ rt }}&related={{ x.lemma|urlencode }}" aria-label="профиль сочетания" data-tip="профиль сочетания">▸</a>{% endif %}</td>
         <td class="num">{{ x.count }}</td><td class="num">{{ x.texts }}</td>{% if rt != 'case' %}<td class="num">{{ x.logdice }}</td>{% endif %}</tr>
       {% endfor %}{% endmacro %}
     <table>

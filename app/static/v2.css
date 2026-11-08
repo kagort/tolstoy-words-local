@@ -195,22 +195,30 @@ body.v2 { font: 15px/1.55 var(--font-sans); background: var(--bg); color: var(--
 .v2 .dv2-pick { display: inline-flex; align-items: center; gap: 8px; } .v2 .dv2-pick select { width: auto; max-width: 100%; }
 .v2 .an-head { margin-bottom: 14px; } .v2 .an-head h1 { margin: 2px 0 4px; }
 .v2 .role-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: -1px; }
-/* инструменты анализа по группам (вариант А): группы — пилюли, инструменты группы — подчёркнутые вкладки */
-.v2 .tool-groups { margin: 12px 0 18px; }
-.v2 .tg-groups { display: flex; gap: 6px; flex-wrap: wrap; }
-.v2 .tg-groups a { padding: 7px 14px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-muted); font-size: 13px; font-weight: 500; }
-.v2 .tg-groups a:hover { color: var(--text); border-color: var(--text-muted); text-decoration: none; }
-.v2 .tg-groups a.active { background: var(--cat-1); border-color: var(--cat-1); color: var(--surface); font-weight: 600; }
-.v2 .tg-groups a .n { margin-left: 5px; font-size: 11px; opacity: .7; }
-.v2 .tg-tools { display: flex; gap: 22px; flex-wrap: wrap; border-bottom: 1px solid var(--border); margin-top: 10px; padding: 0 4px; }
-.v2 .tg-tools a { padding: 8px 0; color: var(--text-muted); font-size: 14px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-.v2 .tg-tools a:hover { color: var(--text); text-decoration: none; }
-.v2 .tg-tools a.active { color: var(--text); border-bottom-color: var(--cat-1); font-weight: 600; }
-@media (max-width: 760px) {
-  .v2 .tg-groups, .v2 .tg-tools { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
-  .v2 .tg-groups a, .v2 .tg-tools a { flex-shrink: 0; min-height: 36px; display: inline-flex; align-items: center; }
-}
-@media print { .tool-groups { display: none !important; } }
+/* инструменты анализа: строка «где я» + сетка всех инструментов по кнопке (вариант Б, 2026-11-08) */
+.v2 .tool-nav { position: relative; margin: 12px 0 18px; }
+.v2 .tool-nav a, .v2 .tool-nav a:hover { border-bottom: 0; }  /* общий стиль nav a.active из app.css (шапка классического) */
+.v2 .tn-bar { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; }
+.v2 .tn-all { display: inline-flex; align-items: center; gap: 7px; padding: 7px 14px; border-radius: 999px; font-size: 13px; font-weight: 600;
+  border: 1px solid var(--cat-1); background: var(--cat-1); color: var(--surface); cursor: pointer; }
+.v2 .tn-all[aria-expanded="true"] { background: var(--surface); color: var(--cat-1); }
+.v2 .tn-path { font-size: 15px; color: var(--text); }
+.v2 .tn-path b { font-weight: 600; }
+.v2 .tn-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--g); margin-right: 7px; vertical-align: 1px; }
+.v2 .tn-near { font-size: 13px; color: var(--text-muted); }
+.v2 .tn-near a { color: var(--link, var(--cat-1)); }
+.v2 .tn-grid { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 8px); display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; padding: 14px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, .14); }
+.v2 .tn-grid[hidden] { display: none; }
+.v2 .tn-head { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; font-weight: 600; color: var(--g);
+  border-bottom: 2px solid var(--g); padding-bottom: 4px; margin-bottom: 4px; }
+.v2 .tn-col a { display: flex; align-items: center; gap: 8px; padding: 5px 7px; border-radius: 6px; color: var(--text); font-size: 14px; }
+.v2 .tn-col a svg { color: var(--g); flex-shrink: 0; }
+.v2 .tn-col a:hover { background: var(--surface-muted); text-decoration: none; }
+.v2 .tn-col a.active { background: var(--surface-muted); font-weight: 600; box-shadow: inset 3px 0 0 var(--g); }
+@media (max-width: 860px) { .v2 .tn-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media print { .tool-nav { display: none !important; } }
 
 /* логотип: при наведении на него в меню марлин по дуге ныряет (солнце неподвижно), над водой — хвост; подпись по-русски
    сменяется английской. Выныривает — когда курсор уходит (класс touched ставит app.js, чтобы не играть при загрузке) */

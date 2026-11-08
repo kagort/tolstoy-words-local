@@ -118,7 +118,7 @@
       <div class="word-grid" style="max-height:140px">{% for c in all_corpora %}<label class="check-item"><input type="checkbox" name="scope_corpus_ids" value="{{ c.id }}" {{ 'checked' if c.id in scope }}> {{ c.name }}</label>{% endfor %}</div>
       <p><button type="submit">Сохранить и пересчитать</button></p>
     </form>
-    {% if stale and not pending %}<p class="flash info">Вхождения ({{ stale }}) найдены прежней версией синтаксического разбора: в профиле слова не хватает связей (у глаголов — подлежащих, дополнений и обстоятельств, у прилагательных — определяемых слов). Нажмите «Пересчитать вхождения».</p>{% endif %}
+    {% if stale and not pending %}<p class="flash info">Вхождения ({{ stale }}) найдены прежней версией синтаксического разбора: в портрете слова не хватает связей (у глаголов — подлежащих, дополнений и обстоятельств, у прилагательных — определяемых слов). Нажмите «Пересчитать вхождения».</p>{% endif %}
     <p class="small">Посчитан на <strong>{{ coverage.n }}</strong> {{ 'тексте' if coverage.n % 10 == 1 and coverage.n % 100 != 11 else 'текстах' }} из {{ coverage.total }}
       ({{ 'корпуса: ' ~ (all_corpora|selectattr('id', 'in', scope)|map(attribute='name')|join(', ')) if scope else 'все тексты' }}){% if not coverage.exact %} <span class="muted">— оценка: словарь пересчитан до версии 0.14.1</span>{% endif %}.</p>
     <form method="post" action="/dictionaries/{{ d.id }}/rematch" class="row" style="align-items:flex-end">

@@ -20,7 +20,7 @@
 <div class="grid cols-2">
   <div class="panel"><h3 style="margin-top:0">Орбитальный граф: {{ MEASURES[p.sort] }}</h3>
     <div id="chart-orbit" class="chart" style="min-height:520px"></div>
-    <p class="help">В центре — слово; на ближней орбите — самые сильные коллокаты по выбранной мере, дальше — слабее. Размер кружка — частота сочетания{{ ', цвет — тип связи' if col.mode == 'syntax' else ', цвет — часть речи' }}. Щелчок по коллокату открывает примеры; в таблице у каждого — «портрет» сочетания.</p></div>
+    <p class="help">В центре — слово; на ближней орбите — самые сильные коллокаты по выбранной мере, дальше — слабее. Размер кружка — частота сочетания{{ ', цвет — тип связи' if col.mode == 'syntax' else ', цвет — часть речи' }}. Щелчок по коллокату открывает примеры; в таблице у каждого — значок ▸: профиль сочетания.</p></div>
   <div class="panel"><h3 style="margin-top:0">Сводная матрица мер (25 первых)</h3>
     <div id="chart-matrix" class="chart" style="min-height:520px"></div>
     <p class="help">Цвет — место коллоката среди 25 первых по каждой мере (тёмный — сильнее всех по этой мере); в подсказке — само значение. Разные меры выдвигают разные коллокаты: PMI — редкие и «экзотичные», t-score и G² — частые и устойчивые, logDice — посередине.</p></div>
@@ -35,7 +35,7 @@
       <td class="num muted">{{ r.fy }}</td>
       {% set pair_q = ('&rel_type=' ~ r.rel ~ '&related=' ~ r.lemma|urlencode) if col.mode == 'syntax' else ('&near=' ~ r.lemma|urlencode ~ '&window=' ~ col.window) %}
       <td class="small nowrap"><a href="/analysis?tab=conc&{{ sq }}&entry_id={{ entry_id }}{{ pair_q }}">примеры</a> ·
-        <a href="/analysis?tab=portrait&{{ sq }}&entry_id={{ entry_id }}{{ pair_q }}" title="портрет сочетания: где встречается, контексты, окружение, сравнение">портрет</a></td></tr>
+        <a class="pt-link" href="/analysis?tab=portrait&{{ sq }}&entry_id={{ entry_id }}{{ pair_q }}" aria-label="профиль сочетания" data-tip="профиль сочетания">▸</a></td></tr>
     {% endfor %}
   </table>
   <p class="help">Наведите курсор на заголовок меры — краткое объяснение. Меры считаются по таблице сопряжённости 2×2: частота сочетания, частота слова (с учётом ширины окна), частота коллоката и размер выборки. ΔP — направленная мера (Gries): «слово → коллокат» — насколько слово предсказывает коллокат, и наоборот.</p>

@@ -983,7 +983,12 @@ def _overview_context(db: Session, request: Request, dict_id: int, text_ids: lis
     ov = A.overview(db, dict_id, text_ids, entry_ids, p["dim"], p["step"], by=by, groups_top=top)
     # распределение по текстам (точка — текст) — только для страницы нового интерфейса, не для выгрузки
     spread = None if all_groups or ui_mode(request) != "v2" else A.by_text(db, dict_id, text_ids, entry_ids, p["dim"], p["step"], by=by)
-    return {"ov": ov, "spread": spread, "ov_params": p, "ov_entry_ids": entry_ids, "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
+    # таблица под графиками: строки по убыванию Σ выбранных (по выбранному показателю), «остальные» — в конце
+    tot = (ov.get("total") or {}).get(p["metric"]) or []
+    groups = ov.get("groups") or []
+    order = sorted(range(len(groups)), key=lambda i: (groups[i].get("key") == A.REST, -(tot[i] if i < len(tot) and tot[i] else 0)))
+    return {"ov": ov, "spread": spread, "ov_params": p, "ov_entry_ids": entry_ids, "ov_order": order,
+            "DIMENSIONS": A.DIMENSIONS, "PERIOD_STEPS": A.PERIOD_STEPS}
 
 
 REP_SHORT_TEXTS, REP_SHORT_WORDS = 30, 10  # выборка с этого размера — отчёт сразу в кратком виде

@@ -57,7 +57,7 @@
   <table id="rels">
     <tr><th>Тип связи</th><th>Слово</th><th>Подробности</th><th>Как получено</th><th class="num">Уверенность</th><th></th></tr>
     {% for r in rels %}{% set off = r.related_idx in unlinked %}
-    <tr{% if off %} class="rel-off" title="связь убрана вручную: не учитывается в профиле слова и коллокациях"{% endif %}><td>{{ rel_label(r.rel_type) }}</td>
+    <tr{% if off %} class="rel-off" title="связь убрана вручную: не учитывается в портрете слова и коллокациях"{% endif %}><td>{{ rel_label(r.rel_type) }}</td>
       <td><a href="?token={{ r.related_idx }}">{{ sent.tok(r.related_idx).form }}</a> <span class="muted small">({{ r.related_lemma }})</span>{% if r.negated %} <span class="badge warn">под отрицанием</span>{% endif %}</td>
       <td class="small">{{ r.detail }}</td>
       <td class="small">{{ SCOPE_LABELS.get(r.scope, r.scope) }}{% if r.rule %} <span class="muted">· правило: {{ r.rule }}</span>{% endif %}{% if r.source == 'enhanced' %} <span class="badge">восстановлено</span>{% endif %}</td>
@@ -69,7 +69,7 @@
       </form></td></tr>
     {% endfor %}
   </table>
-  <p class="help">Ошибочную связь (например, однородные сказуемые при чужом подлежащем) можно убрать: она перестанет учитываться в профиле слова и коллокациях, в том числе после пересчёта вхождений.</p>
+  <p class="help">Ошибочную связь (например, однородные сказуемые при чужом подлежащем) можно убрать: она перестанет учитываться в портрете слова и коллокациях, в том числе после пересчёта вхождений.</p>
   {% else %}<p class="muted">Связей для этого слова не выделено.</p>{% endif %}
   {% set ft = sent.tok(focus) %}{% set ed = edits.get(focus) %}
   <details class="edit-parse no-print" id="edit" {{ 'open' if ed }}>
@@ -87,7 +87,7 @@
         {% for k, v in UD_RELS.items() %}<option value="{{ k }}" {{ 'selected' if k == ft.deprel }}>{{ k }} — {{ v }}</option>{% endfor %}</select></div>
       <div class="act"><button type="submit">Сохранить правку</button></div>
     </form>
-    <p class="help" style="margin-bottom:0">После сохранения предложение пересчитывается для всех словарей: роли, связи, профиль слова, коллокации (ваши отметки ✓ / ✗ сохраняются).
+    <p class="help" style="margin-bottom:0">После сохранения предложение пересчитывается для всех словарей: роли, связи, портрет слова, коллокации (ваши отметки ✓ / ✗ сохраняются).
       Правка помечается «вручную», в дереве — значком ✎, и накладывается заново после точного и повторного разбора. Главное слово «корень» — только со связью root.</p>
   </details>
 </div>
