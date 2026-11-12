@@ -160,6 +160,9 @@ def run_match(job_id: int | None, dictionary_id: int, entry_ids: list[int] | Non
                 done = set(ready_texts) | (set(st.get("matched_texts") or []) if text_ids else set())
                 d.settings = {**st, "matched_texts": sorted(done)}
             flag_name_hits(s, [dictionary_id], text_ids)  # слова внутри имён собственных не считаются
+            from app.services.quicksearch import mark_done
+
+            mark_done(s, dictionary_id, entry_ids, text_ids)  # «Найти слово»: какие тексты уже просмотрены
             s.commit()
     log.info("Словарь %s: найдено вхождений %s", dictionary_id, total_hits)
 

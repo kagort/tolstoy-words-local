@@ -2,34 +2,50 @@
 {% block title %}Отзывы{% endblock %}
 {% block content %}
 <h1>Отзывы тестировщиков</h1>
-<div class="row" style="align-items:center;margin-bottom:10px">
+{% macro fq() %}{% set d = {'status': status, 'priority': priority, 'sort': sort if sort != 'priority' else ''} %}{% for k, v in kwargs.items() %}{% set _ = d.update({k: v}) %}{% endfor %}/feedback?{% for k, v in d.items() if v %}{{ k }}={{ v }}&{% endfor %}{% endmacro %}
+<div class="row fb-filters" style="align-items:center;margin-bottom:8px">
   <div class="tabs" style="margin:0">
-    <a class="{{ 'active' if not status }}" href="/feedback">все ({{ counts.values()|sum }})</a>
-    {% for k, v in STATUSES.items() %}<a class="{{ 'active' if status == k }}" href="/feedback?status={{ k }}">{{ v }} ({{ counts.get(k, 0) }})</a>{% endfor %}
+    <a class="{{ 'active' if not status }}" href="{{ fq(status='') }}">все ({{ counts.values()|sum }})</a>
+    {% for k, v in STATUSES.items() %}<a class="{{ 'active' if status == k }}" href="{{ fq(status=k) }}">{{ v }} ({{ counts.get(k, 0) }})</a>{% endfor %}
   </div>
   <div class="spacer"></div>
   <div class="shrink"><button type="button" class="small secondary" data-feedback>Написать отзыв</button>
     <a class="btn small secondary" href="/export/feedback.xlsx{{ '?status=' ~ status if status }}">{{ icon('download') }}XLSX</a></div>
 </div>
+<div class="row fb-filters" style="align-items:center;margin-bottom:10px">
+  <div class="shrink small">Срочность (несделанные):
+    <a class="fb-chip {{ 'on' if not priority }}" href="{{ fq(priority='') }}">любая</a>
+    {% for k, v in PRIORITIES.items() %}<a class="fb-chip prio-{{ k }} {{ 'on' if priority == k }}" href="{{ fq(priority=k) }}"><span class="flag"></span>{{ v }} ({{ pcounts.get(k, 0) }})</a>{% endfor %}</div>
+  <div class="shrink small">Порядок: {% if sort == 'date' %}<a href="{{ fq(sort='') }}">по срочности</a> · <strong>по дате</strong>{% else %}<strong>по срочности</strong> · <a href="{{ fq(sort='date') }}">по дате</a>{% endif %}</div>
+  <div class="spacer"></div>
+  {% if counts.get('done') %}<form class="shrink" method="post" action="/feedback-clear" onsubmit="return confirm('Удалить все отзывы со статусом «сделано» ({{ counts.get('done') }})? Перед удалением их можно выгрузить в XLSX.')">
+    <input type="hidden" name="back" value="{{ back }}"><button class="small danger" type="submit">{{ icon('trash') }}Удалить сделанные</button></form>{% endif %}
+</div>
 <div class="panel table-scroll">
 {% if items %}
 <table class="fb-table">
-  <tr><th>Когда</th><th>Кто</th><th>Тип</th><th>Отзыв</th><th>Страница</th><th>Статус и заметка</th></tr>
+  <tr><th>Срочность</th><th>Когда</th><th>Кто</th><th>Тип</th><th>Отзыв</th><th>Страница</th><th>Статус и заметка</th><th></th></tr>
   {% for f in items %}
-  <tr id="fb{{ f.id }}" class="{{ 'fb-new' if f.status == 'new' }}">
+  <tr id="fb{{ f.id }}" class="{{ 'fb-new' if f.status == 'new' }} {{ 'fb-done' if f.status == 'done' }} prio-{{ f.priority or 'normal' }}">
+    <td class="nowrap"><span class="flag" title="{{ PRIORITIES.get(f.priority or 'normal') }}"></span>
+      <select name="priority" form="fbf{{ f.id }}" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()" aria-label="срочность">
+        {% for k, v in PRIORITIES.items() %}<option value="{{ k }}" {{ 'selected' if (f.priority or 'normal') == k }}>{{ v }}</option>{% endfor %}</select></td>
     <td class="small nowrap">{{ f.created_at.strftime('%d.%m.%Y %H:%M') if f.created_at }}</td>
     <td class="small">{{ f.author or '—' }}</td>
     <td><span class="badge {{ 'warn' if f.kind == 'error' }}">{{ KINDS.get(f.kind, f.kind) }}</span></td>
     <td style="white-space:pre-wrap;max-width:46ch">{{ f.text }}</td>
     <td class="small"><a href="{{ f.page }}" title="{{ f.page }}">{{ f.page|truncate(40, True) }}</a></td>
-    <td><form method="post" action="/feedback/{{ f.id }}" class="fb-status">
-      <input type="hidden" name="back" value="{{ status }}">
+    <td><form method="post" action="/feedback/{{ f.id }}" class="fb-status" id="fbf{{ f.id }}">
+      <input type="hidden" name="back" value="{{ back }}">
       <select name="status">{% for k, v in STATUSES.items() %}<option value="{{ k }}" {{ 'selected' if f.status == k }}>{{ v }}</option>{% endfor %}</select>
       <input type="text" name="reply" value="{{ f.reply or '' }}" placeholder="заметка (что сделано)">
       <button class="small secondary" type="submit">Сохранить</button></form></td>
+    <td><form method="post" action="/feedback/{{ f.id }}/delete" style="margin:0" onsubmit="return confirm('Удалить этот отзыв?')">
+      <input type="hidden" name="back" value="{{ back }}"><button class="small secondary" type="submit" title="удалить отзыв">{{ icon('trash', 'удалить') }}</button></form></td>
   </tr>
   {% endfor %}
 </table>
-{% else %}<p class="muted">Отзывов пока нет. Кнопка «Отзыв» есть на каждой странице.</p>{% endif %}
+{% else %}<p class="muted">Отзывов {{ 'с такими отметками ' if status or priority }}нет. Кнопка «Отзыв» есть на каждой странице.</p>{% endif %}
 </div>
+<p class="help">Срочность ставит администратор (выбор в первой колонке сохраняется сразу); по умолчанию — «обычно». При порядке «по срочности» сверху срочные и важные, сделанные — внизу.</p>
 {% endblock %}

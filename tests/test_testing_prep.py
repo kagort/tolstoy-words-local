@@ -117,3 +117,39 @@ def test_backup_status(tmp_path, monkeypatch):
     assert st["n"] == 2 and st["name"] == new.name and st["size_mb"] == 1.9 and not st["stale"]
     _os.utime(new, (time.time() - 3 * 86400,) * 2)
     assert backup_status()["stale"]
+
+
+def test_feedback_priority_and_delete(app_client):
+    import io as _io
+
+    import openpyxl
+
+    from app.db import SessionLocal
+    from app.models import Feedback
+
+    c = _login("Анна")
+    with SessionLocal() as s:
+        s.query(Feedback).delete()
+        s.commit()
+    for t in ("первый", "второй", "третий"):
+        c.post("/feedback", data={"text": t, "kind": "idea", "page": "/"})
+    with SessionLocal() as s:
+        ids = {f.text: f.id for f in s.query(Feedback)}
+        assert {f.priority for f in s.query(Feedback)} == {"normal"}
+    c.post(f"/feedback/{ids['третий']}", data={"status": "new", "priority": "urgent", "reply": "", "back": "sort=date"},
+           follow_redirects=False)
+    r = c.post(f"/feedback/{ids['второй']}", data={"status": "done", "priority": "important", "reply": "сделано",
+                                                   "back": "status=new&evil=1"}, follow_redirects=False)
+    assert r.headers["location"].startswith("/feedback?status=new#fb")  # лишние параметры не переносятся
+    page = c.get("/feedback").text  # по срочности: срочный сверху, сделанный — внизу
+    assert page.index("третий") < page.index("первый") < page.index("второй")
+    assert "срочно (1)" in page
+    assert "третий" in c.get("/feedback?priority=urgent").text and "первый" not in c.get("/feedback?priority=urgent").text
+    x = c.get("/export/feedback.xlsx")
+    ws = openpyxl.load_workbook(_io.BytesIO(x.content))["Отзывы"]
+    head = [cell.value for cell in ws[1]]
+    assert "Срочность" in head and "срочно" in [row[head.index("Срочность")] for row in ws.iter_rows(min_row=2, values_only=True)]
+    c.post(f"/feedback/{ids['первый']}/delete", data={"back": ""})
+    c.post("/feedback-clear", data={"back": ""})  # удаляет «сделано» («второй»)
+    with SessionLocal() as s:
+        assert [f.text for f in s.query(Feedback)] == ["третий"]

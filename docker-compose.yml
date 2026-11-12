@@ -92,12 +92,15 @@ services:
     restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN:-localhost}
-      ACME_EMAIL: ${ACME_EMAIL:-}
+      # сертификат: internal — свой (закрытая сеть); «/certs/cert.pem /certs/key.pem» — от IT-службы; e-mail — Let's Encrypt.
+      # Если TLS не задан: есть ACME_EMAIL — Let's Encrypt, иначе internal (см. deploy/Caddyfile, docs/DEPLOY.md §2.3а)
+      TLS: ${TLS:-${ACME_EMAIL:-internal}}
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

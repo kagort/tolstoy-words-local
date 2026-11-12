@@ -35,11 +35,11 @@
       <tr><td>Предложений</td><td class="num">{{ doc.n_sentences }}</td></tr>
       <tr><td>Токенов (со знаками препинания)</td><td class="num">{{ doc.n_tokens }}</td></tr>
       <tr><td>Словоупотреблений</td><td class="num">{{ doc.n_words }}</td></tr>
-      <tr><td>Исходный файл</td><td class="num">{{ doc.source_filename or '' }}</td></tr>
-      <tr><td>Конвейер разбора</td><td class="num small">{{ doc.pipeline_version or '—' }}</td></tr>
+      <tr><td>Исходный файл</td><td class="val">{{ doc.source_filename or '' }}</td></tr>
+      <tr><td>Конвейер разбора</td><td class="val small">{{ doc.pipeline_version or '—' }}</td></tr>
       {% if levels and levels.total %}
       <tr><td title="точный разбор основным парсером — для предложений со словами словарей; остальные разобраны предварительно (быстрым парсером)">Синтаксический разбор</td>
-        <td class="num small">точный: {{ levels.precise }}{% if levels.fast %} · предварительный: {{ levels.fast }}{% endif %}</td></tr>
+        <td class="val small">точный: {{ levels.precise }}{% if levels.fast %} · предварительный: {{ levels.fast }}{% endif %}</td></tr>
       {% endif %}
       <tr><td>Загружен</td><td class="num">{{ doc.created_at.strftime('%d.%m.%Y %H:%M') if doc.created_at }}</td></tr>
     </table>

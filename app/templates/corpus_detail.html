@@ -5,6 +5,13 @@
 <h1>Корпус «{{ corpus.name }}»</h1>
 {% if corpus.created_by %}<p class="muted small" style="margin-top:-6px">Создал(а): {{ corpus.created_by }}{% if corpus.created_at %} · {{ corpus.created_at.strftime('%d.%m.%Y') }}{% endif %}</p>{% endif %}
 <p><a class="btn secondary" href="/dashboard?corpus_id={{ corpus.id }}">{{ icon('chart') }}Дашборд корпуса</a> <a class="btn secondary" href="/analysis?corpus_id={{ corpus.id }}">Анализ</a></p>
+<form class="panel row corpus-zip" method="get" action="/export/corpus.zip" style="align-items:center">
+  <input type="hidden" name="corpus_id" value="{{ corpus.id }}">
+  <div class="shrink"><strong>Скачать корпус (ZIP)</strong><div class="muted small">очищенные тексты .txt + таблица метаданных</div></div>
+  <label class="check shrink"><input type="checkbox" name="parts" value="lemmas"> + леммы</label>
+  <label class="check shrink"><input type="checkbox" name="parts" value="conllu"> + разметка CoNLL-U</label>
+  <div class="shrink"><button class="secondary" type="submit">{{ icon('download') }}Скачать</button></div>
+</form>
 <form method="post" action="/corpora/{{ corpus.id }}">
   <div class="panel">
     <div class="row">

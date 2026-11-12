@@ -176,7 +176,12 @@ def run_ingest(job_id: int | None, text_id: int) -> None:
         # предложения со словами словарей получат точный разбор — ступень 2)
         from app.services.dictionaries import scope_text_ids
 
+        from app.services.quicksearch import forget_text, is_quick
+
+        forget_text(s, text_id)  # «Найти слово»: текст разобран заново — для быстрого поиска снова не просмотрен
         for d in s.scalars(select(Dictionary)):
+            if is_quick(d):  # служебный словарь «Найти слово» — только по запросу, не при каждой загрузке
+                continue
             scope = scope_text_ids(s, d)
             if scope is not None and text_id not in scope:  # словарь сопоставляется только с выбранными корпусами
                 continue

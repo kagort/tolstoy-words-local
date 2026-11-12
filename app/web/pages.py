@@ -918,7 +918,10 @@ def _analysis_context(db: Session, request: Request) -> dict:
     qp = request.query_params
     dictionaries = list(db.scalars(select(Dictionary).order_by(Dictionary.id)))
     corpora = list(db.scalars(select(Corpus).order_by(Corpus.name)))
-    dict_id = _int(qp.get("dictionary_id")) or (dictionaries[0].id if dictionaries else None)
+    from app.services.quicksearch import is_quick
+
+    regular = [d for d in dictionaries if not is_quick(d)]
+    dict_id = _int(qp.get("dictionary_id")) or ((regular or dictionaries)[0].id if dictionaries else None)
     sel = from_params(db, qp)
     entries = list(db.scalars(select(DictionaryEntry).where(DictionaryEntry.dictionary_id == dict_id)
                               .order_by(DictionaryEntry.category, DictionaryEntry.surface))) if dict_id else []
@@ -955,7 +958,20 @@ def _analysis_context(db: Session, request: Request) -> dict:
         Hit.dictionary_id == dict_id, Hit.text_id.in_(sel.ids or [-1]), A.VALID, Hit.in_propn)) or 0 if dict_id and sel.noprop else 0
     stale_pending = bool(stale) and bool(db.scalar(select(func.count()).select_from(Job).where(
         Job.status.in_(["queued", "running"]), Job.kind == "match")))
-    return dict(dictionaries=dictionaries, corpora=corpora, dict_id=dict_id, corpus_id=sel.corpus_id, entries=entries,
+    # «Найти слово»: плашка над вкладками — что ищем, идёт ли поиск, вернуться к прежнему словарю
+    quick = None
+    if is_quick(cur):
+        from app.services.quicksearch import pending
+
+        e_id = _int(qp.get("entry_id"))
+        from urllib.parse import parse_qsl
+
+        # куда вернуться: из адреса (сразу после поиска) или прежний словарь из запомненного выбора (cookie)
+        prev_id = _int(qp.get("prev_dict")) or next((int(v) for k, v in parse_qsl(request.cookies.get(REMEMBER_COOKIE) or "")
+                                                     if k == "dictionary_id" and v.isdigit()), None)
+        prev_dict = next((d for d in regular if d.id == prev_id), None)
+        quick = {"entry": next((e for e in entries if e.id == e_id), None), "pending": pending(db, cur, e_id), "prev": prev_dict}
+    return dict(dictionaries=dictionaries, corpora=corpora, dict_id=dict_id, corpus_id=sel.corpus_id, entries=entries, quick=quick,
                 scope_out=scope_out, stale=stale, stale_pending=stale_pending, propn_excluded=propn_excluded,
                 corpus_name=sel.corpus_name, tab=qp.get("tab", "overview"), sel=sel, sel_texts=corpus_texts(db, sel),
                 facets=A.facets(db, sel.corpus_ids), word_counts=word_counts, categories=categories, no_cats=no_cats,
@@ -1332,15 +1348,38 @@ def _stylo_context(db: Session, request: Request, sel) -> dict:
             "STY_MIN_WORDS": ST.MIN_WORDS}
 
 
+def _punct_context(db: Session, request: Request, sel) -> dict:
+    from app.services.punctuation import DIMS, analyze, examples
+
+    qp = request.query_params
+    dim = qp.get("pdim") if qp.get("pdim") in DIMS else ("text" if len(sel.ids) <= 12 else "author")
+    mark = qp.get("pmark") or ""
+    return {"pu": analyze(db, sel.ids, dim), "pu_dim": dim, "PU_DIMS": DIMS, "pu_mark": mark,
+            "pu_ex": examples(db, sel.ids, mark, _int(qp.get("page")) or 1) if mark else None}
+
+
 def _textcmp_context(db: Session, request: Request, sel) -> dict:
+    """Сравнение текстов: можно брать тексты из любых корпусов (не только из выборки) — сначала тексты выборки,
+    ниже остальные готовые тексты базы с корпусами."""
+    from app.models import corpus_texts
     from app.services.textcompare import compare
 
-    chosen = [int(x) for x in request.query_params.getlist("cmp") if x.isdigit() and int(x) in sel.ids][:5]
+    rows = list(db.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.n_words)
+                           .where(TextDoc.status == "ready").order_by(TextDoc.author, TextDoc.title)))
+    ready = {r.id for r in rows}
+    chosen = [int(x) for x in dict.fromkeys(request.query_params.getlist("cmp")) if x.isdigit() and int(x) in ready][:5]
     if not chosen:
-        chosen = sel.ids[:4]
-    texts = list(db.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.n_words).where(TextDoc.id.in_(sel.ids or [-1]))
-                            .order_by(TextDoc.author, TextDoc.title)))
-    return {"tc": compare(db, chosen, sel.stopset) if len(chosen) >= 1 else None, "tc_texts": texts, "tc_chosen": chosen}
+        chosen = [t for t in sel.ids if t in ready][:4]
+    cnames = dict(db.execute(select(Corpus.id, Corpus.name)).all())
+    in_corpora: dict[int, list[str]] = {}
+    for tid, cid in db.execute(select(corpus_texts.c.text_id, corpus_texts.c.corpus_id)):
+        in_corpora.setdefault(tid, []).append(cnames.get(cid, ""))
+    in_sel = set(sel.ids)
+    texts = [r for r in rows if r.id in in_sel]
+    others = [{"id": r.id, "title": r.title, "author": r.author, "n_words": r.n_words, "corpora": sorted(in_corpora.get(r.id, []))}
+              for r in rows if r.id not in in_sel]
+    return {"tc": compare(db, chosen, sel.stopset) if len(chosen) >= 1 else None, "tc_texts": texts, "tc_others": others,
+            "tc_chosen": chosen}
 
 
 @router.get("/api/entities/mentions")
@@ -1478,14 +1517,51 @@ def _recall_selection(request: Request, db: Session):
 def _remember_selection(resp, request: Request, dict_id: int | None):
     from urllib.parse import urlencode
 
+    from urllib.parse import parse_qsl
+
     qp = request.query_params
     pairs = [(k, v) for k in REMEMBER_KEYS for v in qp.getlist(k) if k != "dictionary_id"]
+    if dict_id and _is_quick_id(dict_id):  # «Найти слово»: служебный словарь не запоминаем — остаётся прежний
+        dict_id = next((int(v) for k, v in parse_qsl(request.cookies.get(REMEMBER_COOKIE) or "")
+                        if k == "dictionary_id" and v.isdigit()), None)
     if dict_id:
         pairs.insert(0, ("dictionary_id", str(dict_id)))
     if "corpus_id" not in qp:
         pairs.append(("corpus_id", ""))  # «Все тексты» — тоже выбор
     resp.set_cookie(REMEMBER_COOKIE, urlencode(pairs), max_age=180 * 24 * 3600, samesite="lax", httponly=True)
     return resp
+
+
+def _is_quick_id(dict_id: int) -> bool:
+    from app.db import SessionLocal
+    from app.services.quicksearch import is_quick
+
+    with SessionLocal() as s:
+        return is_quick(s.get(Dictionary, dict_id))
+
+
+@router.post("/analysis/find")
+def analysis_find(request: Request, word: str = Form(""), back: str = Form(""), db: Session = Depends(get_session)):
+    """«Найти слово»: любое слово или словосочетание — в служебном словаре «Быстрый поиск», по текущей выборке."""
+    from urllib.parse import parse_qsl
+
+    from starlette.datastructures import QueryParams
+
+    from app.services.quicksearch import find
+    from app.services.selection import from_params
+
+    qp = QueryParams(back or "")
+    sel = from_params(db, qp)
+    res = find(db, word, sel.ids)
+    if res.get("error"):
+        flash(request, "Найти слово: " + res["error"] + ".", "error")
+        return redirect("/analysis?" + (back or ""))
+    db.commit()
+    prev = qp.get("dictionary_id") or next((v for k, v in parse_qsl(request.cookies.get(REMEMBER_COOKIE) or "") if k == "dictionary_id"), "")
+    tab = qp.get("tab") if qp.get("tab") in ("conc", "profile", "portrait", "colloc", "freq", "overview", "report", "map") else "conc"
+    url = (f"/analysis?tab={tab}&dictionary_id={res['dictionary'].id}&entry_id={res['entry'].id}&{sel.query()}"
+           + (f"&prev_dict={prev}" if prev and str(prev) != str(res['dictionary'].id) else ""))
+    return redirect(url)
 
 
 @router.get("/analysis")
@@ -1538,6 +1614,8 @@ def _analysis_page(request: Request, db: Session):
         ctx.update(_stylo_context(db, request, sel))
     elif tab == "textcmp":
         ctx.update(_textcmp_context(db, request, sel))
+    elif tab == "punct":
+        ctx.update(_punct_context(db, request, sel))
     elif tab == "freq":
         # отмеченные слова — только они (переключатель all_words показывает весь словарь)
         words = None if qp.get("all_words") else (sel.words or None)
@@ -1913,31 +1991,79 @@ def feedback_create(request: Request, text: str = Form(""), kind: str = Form("ot
     return redirect(page)
 
 
-@router.get("/feedback")
-def feedback_list(request: Request, status: str = "", db: Session = Depends(get_session)):
-    from app.models import FEEDBACK_KINDS, FEEDBACK_STATUSES, Feedback
+def _feedback_back(back: str) -> str:
+    """Адрес списка отзывов с прежними фильтрами (только известные параметры — без перехода на чужие адреса)."""
+    from urllib.parse import parse_qsl, urlencode
 
-    q = select(Feedback).order_by(Feedback.created_at.desc())
+    keep = [(k, v) for k, v in parse_qsl(back or "") if k in ("status", "priority", "sort")]
+    return "/feedback" + ("?" + urlencode(keep) if keep else "")
+
+
+@router.get("/feedback")
+def feedback_list(request: Request, status: str = "", priority: str = "", sort: str = "priority",
+                  db: Session = Depends(get_session)):
+    from sqlalchemy import case
+
+    from app.models import FEEDBACK_KINDS, FEEDBACK_PRIORITIES, FEEDBACK_STATUSES, Feedback
+
+    rank = case({k: n for n, k in enumerate(FEEDBACK_PRIORITIES)}, value=Feedback.priority, else_=len(FEEDBACK_PRIORITIES))
+    q = select(Feedback)
+    # по срочности: срочные и важные — сверху, сделанные — вниз; внутри — новые сначала
+    q = (q.order_by(Feedback.created_at.desc()) if sort == "date"
+         else q.order_by((Feedback.status == "done").asc(), rank, Feedback.created_at.desc()))
     if status in FEEDBACK_STATUSES:
         q = q.where(Feedback.status == status)
+    if priority in FEEDBACK_PRIORITIES:
+        q = q.where(Feedback.priority == priority)
     counts = dict(db.execute(select(Feedback.status, func.count()).group_by(Feedback.status)).all())
-    return render(request, "feedback.html", items=list(db.scalars(q.limit(1000))), status=status, counts=counts,
-                  KINDS=FEEDBACK_KINDS, STATUSES=FEEDBACK_STATUSES)
+    pcounts = dict(db.execute(select(Feedback.priority, func.count()).where(Feedback.status != "done")
+                              .group_by(Feedback.priority)).all())
+    return render(request, "feedback.html", items=list(db.scalars(q.limit(1000))), status=status, priority=priority,
+                  sort="date" if sort == "date" else "priority", counts=counts, pcounts=pcounts,
+                  KINDS=FEEDBACK_KINDS, STATUSES=FEEDBACK_STATUSES, PRIORITIES=FEEDBACK_PRIORITIES,
+                  back=request.url.query)
 
 
 @router.post("/feedback/{fid}")
 def feedback_update(request: Request, fid: int, status: str = Form("seen"), reply: str = Form(""),
-                    back: str = Form(""), db: Session = Depends(get_session)):
-    from app.models import FEEDBACK_STATUSES, Feedback
+                    priority: str = Form(""), back: str = Form(""), db: Session = Depends(get_session)):
+    from app.models import FEEDBACK_PRIORITIES, FEEDBACK_STATUSES, Feedback
 
     fb = db.get(Feedback, fid)
     if fb is None:
         raise HTTPException(404)
     if status in FEEDBACK_STATUSES:
         fb.status = status
+    if priority in FEEDBACK_PRIORITIES:
+        fb.priority = priority
     fb.reply = reply.strip() or None
     db.commit()
-    return redirect("/feedback" + (f"?status={back}" if back in FEEDBACK_STATUSES else "") + f"#fb{fid}")
+    return redirect(_feedback_back(back) + f"#fb{fid}")
+
+
+@router.post("/feedback/{fid}/delete")
+def feedback_delete(request: Request, fid: int, back: str = Form(""), db: Session = Depends(get_session)):
+    from app.models import Feedback
+
+    fb = db.get(Feedback, fid)
+    if fb is not None:
+        db.delete(fb)
+        db.commit()
+        flash(request, "Отзыв удалён.")
+    return redirect(_feedback_back(back))
+
+
+@router.post("/feedback-clear")
+def feedback_clear(request: Request, back: str = Form(""), db: Session = Depends(get_session)):
+    """Удалить все отзывы со статусом «сделано» (перед удалением их можно выгрузить в XLSX)."""
+    from sqlalchemy import delete as sql_delete
+
+    from app.models import Feedback
+
+    n = db.execute(sql_delete(Feedback).where(Feedback.status == "done")).rowcount or 0
+    db.commit()
+    flash(request, f"Удалено сделанных отзывов: {n}." if n else "Сделанных отзывов нет.")
+    return redirect(_feedback_back(back))
 
 
 @router.get("/help")

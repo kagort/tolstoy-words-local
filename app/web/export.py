@@ -156,7 +156,7 @@ def export_concordance(fmt: str, request: Request, db: Session = Depends(get_ses
 @router.get("/feedback.{fmt}")
 def export_feedback(fmt: str, request: Request, db: Session = Depends(get_session)):
     """Отзывы тестировщиков — для обобщения пользовательского опыта."""
-    from app.models import FEEDBACK_KINDS, FEEDBACK_STATUSES, Feedback
+    from app.models import FEEDBACK_KINDS, FEEDBACK_PRIORITIES, FEEDBACK_STATUSES, Feedback
 
     if fmt not in FORMATS:
         raise HTTPException(400)
@@ -166,8 +166,9 @@ def export_feedback(fmt: str, request: Request, db: Session = Depends(get_sessio
         q = q.where(Feedback.status == status)
     df = pd.DataFrame([{"Дата": f.created_at.strftime("%d.%m.%Y %H:%M") if f.created_at else "", "Кто": f.author or "",
                         "Тип": FEEDBACK_KINDS.get(f.kind, f.kind), "Отзыв": f.text, "Страница": f.page or "",
-                        "Статус": FEEDBACK_STATUSES.get(f.status, f.status), "Заметка": f.reply or ""} for f in db.scalars(q)],
-                      columns=["Дата", "Кто", "Тип", "Отзыв", "Страница", "Статус", "Заметка"])
+                        "Статус": FEEDBACK_STATUSES.get(f.status, f.status), "Заметка": f.reply or "",
+                        "Срочность": FEEDBACK_PRIORITIES.get(f.priority or "normal", f.priority)} for f in db.scalars(q)],
+                      columns=["Дата", "Кто", "Тип", "Отзыв", "Страница", "Статус", "Заметка", "Срочность"])
     return _send({"Отзывы": df}, fmt, "feedback", {"Отзывов": len(df), "Статус": FEEDBACK_STATUSES.get(status, "все")})
 
 
@@ -489,6 +490,52 @@ def export_hits_conllu(request: Request, db: Session = Depends(get_session)):
 
     return StreamingResponse(gen(), media_type="text/plain; charset=utf-8",
                              headers={"Content-Disposition": 'attachment; filename="hits.conllu"'})
+
+
+@router.get("/punct.{fmt}")
+def export_punct(fmt: str, request: Request, db: Session = Depends(get_session)):
+    """Пунктуация выборки: на 1000 слов, абсолютные числа, концовки предложений — по группам."""
+    from app.services.punctuation import DIMS, analyze
+
+    if fmt not in FORMATS:
+        raise HTTPException(400)
+    _, ids = _ctx(db, request)
+    dim = request.query_params.get("pdim")
+    pu = analyze(db, ids, dim if dim in DIMS else "author")
+    rows = pu["groups"] + ([pu["total"]] if pu.get("total") else [])
+
+    def frame(field, labels, suffix=""):
+        return pd.DataFrame([{pu["dim_label"]: g["full"], "Слов": g["words"], "Предложений": g["sentences"],
+                              **{labels[k][0] if isinstance(labels[k], tuple) else labels[k]: g[field][k] for k in labels},
+                              **({"Запятых на предложение": g["commas_per_sentence"], "Слов в предложении": g["words_per_sentence"],
+                                  "Прямая речь, %": g["direct_pct"]} if field == "per1000" else {})} for g in rows])
+    return _send({"На 1000 слов": frame("per1000", pu["marks"]), "Число знаков": frame("counts", pu["marks"]),
+                  "Концовки, %": frame("endings", pu["endings"])}, fmt, "punctuation", _params(db, request))
+
+
+@router.get("/corpus.zip")
+def export_corpus_zip(request: Request, db: Session = Depends(get_session)):
+    """Корпус архивом: очищенные тексты + метаданные; parts=lemmas, parts=conllu — добавить леммы и разметку."""
+    from app.services.corpus_export import _slug, build_zip, translit
+
+    qp = request.query_params
+    cid = _int(qp.get("corpus_id"))
+    name, buf, n = build_zip(db, cid, set(qp.getlist("parts")))
+    if not name:
+        raise HTTPException(404)
+
+    def chunks():
+        try:
+            while True:
+                b = buf.read(1 << 20)
+                if not b:
+                    break
+                yield b
+        finally:
+            buf.close()
+
+    filename = f"korpus-{_slug(translit(name), 40)}-{datetime.now().strftime('%Y%m%d')}.zip"
+    return StreamingResponse(chunks(), media_type="application/zip", headers={"Content-Disposition": _disposition(filename)})
 
 
 @router.get("/text/{text_id}.conllu")

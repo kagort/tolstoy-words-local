@@ -278,7 +278,7 @@ dialog.fb-dialog::backdrop { background: rgba(0,0,0,.35); }
 dialog.fb-dialog textarea { width: 100%; box-sizing: border-box; }
 .fb-kinds { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0; }
 .fb-btn { width: 100%; }
-.fb-table tr.fb-new td:first-child { border-left: 3px solid var(--accent); }
+.fb-table tr.fb-new td:nth-child(5) { font-weight: 600; }  /* новый — жирный текст; полоса слева — срочность */
 .fb-status { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 0; }
 .fb-status input[type=text] { min-width: 180px; flex: 1; }
 /* значок ▸ «профиль сочетания» у связанного слова (портрет слова, коллокации): плашка при наведении */
@@ -289,3 +289,22 @@ a.pt-link::after { content: attr(data-tip); position: absolute; left: 50%; botto
   white-space: nowrap; background: var(--text); color: var(--panel); font-size: 12px; padding: 3px 8px; border-radius: 6px;
   opacity: 0; pointer-events: none; transition: opacity .12s ease .15s; z-index: 20; }
 a.pt-link:hover::after, a.pt-link:focus-visible::after { opacity: 1; }
+
+/* длинные текстовые значения в таблицах «название — значение» (имя файла, конвейер разбора): переносятся, не выталкивают
+   числа за рамку панели (карточка текста, отзыв 2026-11-11) */
+td.val { text-align: right; white-space: normal; overflow-wrap: anywhere; }
+/* срочность отзывов: флажок цветом */
+.flag { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: 0; background: var(--border); }
+.prio-urgent .flag { background: var(--err); } .prio-important .flag { background: var(--warn); } .prio-normal .flag { background: var(--border); }
+.fb-table tr.prio-urgent td:first-child { box-shadow: inset 3px 0 0 var(--err); }
+.fb-table tr.prio-important td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+.fb-table tr.fb-done td { opacity: .65; }
+.fb-table select[name=priority] { width: auto; padding: 2px 6px; font-size: 13px; }
+.fb-chip { display: inline-flex; align-items: center; padding: 2px 9px; margin-left: 4px; border: 1px solid var(--border); border-radius: 999px; color: var(--text); text-decoration: none; }
+.fb-chip.on { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+/* «Найти слово» в «Анализе» */
+.tn-find { display: flex; gap: 6px; align-items: center; margin: 0 0 0 auto; }
+.tn-find input[type=search] { width: 210px; padding: 5px 10px; font-size: 13.5px; }
+.quick-bar .quick-wait { font-weight: 600; }
+@media (max-width: 860px) { .tn-find { margin-left: 0; width: 100%; } .tn-find input[type=search] { flex: 1; width: auto; } }
+.tc-list .tc-head { grid-column: 1 / -1; margin: 6px 0 2px; text-transform: uppercase; letter-spacing: .05em; font-size: 11px; }

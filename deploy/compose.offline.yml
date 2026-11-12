@@ -1,0 +1,14 @@
+# Запуск на сервере без интернета (deploy/offline-install.sh): образы загружены с флешки (docker load) —
+# ничего не собирать и не скачивать. Используется вместе с основным файлом:
+#   docker compose -f docker-compose.yml -f deploy/compose.offline.yml up -d --no-build
+services:
+  web:
+    pull_policy: never
+  worker:
+    pull_policy: never
+  db:
+    pull_policy: never
+  backup:
+    pull_policy: never
+  caddy:
+    pull_policy: never
