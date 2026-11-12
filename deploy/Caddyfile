@@ -1,9 +1,16 @@
-# Caddy сам получает и продлевает сертификат Let's Encrypt для домена из DOMAIN
+# HTTPS для Quotverba (docker compose --profile prod up -d). Сертификат — по переменной TLS (docker-compose.yml):
+#   internal                      — свой сертификат Caddy (сервер в закрытой сети: адрес DOMAIN — IP или внутреннее имя;
+#                                   чтобы браузеры не предупреждали, установите корневой сертификат — docs/DEPLOY.md §2.3а)
+#   /certs/cert.pem /certs/key.pem — сертификат, выданный IT-службой (файлы в папке certs/ проекта)
+#   адрес@почты                    — Let's Encrypt (сервер с выходом в интернет и доменом в DNS)
+# Порт 80 сам перенаправляет на 443.
 {
-	email {$ACME_EMAIL}
+	# не пытаться ставить корневой сертификат в систему контейнера (для TLS internal он ставится на компьютеры пользователей)
+	skip_install_trust
 }
 
 {$DOMAIN} {
+	tls {$TLS}
 	encode gzip
 	request_body {
 		max_size 60MB

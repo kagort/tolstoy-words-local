@@ -12,3 +12,6 @@ __pycache__/
 .vscode/
 backups/
 *.dump
+
+# сертификаты HTTPS (от IT-службы) — не в репозиторий
+certs/
