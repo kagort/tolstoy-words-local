@@ -289,3 +289,7 @@ a.pt-link::after { content: attr(data-tip); position: absolute; left: 50%; botto
   white-space: nowrap; background: var(--text); color: var(--panel); font-size: 12px; padding: 3px 8px; border-radius: 6px;
   opacity: 0; pointer-events: none; transition: opacity .12s ease .15s; z-index: 20; }
 a.pt-link:hover::after, a.pt-link:focus-visible::after { opacity: 1; }
+
+/* длинные текстовые значения в таблицах «название — значение» (имя файла, конвейер разбора): переносятся, не выталкивают
+   числа за рамку панели (карточка текста, отзыв 2026-11-11) */
+td.val { text-align: right; white-space: normal; overflow-wrap: anywhere; }
