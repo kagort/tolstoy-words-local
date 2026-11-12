@@ -15,3 +15,5 @@ backups/
 
 # сертификаты HTTPS (от IT-службы) — не в репозиторий
 certs/
+# пакет обновления для флешки (deploy/offline-pack.sh)
+offline-update/
