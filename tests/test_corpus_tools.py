@@ -74,3 +74,25 @@ def test_textcmp_across_corpora(setup):
     assert r.status_code == 200 and "Лепестковая диаграмма" in r.text and "Второй" in r.text
     x = c.get(f"/export/textcmp.xlsx?corpus_id={ids['Проза']}&cmp={texts['Первый']}&cmp={texts['Второй']}")
     assert x.status_code == 200 and x.content[:2] == b"PK"
+
+
+def test_punctuation(setup):
+    from app.db import SessionLocal
+    from app.services.punctuation import analyze, classify, examples
+
+    c, ids, texts = setup
+    assert [classify(f) for f in (",", "…", "...", "?!", "!..", "–", "«", "*")] == \
+        ["comma", "ellipsis", "ellipsis", "qe", "exclam", "dash", "quote", None]
+    with SessionLocal() as s:
+        pu = analyze(s, list(texts.values()), "text")
+        first = next(g for g in pu["groups"] if g["full"].endswith("«Первый»"))
+        assert first["counts"]["period"] == 2 and first["endings"]["period"] == 100.0
+        second = next(g for g in pu["groups"] if g["full"].endswith("«Второй»"))
+        assert second["counts"]["comma"] == 1 and second["per1000"]["comma"] > 0
+        assert pu["total"]["words"] == first["words"] + second["words"]
+        ex = examples(s, list(texts.values()), "comma")
+        assert ex["total"] == 1 and any(k == "kw" for _, k in ex["items"][0]["parts"])
+    page = c.get(f"/analysis?tab=punct&dictionary_id=1&pdim=text&pmark=comma")
+    assert page.status_code == 200 and "Профиль пунктуации" in page.text and "Буря мглою" in page.text
+    x = c.get("/export/punct.xlsx?pdim=author")
+    assert x.status_code == 200 and x.content[:2] == b"PK"

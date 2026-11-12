@@ -1,0 +1,72 @@
+{# ============================================================== ПУНКТУАЦИЯ (services/punctuation.py). Переменные: pu, pu_dim, pu_mark, pu_ex #}
+{% if tab == 'punct' and pu %}
+<div class="panel row">
+  <div><label>Группировать по</label><select name="pdim" form="sel-form">{% for k, v in PU_DIMS.items() %}<option value="{{ k }}" {{ 'selected' if pu_dim == k }}>{{ v|lower }}ам{% if k == 'text' %} (каждый текст){% endif %}</option>{% endfor %}</select></div>
+  <div class="shrink"><button type="submit" form="sel-form">Показать</button></div>
+  <div class="shrink">Скачать: <a href="/export/punct.xlsx{{ qs(request, page=None) }}">XLSX</a></div>
+</div>
+{% if not pu.groups %}<div class="panel muted">В выборке нет готовых текстов.</div>{% else %}
+{% set t = pu.total %}
+<div class="stat-tiles">
+  <div class="tile"><div class="tile-num">{{ t.per1000.comma|string|replace('.', ',') }}</div><div class="tile-label">запятых на 1000 слов</div></div>
+  <div class="tile"><div class="tile-num">{{ t.per1000.dash|string|replace('.', ',') }}</div><div class="tile-label">тире на 1000 слов</div></div>
+  <div class="tile"><div class="tile-num">{{ t.commas_per_sentence|string|replace('.', ',') }}</div><div class="tile-label">запятых на предложение (слов в предложении — {{ t.words_per_sentence|string|replace('.', ',') }})</div></div>
+  <div class="tile"><div class="tile-num">{{ t.direct_pct|string|replace('.', ',') }}&thinsp;%</div><div class="tile-label">предложений с прямой речью</div></div>
+</div>
+{% if pu.hidden %}<p class="help">Показаны {{ pu.groups|length }} самых больших групп, ещё {{ pu.hidden }} — в выгрузке нет; сузьте выборку или сгруппируйте по авторам.</p>{% endif %}
+
+<div class="panel"><h3 style="margin-top:0">Профиль пунктуации: знак × {{ pu.dim_label|lower }}</h3>
+  <div id="chart-punct" class="chart"></div>
+  <p class="help">Строка — {{ pu.dim_label|lower }}, столбец — знак; цвет — насколько часто знак в этой группе по сравнению с группой, где он встречается чаще всего (100 %); в подсказке — на 1000 слов. Так видно «почерк»: у кого больше тире, точек с запятой, многоточий. Кавычки и скобки — парами.</p></div>
+
+<div class="panel"><h3 style="margin-top:0">Как заканчиваются предложения</h3>
+  <div id="chart-endings" class="chart"></div>
+  <p class="help">Доля предложений по последнему знаку (закрывающие кавычки и скобки не считаются). «Без знака» — заголовки, строки стихов, обрывы.</p></div>
+
+<div class="panel table-scroll"><h3 style="margin-top:0">Таблица: на 1000 слов</h3>
+  <table>
+    <tr><th>{{ pu.dim_label }}</th><th class="num">Слов</th><th class="num">Предл.</th>
+      {% for k, v in pu.marks.items() %}<th class="num" title="{{ v[0] }}"><a href="/analysis{{ qs(request, pmark=k, page=None) }}#pu-ex">{{ v[1] }}</a></th>{% endfor %}
+      <th class="num" title="запятых на предложение">, / предл.</th><th class="num" title="слов в предложении">слов / предл.</th><th class="num">прямая речь, %</th></tr>
+    {% for g in pu.groups + [t] %}
+    <tr class="{{ 'total' if loop.last }}"><td title="{{ g.full }}">{% if loop.last %}<strong>{{ g.label }}</strong>{% else %}{{ g.label }}{% endif %}</td>
+      <td class="num">{{ g.words }}</td><td class="num">{{ g.sentences }}</td>
+      {% for k in pu.marks %}<td class="num" title="{{ pu.marks[k][0] }}: {{ g.counts[k] }}">{{ g.per1000[k] }}</td>{% endfor %}
+      <td class="num">{{ g.commas_per_sentence }}</td><td class="num">{{ g.words_per_sentence }}</td><td class="num">{{ g.direct_pct }}</td></tr>
+    {% endfor %}
+  </table>
+  <p class="help">Щелчок по знаку в заголовке — предложения выборки с этим знаком (ниже).</p></div>
+
+<div class="panel" id="pu-ex"><div class="row" style="align-items:center"><h3 style="margin:0">Примеры</h3><div class="spacer"></div>
+  <div class="shrink small">{% for k, v in pu.marks.items() %}<a class="fb-chip {{ 'on' if pu_mark == k }}" href="/analysis{{ qs(request, pmark=k, page=None) }}#pu-ex" title="{{ v[0] }}">{{ v[1] }}</a>{% endfor %}</div></div>
+  {% if not pu_ex %}<p class="muted">Выберите знак — появятся предложения выборки с ним.</p>
+  {% elif not pu_ex['items'] %}<p class="muted">Предложений с этим знаком нет.</p>
+  {% else %}
+  <p class="muted small">{{ pu.marks[pu_mark][0] }} — предложений: {{ pu_ex.total }}</p>
+  <ol class="pt-ctx" start="{{ (pu_ex.page - 1) * 30 + 1 }}">{% for i in pu_ex['items'] %}
+    <li><div>{% for tx, k in i.parts %}{% if k == 'kw' %}<mark>{{ tx }}</mark>{% else %}{{ tx }}{% endif %}{% endfor %}</div>
+      <div class="small muted">{{ i.source }} · <a href="/sentences/{{ i.sentence_id }}">{{ icon('tree', 'разбор') }}№&nbsp;{{ i.sent_idx }}</a></div></li>{% endfor %}</ol>
+  {% if pu_ex.pages > 1 %}<div class="pager">Страница {{ pu_ex.page }} из {{ pu_ex.pages }}
+    {% if pu_ex.page > 1 %}<a class="btn small secondary" href="/analysis{{ qs(request, page=pu_ex.page - 1) }}#pu-ex">← назад</a>{% endif %}
+    {% if pu_ex.page < pu_ex.pages %}<a class="btn small secondary" href="/analysis{{ qs(request, page=pu_ex.page + 1) }}#pu-ex">вперёд →</a>{% endif %}</div>{% endif %}
+  {% endif %}
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const pu = {{ pu|tojson }};
+  const keys = pu.mark_order, groups = pu.groups;  // порядок знаков — как в таблице (tojson сортирует ключи словаря)
+  const raw = keys.map(k => groups.map(g => g.per1000[k]));
+  const z = raw.map(row => { const m = Math.max(...row) || 1; return row.map(v => Math.round(100 * v / m)); });
+  drawHeat('chart-punct', keys.map(k => pu.marks[k][0]), groups.map(g => g.label), groups.map(g => g.full), z,
+    { vertical: true, sort: false, raw, unit: 'на 1000 слов', colorbar: { title: { text: '% от макс.<br>знака', font: { size: 10 } }, ticksuffix: '%' } });
+  const ek = pu.ending_order, colors = ['--cat-4', '--cat-1', '--cat-3', '--cat-2', '--cat-5', '--border'];
+  const rows = groups.concat([pu.total]), h = Math.max(260, 110 + 30 * rows.length);
+  document.getElementById('chart-endings').style.minHeight = h + 'px';
+  drawChart('chart-endings', ek.map((k, i) => ({ type: 'bar', orientation: 'h', name: pu.endings[k], y: rows.map(g => g.label),
+      x: rows.map(g => g.endings[k]), marker: { color: cssVar(colors[i]) || undefined }, hovertemplate: '%{y}: ' + pu.endings[k] + ' — %{x}%<extra></extra>' })),
+    { barmode: 'stack', height: h, xaxis: { title: '% предложений', range: [0, 100] },
+      yaxis: { autorange: 'reversed', automargin: true }, legend: { orientation: 'h', x: 0, y: 1.02, yanchor: 'bottom', traceorder: 'normal' }, margin: { l: 20, r: 20, t: 60, b: 50 } });
+});
+</script>
+{% endif %}
+{% endif %}

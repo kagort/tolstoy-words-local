@@ -492,6 +492,27 @@ def export_hits_conllu(request: Request, db: Session = Depends(get_session)):
                              headers={"Content-Disposition": 'attachment; filename="hits.conllu"'})
 
 
+@router.get("/punct.{fmt}")
+def export_punct(fmt: str, request: Request, db: Session = Depends(get_session)):
+    """Пунктуация выборки: на 1000 слов, абсолютные числа, концовки предложений — по группам."""
+    from app.services.punctuation import DIMS, analyze
+
+    if fmt not in FORMATS:
+        raise HTTPException(400)
+    _, ids = _ctx(db, request)
+    dim = request.query_params.get("pdim")
+    pu = analyze(db, ids, dim if dim in DIMS else "author")
+    rows = pu["groups"] + ([pu["total"]] if pu.get("total") else [])
+
+    def frame(field, labels, suffix=""):
+        return pd.DataFrame([{pu["dim_label"]: g["full"], "Слов": g["words"], "Предложений": g["sentences"],
+                              **{labels[k][0] if isinstance(labels[k], tuple) else labels[k]: g[field][k] for k in labels},
+                              **({"Запятых на предложение": g["commas_per_sentence"], "Слов в предложении": g["words_per_sentence"],
+                                  "Прямая речь, %": g["direct_pct"]} if field == "per1000" else {})} for g in rows])
+    return _send({"На 1000 слов": frame("per1000", pu["marks"]), "Число знаков": frame("counts", pu["marks"]),
+                  "Концовки, %": frame("endings", pu["endings"])}, fmt, "punctuation", _params(db, request))
+
+
 @router.get("/corpus.zip")
 def export_corpus_zip(request: Request, db: Session = Depends(get_session)):
     """Корпус архивом: очищенные тексты + метаданные; parts=lemmas, parts=conllu — добавить леммы и разметку."""

@@ -1348,6 +1348,16 @@ def _stylo_context(db: Session, request: Request, sel) -> dict:
             "STY_MIN_WORDS": ST.MIN_WORDS}
 
 
+def _punct_context(db: Session, request: Request, sel) -> dict:
+    from app.services.punctuation import DIMS, analyze, examples
+
+    qp = request.query_params
+    dim = qp.get("pdim") if qp.get("pdim") in DIMS else ("text" if len(sel.ids) <= 12 else "author")
+    mark = qp.get("pmark") or ""
+    return {"pu": analyze(db, sel.ids, dim), "pu_dim": dim, "PU_DIMS": DIMS, "pu_mark": mark,
+            "pu_ex": examples(db, sel.ids, mark, _int(qp.get("page")) or 1) if mark else None}
+
+
 def _textcmp_context(db: Session, request: Request, sel) -> dict:
     """Сравнение текстов: можно брать тексты из любых корпусов (не только из выборки) — сначала тексты выборки,
     ниже остальные готовые тексты базы с корпусами."""
@@ -1604,6 +1614,8 @@ def _analysis_page(request: Request, db: Session):
         ctx.update(_stylo_context(db, request, sel))
     elif tab == "textcmp":
         ctx.update(_textcmp_context(db, request, sel))
+    elif tab == "punct":
+        ctx.update(_punct_context(db, request, sel))
     elif tab == "freq":
         # отмеченные слова — только они (переключатель all_words показывает весь словарь)
         words = None if qp.get("all_words") else (sel.words or None)
