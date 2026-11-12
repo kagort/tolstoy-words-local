@@ -302,3 +302,8 @@ td.val { text-align: right; white-space: normal; overflow-wrap: anywhere; }
 .fb-table select[name=priority] { width: auto; padding: 2px 6px; font-size: 13px; }
 .fb-chip { display: inline-flex; align-items: center; padding: 2px 9px; margin-left: 4px; border: 1px solid var(--border); border-radius: 999px; color: var(--text); text-decoration: none; }
 .fb-chip.on { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+/* «Найти слово» в «Анализе» */
+.tn-find { display: flex; gap: 6px; align-items: center; margin: 0 0 0 auto; }
+.tn-find input[type=search] { width: 210px; padding: 5px 10px; font-size: 13.5px; }
+.quick-bar .quick-wait { font-weight: 600; }
+@media (max-width: 860px) { .tn-find { margin-left: 0; width: 100%; } .tn-find input[type=search] { flex: 1; width: auto; } }

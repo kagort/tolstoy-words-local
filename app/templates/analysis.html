@@ -118,6 +118,14 @@
 
 {% if propn_excluded %}<p class="help">Имена собственные не учитываются: {{ propn_excluded }} вхождений слов словаря внутри имён и названий
   («Чёрное море», «Белый дом») не посчитаны. Вернуть отдельное вхождение — ✓ в конкордансе.</p>{% endif %}
+{% macro find_form() %}<form class="tn-find" method="post" action="/analysis/find" role="search" title="любое слово или словосочетание — не только из словаря: поиск в текущей выборке">
+  <input type="hidden" name="back" value="{{ request.url.query }}">
+  <input type="search" name="word" placeholder="Найти любое слово…" aria-label="Найти любое слово или словосочетание" required maxlength="80" value="{{ quick.entry.surface if quick and quick.entry else '' }}">
+  <button class="small" type="submit">Найти</button></form>{% endmacro %}
+{% if quick %}<div class="flash info quick-bar">{% if quick.entry %}Быстрый поиск: «<strong>{{ quick.entry.surface }}</strong>»{% else %}Служебный словарь «Быстрый поиск»{% endif %} — слово не из ваших словарей, поиск по текущей выборке.
+  {% if quick.pending %}<span class="quick-wait">Ищем в текстах выборки… страница обновится сама.</span>{% endif %}
+  {% if quick.prev %}<a href="/analysis?dictionary_id={{ quick.prev.id }}&{{ sel.query() }}">← вернуться к словарю «{{ quick.prev.name }}»</a>{% endif %}</div>
+{% if quick.pending %}<script>setTimeout(() => location.reload(), 4000);</script>{% endif %}{% endif %}
 {# группы инструментов: (название, цвет-токен, [(вкладка, название, значок)]); названия «Сравнения» короткие — группа уже говорит «Сравнение» #}
 {% set TOOL_GROUPS = [
   ('Сводка', '--cat-1', [('overview', 'Обзор', 'M4 20V10M10 20V4M16 20v-7'), ('report', 'Отчёт', 'M6 3h9l4 4v14H6zM9 12h7M9 16h7')]),
@@ -142,6 +150,7 @@
       Все инструменты</button>
     {% if cur.group %}<span class="tn-path" style="--g:var({{ cur.color }})"><span class="tn-dot"></span>{{ cur.group }} › <b>{{ cur.label }}</b></span>
     {% if cur.items|length > 1 %}<span class="tn-near">рядом: {% for key, label, d in cur.items if key != tab %}<a href="{{ tab_href(key) }}">{{ label }}</a>{{ ' · ' if not loop.last }}{% endfor %}</span>{% endif %}{% endif %}
+    {{ find_form() }}
   </div>
   <div class="tn-grid" id="tn-grid" hidden>
     {% for gname, color, items in TOOL_GROUPS %}
@@ -161,6 +170,7 @@
 })();
 </script>
 {% else %}
+<div class="row" style="margin:6px 0 0">{{ find_form() }}</div>
 <div class="tabs">
   {% for gname, color, items in TOOL_GROUPS %}{% for key, label, d in items %}
   <a class="{{ 'active' if tab == key }}" href="{{ tab_href(key) }}">{{ 'Сравнение ' ~ label|lower if gname == 'Сравнение' and key != 'stylo' else label }}</a>

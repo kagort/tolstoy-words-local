@@ -918,7 +918,10 @@ def _analysis_context(db: Session, request: Request) -> dict:
     qp = request.query_params
     dictionaries = list(db.scalars(select(Dictionary).order_by(Dictionary.id)))
     corpora = list(db.scalars(select(Corpus).order_by(Corpus.name)))
-    dict_id = _int(qp.get("dictionary_id")) or (dictionaries[0].id if dictionaries else None)
+    from app.services.quicksearch import is_quick
+
+    regular = [d for d in dictionaries if not is_quick(d)]
+    dict_id = _int(qp.get("dictionary_id")) or ((regular or dictionaries)[0].id if dictionaries else None)
     sel = from_params(db, qp)
     entries = list(db.scalars(select(DictionaryEntry).where(DictionaryEntry.dictionary_id == dict_id)
                               .order_by(DictionaryEntry.category, DictionaryEntry.surface))) if dict_id else []
@@ -955,7 +958,20 @@ def _analysis_context(db: Session, request: Request) -> dict:
         Hit.dictionary_id == dict_id, Hit.text_id.in_(sel.ids or [-1]), A.VALID, Hit.in_propn)) or 0 if dict_id and sel.noprop else 0
     stale_pending = bool(stale) and bool(db.scalar(select(func.count()).select_from(Job).where(
         Job.status.in_(["queued", "running"]), Job.kind == "match")))
-    return dict(dictionaries=dictionaries, corpora=corpora, dict_id=dict_id, corpus_id=sel.corpus_id, entries=entries,
+    # «Найти слово»: плашка над вкладками — что ищем, идёт ли поиск, вернуться к прежнему словарю
+    quick = None
+    if is_quick(cur):
+        from app.services.quicksearch import pending
+
+        e_id = _int(qp.get("entry_id"))
+        from urllib.parse import parse_qsl
+
+        # куда вернуться: из адреса (сразу после поиска) или прежний словарь из запомненного выбора (cookie)
+        prev_id = _int(qp.get("prev_dict")) or next((int(v) for k, v in parse_qsl(request.cookies.get(REMEMBER_COOKIE) or "")
+                                                     if k == "dictionary_id" and v.isdigit()), None)
+        prev_dict = next((d for d in regular if d.id == prev_id), None)
+        quick = {"entry": next((e for e in entries if e.id == e_id), None), "pending": pending(db, cur, e_id), "prev": prev_dict}
+    return dict(dictionaries=dictionaries, corpora=corpora, dict_id=dict_id, corpus_id=sel.corpus_id, entries=entries, quick=quick,
                 scope_out=scope_out, stale=stale, stale_pending=stale_pending, propn_excluded=propn_excluded,
                 corpus_name=sel.corpus_name, tab=qp.get("tab", "overview"), sel=sel, sel_texts=corpus_texts(db, sel),
                 facets=A.facets(db, sel.corpus_ids), word_counts=word_counts, categories=categories, no_cats=no_cats,
@@ -1478,14 +1494,51 @@ def _recall_selection(request: Request, db: Session):
 def _remember_selection(resp, request: Request, dict_id: int | None):
     from urllib.parse import urlencode
 
+    from urllib.parse import parse_qsl
+
     qp = request.query_params
     pairs = [(k, v) for k in REMEMBER_KEYS for v in qp.getlist(k) if k != "dictionary_id"]
+    if dict_id and _is_quick_id(dict_id):  # «Найти слово»: служебный словарь не запоминаем — остаётся прежний
+        dict_id = next((int(v) for k, v in parse_qsl(request.cookies.get(REMEMBER_COOKIE) or "")
+                        if k == "dictionary_id" and v.isdigit()), None)
     if dict_id:
         pairs.insert(0, ("dictionary_id", str(dict_id)))
     if "corpus_id" not in qp:
         pairs.append(("corpus_id", ""))  # «Все тексты» — тоже выбор
     resp.set_cookie(REMEMBER_COOKIE, urlencode(pairs), max_age=180 * 24 * 3600, samesite="lax", httponly=True)
     return resp
+
+
+def _is_quick_id(dict_id: int) -> bool:
+    from app.db import SessionLocal
+    from app.services.quicksearch import is_quick
+
+    with SessionLocal() as s:
+        return is_quick(s.get(Dictionary, dict_id))
+
+
+@router.post("/analysis/find")
+def analysis_find(request: Request, word: str = Form(""), back: str = Form(""), db: Session = Depends(get_session)):
+    """«Найти слово»: любое слово или словосочетание — в служебном словаре «Быстрый поиск», по текущей выборке."""
+    from urllib.parse import parse_qsl
+
+    from starlette.datastructures import QueryParams
+
+    from app.services.quicksearch import find
+    from app.services.selection import from_params
+
+    qp = QueryParams(back or "")
+    sel = from_params(db, qp)
+    res = find(db, word, sel.ids)
+    if res.get("error"):
+        flash(request, "Найти слово: " + res["error"] + ".", "error")
+        return redirect("/analysis?" + (back or ""))
+    db.commit()
+    prev = qp.get("dictionary_id") or next((v for k, v in parse_qsl(request.cookies.get(REMEMBER_COOKIE) or "") if k == "dictionary_id"), "")
+    tab = qp.get("tab") if qp.get("tab") in ("conc", "profile", "portrait", "colloc", "freq", "overview", "report", "map") else "conc"
+    url = (f"/analysis?tab={tab}&dictionary_id={res['dictionary'].id}&entry_id={res['entry'].id}&{sel.query()}"
+           + (f"&prev_dict={prev}" if prev and str(prev) != str(res['dictionary'].id) else ""))
+    return redirect(url)
 
 
 @router.get("/analysis")

@@ -142,7 +142,11 @@ def run_deepparse(job_id: int | None, text_id: int | None = None, sentence_ids: 
         with SessionLocal() as s:
             targets = [text_id] if text_id is not None else text_ids
             titles = dict(s.execute(select(TextDoc.id, TextDoc.title).where(TextDoc.id.in_(targets))).all())
+            from app.services.quicksearch import is_quick
+
             for d in s.scalars(select(Dictionary)):
+                if is_quick(d):  # служебный словарь «Найти слово» — только по запросу
+                    continue
                 enqueue(s, "match", {"dictionary_id": d.id, "text_ids": targets},
                         title=f"Словарь «{d.name}» × {', '.join('«' + t + '»' for t in titles.values())[:200]}")
             s.commit()
