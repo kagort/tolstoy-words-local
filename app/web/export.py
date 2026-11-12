@@ -492,6 +492,31 @@ def export_hits_conllu(request: Request, db: Session = Depends(get_session)):
                              headers={"Content-Disposition": 'attachment; filename="hits.conllu"'})
 
 
+@router.get("/corpus.zip")
+def export_corpus_zip(request: Request, db: Session = Depends(get_session)):
+    """Корпус архивом: очищенные тексты + метаданные; parts=lemmas, parts=conllu — добавить леммы и разметку."""
+    from app.services.corpus_export import _slug, build_zip, translit
+
+    qp = request.query_params
+    cid = _int(qp.get("corpus_id"))
+    name, buf, n = build_zip(db, cid, set(qp.getlist("parts")))
+    if not name:
+        raise HTTPException(404)
+
+    def chunks():
+        try:
+            while True:
+                b = buf.read(1 << 20)
+                if not b:
+                    break
+                yield b
+        finally:
+            buf.close()
+
+    filename = f"korpus-{_slug(translit(name), 40)}-{datetime.now().strftime('%Y%m%d')}.zip"
+    return StreamingResponse(chunks(), media_type="application/zip", headers={"Content-Disposition": _disposition(filename)})
+
+
 @router.get("/text/{text_id}.conllu")
 def export_text_conllu(text_id: int, db: Session = Depends(get_session)):
     doc = db.get(TextDoc, text_id)

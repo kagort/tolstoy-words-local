@@ -69,9 +69,26 @@ document.addEventListener('DOMContentLoaded', function () {
 {# ============================================================== СРАВНЕНИЕ ТЕКСТОВ #}
 {% if tab == 'textcmp' %}
 <div class="panel">
-  <label>Тексты для сравнения (2–5, из выборки)</label>
-  <div class="word-grid" style="max-height:180px">{% for t in tc_texts %}<label class="check-item"><input type="checkbox" name="cmp" value="{{ t.id }}" form="sel-form" {{ 'checked' if t.id in tc_chosen }}>
-    {% if t.author %}{{ t.author }}, {% endif %}«{{ t.title }}» <span class="muted small">{{ t.n_words }} сл.</span></label>{% endfor %}</div>
+  <div class="row" style="align-items:flex-end;margin-bottom:6px"><label style="margin:0">Тексты для сравнения (2–5) — из выборки и из любых других корпусов
+    <span class="muted small" id="tc-count"></span></label>
+    {% if tc_others %}<div class="shrink"><input type="search" id="tc-filter" placeholder="найти текст или автора…" aria-label="найти текст или автора" style="width:240px"></div>{% endif %}</div>
+  <div class="word-grid tc-list" style="max-height:260px">
+    {% if tc_others %}<div class="tc-head muted small">Из выборки</div>{% endif %}
+    {% for t in tc_texts %}<label class="check-item"><input type="checkbox" name="cmp" value="{{ t.id }}" form="sel-form" {{ 'checked' if t.id in tc_chosen }}>
+    {% if t.author %}{{ t.author }}, {% endif %}«{{ t.title }}» <span class="muted small">{{ t.n_words }} сл.</span></label>{% endfor %}
+    {% if tc_others %}<div class="tc-head muted small">Другие тексты базы</div>
+    {% for t in tc_others %}<label class="check-item"><input type="checkbox" name="cmp" value="{{ t.id }}" form="sel-form" {{ 'checked' if t.id in tc_chosen }}>
+    {% if t.author %}{{ t.author }}, {% endif %}«{{ t.title }}» <span class="muted small">{{ t.n_words }} сл.{% if t.corpora %} · {{ t.corpora|join(', ') }}{% endif %}</span></label>{% endfor %}{% endif %}
+  </div>
+  <script>
+  (function () {
+    const list = document.querySelector('.tc-list'), f = document.getElementById('tc-filter'), cnt = document.getElementById('tc-count');
+    const upd = () => { const n = list.querySelectorAll('input:checked').length; cnt.textContent = n ? '· отмечено: ' + n + (n > 5 ? ' (сравниваются первые 5)' : '') : ''; };
+    list.addEventListener('change', upd); upd();
+    if (f) f.addEventListener('input', () => { const q = f.value.trim().toLowerCase();
+      list.querySelectorAll('.check-item').forEach(l => { l.style.display = !q || l.textContent.toLowerCase().includes(q) || l.querySelector('input').checked ? '' : 'none'; }); });
+  })();
+  </script>
   <p><button type="submit" form="sel-form">Сравнить</button>{% if tc and tc.texts|length > 1 %} · Скачать: <a href="/export/textcmp.xlsx{{ qs(request) }}">XLSX</a>{% endif %}</p>
 </div>
 {% if tc and tc.texts|length > 1 %}

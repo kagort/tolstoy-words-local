@@ -307,3 +307,4 @@ td.val { text-align: right; white-space: normal; overflow-wrap: anywhere; }
 .tn-find input[type=search] { width: 210px; padding: 5px 10px; font-size: 13.5px; }
 .quick-bar .quick-wait { font-weight: 600; }
 @media (max-width: 860px) { .tn-find { margin-left: 0; width: 100%; } .tn-find input[type=search] { flex: 1; width: auto; } }
+.tc-list .tc-head { grid-column: 1 / -1; margin: 6px 0 2px; text-transform: uppercase; letter-spacing: .05em; font-size: 11px; }

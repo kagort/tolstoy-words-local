@@ -1349,14 +1349,27 @@ def _stylo_context(db: Session, request: Request, sel) -> dict:
 
 
 def _textcmp_context(db: Session, request: Request, sel) -> dict:
+    """Сравнение текстов: можно брать тексты из любых корпусов (не только из выборки) — сначала тексты выборки,
+    ниже остальные готовые тексты базы с корпусами."""
+    from app.models import corpus_texts
     from app.services.textcompare import compare
 
-    chosen = [int(x) for x in request.query_params.getlist("cmp") if x.isdigit() and int(x) in sel.ids][:5]
+    rows = list(db.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.n_words)
+                           .where(TextDoc.status == "ready").order_by(TextDoc.author, TextDoc.title)))
+    ready = {r.id for r in rows}
+    chosen = [int(x) for x in dict.fromkeys(request.query_params.getlist("cmp")) if x.isdigit() and int(x) in ready][:5]
     if not chosen:
-        chosen = sel.ids[:4]
-    texts = list(db.execute(select(TextDoc.id, TextDoc.title, TextDoc.author, TextDoc.n_words).where(TextDoc.id.in_(sel.ids or [-1]))
-                            .order_by(TextDoc.author, TextDoc.title)))
-    return {"tc": compare(db, chosen, sel.stopset) if len(chosen) >= 1 else None, "tc_texts": texts, "tc_chosen": chosen}
+        chosen = [t for t in sel.ids if t in ready][:4]
+    cnames = dict(db.execute(select(Corpus.id, Corpus.name)).all())
+    in_corpora: dict[int, list[str]] = {}
+    for tid, cid in db.execute(select(corpus_texts.c.text_id, corpus_texts.c.corpus_id)):
+        in_corpora.setdefault(tid, []).append(cnames.get(cid, ""))
+    in_sel = set(sel.ids)
+    texts = [r for r in rows if r.id in in_sel]
+    others = [{"id": r.id, "title": r.title, "author": r.author, "n_words": r.n_words, "corpora": sorted(in_corpora.get(r.id, []))}
+              for r in rows if r.id not in in_sel]
+    return {"tc": compare(db, chosen, sel.stopset) if len(chosen) >= 1 else None, "tc_texts": texts, "tc_others": others,
+            "tc_chosen": chosen}
 
 
 @router.get("/api/entities/mentions")
