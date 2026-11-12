@@ -1913,31 +1913,79 @@ def feedback_create(request: Request, text: str = Form(""), kind: str = Form("ot
     return redirect(page)
 
 
-@router.get("/feedback")
-def feedback_list(request: Request, status: str = "", db: Session = Depends(get_session)):
-    from app.models import FEEDBACK_KINDS, FEEDBACK_STATUSES, Feedback
+def _feedback_back(back: str) -> str:
+    """Адрес списка отзывов с прежними фильтрами (только известные параметры — без перехода на чужие адреса)."""
+    from urllib.parse import parse_qsl, urlencode
 
-    q = select(Feedback).order_by(Feedback.created_at.desc())
+    keep = [(k, v) for k, v in parse_qsl(back or "") if k in ("status", "priority", "sort")]
+    return "/feedback" + ("?" + urlencode(keep) if keep else "")
+
+
+@router.get("/feedback")
+def feedback_list(request: Request, status: str = "", priority: str = "", sort: str = "priority",
+                  db: Session = Depends(get_session)):
+    from sqlalchemy import case
+
+    from app.models import FEEDBACK_KINDS, FEEDBACK_PRIORITIES, FEEDBACK_STATUSES, Feedback
+
+    rank = case({k: n for n, k in enumerate(FEEDBACK_PRIORITIES)}, value=Feedback.priority, else_=len(FEEDBACK_PRIORITIES))
+    q = select(Feedback)
+    # по срочности: срочные и важные — сверху, сделанные — вниз; внутри — новые сначала
+    q = (q.order_by(Feedback.created_at.desc()) if sort == "date"
+         else q.order_by((Feedback.status == "done").asc(), rank, Feedback.created_at.desc()))
     if status in FEEDBACK_STATUSES:
         q = q.where(Feedback.status == status)
+    if priority in FEEDBACK_PRIORITIES:
+        q = q.where(Feedback.priority == priority)
     counts = dict(db.execute(select(Feedback.status, func.count()).group_by(Feedback.status)).all())
-    return render(request, "feedback.html", items=list(db.scalars(q.limit(1000))), status=status, counts=counts,
-                  KINDS=FEEDBACK_KINDS, STATUSES=FEEDBACK_STATUSES)
+    pcounts = dict(db.execute(select(Feedback.priority, func.count()).where(Feedback.status != "done")
+                              .group_by(Feedback.priority)).all())
+    return render(request, "feedback.html", items=list(db.scalars(q.limit(1000))), status=status, priority=priority,
+                  sort="date" if sort == "date" else "priority", counts=counts, pcounts=pcounts,
+                  KINDS=FEEDBACK_KINDS, STATUSES=FEEDBACK_STATUSES, PRIORITIES=FEEDBACK_PRIORITIES,
+                  back=request.url.query)
 
 
 @router.post("/feedback/{fid}")
 def feedback_update(request: Request, fid: int, status: str = Form("seen"), reply: str = Form(""),
-                    back: str = Form(""), db: Session = Depends(get_session)):
-    from app.models import FEEDBACK_STATUSES, Feedback
+                    priority: str = Form(""), back: str = Form(""), db: Session = Depends(get_session)):
+    from app.models import FEEDBACK_PRIORITIES, FEEDBACK_STATUSES, Feedback
 
     fb = db.get(Feedback, fid)
     if fb is None:
         raise HTTPException(404)
     if status in FEEDBACK_STATUSES:
         fb.status = status
+    if priority in FEEDBACK_PRIORITIES:
+        fb.priority = priority
     fb.reply = reply.strip() or None
     db.commit()
-    return redirect("/feedback" + (f"?status={back}" if back in FEEDBACK_STATUSES else "") + f"#fb{fid}")
+    return redirect(_feedback_back(back) + f"#fb{fid}")
+
+
+@router.post("/feedback/{fid}/delete")
+def feedback_delete(request: Request, fid: int, back: str = Form(""), db: Session = Depends(get_session)):
+    from app.models import Feedback
+
+    fb = db.get(Feedback, fid)
+    if fb is not None:
+        db.delete(fb)
+        db.commit()
+        flash(request, "Отзыв удалён.")
+    return redirect(_feedback_back(back))
+
+
+@router.post("/feedback-clear")
+def feedback_clear(request: Request, back: str = Form(""), db: Session = Depends(get_session)):
+    """Удалить все отзывы со статусом «сделано» (перед удалением их можно выгрузить в XLSX)."""
+    from sqlalchemy import delete as sql_delete
+
+    from app.models import Feedback
+
+    n = db.execute(sql_delete(Feedback).where(Feedback.status == "done")).rowcount or 0
+    db.commit()
+    flash(request, f"Удалено сделанных отзывов: {n}." if n else "Сделанных отзывов нет.")
+    return redirect(_feedback_back(back))
 
 
 @router.get("/help")

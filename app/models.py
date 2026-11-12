@@ -365,6 +365,7 @@ class Job(Base):
 
 FEEDBACK_KINDS = {"error": "ошибка", "idea": "предложение", "question": "вопрос", "other": "другое"}
 FEEDBACK_STATUSES = {"new": "новый", "seen": "прочитан", "done": "сделано"}
+FEEDBACK_PRIORITIES = {"urgent": "срочно", "important": "важно", "normal": "обычно"}  # порядок — по убыванию срочности
 
 
 class Feedback(Base):
@@ -380,3 +381,4 @@ class Feedback(Base):
     text: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(16), default="new", server_default="new")
     reply: Mapped[str | None] = mapped_column(Text)  # заметка администратора
+    priority: Mapped[str] = mapped_column(String(16), default="normal", server_default="normal")  # FEEDBACK_PRIORITIES

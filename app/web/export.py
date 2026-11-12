@@ -156,7 +156,7 @@ def export_concordance(fmt: str, request: Request, db: Session = Depends(get_ses
 @router.get("/feedback.{fmt}")
 def export_feedback(fmt: str, request: Request, db: Session = Depends(get_session)):
     """Отзывы тестировщиков — для обобщения пользовательского опыта."""
-    from app.models import FEEDBACK_KINDS, FEEDBACK_STATUSES, Feedback
+    from app.models import FEEDBACK_KINDS, FEEDBACK_PRIORITIES, FEEDBACK_STATUSES, Feedback
 
     if fmt not in FORMATS:
         raise HTTPException(400)
@@ -166,8 +166,9 @@ def export_feedback(fmt: str, request: Request, db: Session = Depends(get_sessio
         q = q.where(Feedback.status == status)
     df = pd.DataFrame([{"Дата": f.created_at.strftime("%d.%m.%Y %H:%M") if f.created_at else "", "Кто": f.author or "",
                         "Тип": FEEDBACK_KINDS.get(f.kind, f.kind), "Отзыв": f.text, "Страница": f.page or "",
-                        "Статус": FEEDBACK_STATUSES.get(f.status, f.status), "Заметка": f.reply or ""} for f in db.scalars(q)],
-                      columns=["Дата", "Кто", "Тип", "Отзыв", "Страница", "Статус", "Заметка"])
+                        "Статус": FEEDBACK_STATUSES.get(f.status, f.status), "Заметка": f.reply or "",
+                        "Срочность": FEEDBACK_PRIORITIES.get(f.priority or "normal", f.priority)} for f in db.scalars(q)],
+                      columns=["Дата", "Кто", "Тип", "Отзыв", "Страница", "Статус", "Заметка", "Срочность"])
     return _send({"Отзывы": df}, fmt, "feedback", {"Отзывов": len(df), "Статус": FEEDBACK_STATUSES.get(status, "все")})
 
 
