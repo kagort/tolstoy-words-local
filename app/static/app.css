@@ -308,3 +308,6 @@ td.val { text-align: right; white-space: normal; overflow-wrap: anywhere; }
 .quick-bar .quick-wait { font-weight: 600; }
 @media (max-width: 860px) { .tn-find { margin-left: 0; width: 100%; } .tn-find input[type=search] { flex: 1; width: auto; } }
 .tc-list .tc-head { grid-column: 1 / -1; margin: 6px 0 2px; text-transform: uppercase; letter-spacing: .05em; font-size: 11px; }
+
+/* словарь: категория в строке изменена, но ещё не сохранена */
+input.cat-input.unsaved { border-color: var(--warn); box-shadow: 0 0 0 2px var(--warn-soft); }

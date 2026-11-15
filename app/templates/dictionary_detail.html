@@ -35,7 +35,7 @@
   <form method="post" action="/dictionaries/{{ d.id }}/assign-category" id="catform" class="row cat-bar" style="align-items:flex-end">
     <input type="hidden" name="back" value="/dictionaries/{{ d.id }}?sort={{ sort }}{{ showq }}">
     <div><label>{{ icon('tag') }}Категория для отмеченных слов <span class="muted small">(новое название — новая категория; пусто — убрать категорию)</span></label>
-      <input type="text" name="category" list="cat-list" placeholder="например: ЗАПАХИ ЦВЕТОВ">
+      <input type="text" name="category" list="cat-list" autocomplete="off" placeholder="например: ЗАПАХИ ЦВЕТОВ">
       <datalist id="cat-list">{% for c in categories %}<option value="{{ c }}">{% endfor %}</datalist></div>
     <div class="shrink"><button type="submit">Создать категорию</button></div>
     <div class="shrink small muted" id="cat-count">отмечено: 0</div>
@@ -76,7 +76,7 @@
         <details class="small"><summary>своя лемма</summary><input form="f{{ e.id }}" type="text" name="lemma" placeholder="например: духи"></details>
       </td>
       <td><select name="match_mode" form="f{{ e.id }}"><option value="lemma" {{ 'selected' if e.match_mode == 'lemma' }}>по лемме</option><option value="forms" {{ 'selected' if e.match_mode == 'forms' }}>по формам</option></select></td>
-      {% if not no_cats %}<td><input form="f{{ e.id }}" type="text" name="category" value="{{ e.category or '' }}"></td>{% endif %}
+      {% if not no_cats %}<td><input form="f{{ e.id }}" type="text" name="category" value="{{ e.category or '' }}" class="cat-input" list="cat-list" autocomplete="off" data-saved="{{ e.category or '' }}"></td>{% endif %}
       <td class="num"><a href="/analysis?tab=conc&dictionary_id={{ d.id }}&entry_id={{ e.id }}">{{ hits.get(e.id, 0) }}</a>
         {% if in_names.get(e.id) or e.id in names_ok %}<div class="small">
           {% if e.id in names_ok %}<span class="muted" title="вхождения внутри имён собственных считаются">+ в именах</span>
@@ -134,6 +134,15 @@
   </div>
 </div>
 <script>
+// Категории: в поле у каждого слова — подсказка из категорий словаря (список cat-list, не автозаполнение браузера).
+// Новая категория, введённая вручную у одного слова, сразу предлагается у следующих — ещё до сохранения.
+document.querySelectorAll('.cat-input').forEach(inp => inp.addEventListener('change', () => {
+  const v = inp.value.trim(), list = document.getElementById('cat-list');
+  if (v && list && ![...list.options].some(o => o.value === v)) list.appendChild(new Option('', v));
+  const changed = v !== (inp.dataset.saved || '');
+  inp.classList.toggle('unsaved', changed);
+  inp.title = changed ? 'изменено — нажмите «Сохранить» в этой строке' : '';
+}));
 function catCount() { const el = document.getElementById('cat-count'); if (el) el.textContent = 'отмечено: ' + document.querySelectorAll('.cat-check:checked').length; }
 </script>
 {% endblock %}

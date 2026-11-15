@@ -126,3 +126,20 @@ def test_categories_view_rename_delete(client):
     with SessionLocal() as s:
         d = s.get(Dictionary, client.dict_id)
         assert len(d.entries) == 3 and all(e.category is None for e in d.entries)  # слова остались, без категории
+
+
+def test_category_suggestions_in_rows(client):
+    """Поле категории у каждого слова предлагает категории словаря (datalist), а не автозаполнение браузера."""
+    from app.db import SessionLocal
+    from app.models import Dictionary
+
+    client.post("/dictionaries", data={"name": "Подсказки категорий", "words": "дым\nпар"})
+    with SessionLocal() as s:
+        d = s.query(Dictionary).filter_by(name="Подсказки категорий").one()
+        did, eid = d.id, d.entries[0].id
+        d.entries[0].category = "ОГОНЬ"
+        s.commit()
+    page = client.get(f"/dictionaries/{did}").text
+    assert 'class="cat-input" list="cat-list" autocomplete="off"' in page
+    assert '<option value="ОГОНЬ">' in page and 'data-saved="ОГОНЬ"' in page and ".cat-input" in page
+    assert eid
