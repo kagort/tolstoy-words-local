@@ -1,6 +1,6 @@
-# Пакет обновления для сервера без интернета — Windows (PowerShell), компьютер С интернетом и Docker Desktop.
+﻿# Пакет обновления для сервера без интернета — Windows (PowerShell), компьютер С интернетом и Docker Desktop.
 # В папке проекта:   powershell -ExecutionPolicy Bypass -File deploy\offline-pack.ps1 [-Out offline-update] [-WithModels] [-AppOnly]
-# Папку пакета потом целиком копируют на флешку; на сервере — offline-install.sh из пакета (docs/DEPLOY.md §2.8).
+# Папку пакета потом целиком копируют на флешку; на сервере — offline-install.ps1 (Windows) или offline-install.sh (Linux).
 param([string]$Out = "offline-update", [switch]$WithModels, [switch]$AppOnly)
 $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
@@ -21,9 +21,9 @@ if (-not $AppOnly) {
 Write-Host "== 3/4 сохранение образов ($images) — несколько минут"
 Run "docker save -o `"$OutFull\images.tar`" $images"
 Run "git archive --format=tar.gz -o `"$OutFull\code.tar.gz`" HEAD"
-Copy-Item deploy\offline-install.sh $OutFull -Force
+Copy-Item deploy\offline-install.sh, deploy\offline-install.ps1 $OutFull -Force
 
-$files = @("images.tar", "code.tar.gz", "offline-install.sh")
+$files = @("images.tar", "code.tar.gz", "offline-install.sh", "offline-install.ps1")
 if ($WithModels) {
   Write-Host "== 4/4 модели Stanza из тома Docker"
   $vol = (docker volume ls -q --filter label=com.docker.compose.volume=stanza_models | Select-Object -First 1)
@@ -33,7 +33,7 @@ if ($WithModels) {
 }
 $commit = (git rev-parse --short HEAD)
 $utf8 = New-Object System.Text.UTF8Encoding($false)
-[IO.File]::WriteAllText("$OutFull\ВЕРСИЯ.txt", "Quotverba $version, пакет от $(Get-Date -Format 'yyyy-MM-dd HH:mm'), коммит $commit`nУстановка на сервере: ./offline-install.sh /путь/к/проекту   (см. docs/DEPLOY.md §2.8)`n", $utf8)
+[IO.File]::WriteAllText("$OutFull\ВЕРСИЯ.txt", "Quotverba $version, пакет от $(Get-Date -Format 'yyyy-MM-dd HH:mm'), коммит $commit`nУстановка на сервере: Windows - offline-install.ps1 -App C:\путь\к\проекту; Linux - ./offline-install.sh /путь/к/проекту (docs/DEPLOY.md, 2.8)`n", $utf8)
 # контрольные суммы в формате sha256sum (переводы строк LF) — их проверяет offline-install.sh на сервере
 $sums = ($files | ForEach-Object { "$((Get-FileHash -Algorithm SHA256 (Join-Path $OutFull $_)).Hash.ToLower())  $_" }) -join "`n"
 [IO.File]::WriteAllText("$OutFull\SHA256SUMS", "$sums`n", $utf8)

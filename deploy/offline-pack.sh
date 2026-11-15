@@ -35,7 +35,7 @@ fi
 echo "== 3/4 сохранение образов ($IMAGES) — несколько минут"
 docker save $IMAGES | gzip > "$OUT/images.tar.gz"
 git archive --format=tar.gz -o "$OUT/code.tar.gz" HEAD
-cp deploy/offline-install.sh "$OUT/"
+cp deploy/offline-install.sh deploy/offline-install.ps1 "$OUT/"
 
 if [ "$MODELS" = 1 ]; then
   echo "== 4/4 модели Stanza из тома Docker"
@@ -53,6 +53,6 @@ fi
   echo "Quotverba $VERSION, пакет от $(date '+%Y-%m-%d %H:%M'), коммит $(git rev-parse --short HEAD)"
   echo "Установка на сервере: sudo ./offline-install.sh /путь/к/проекту   (см. docs/DEPLOY.md §2.8)"
 } > "$OUT/ВЕРСИЯ.txt"
-(cd "$OUT" && sha256sum images.tar.gz code.tar.gz offline-install.sh $( [ -f stanza_models.tar.gz ] && echo stanza_models.tar.gz ) > SHA256SUMS)
+(cd "$OUT" && sha256sum images.tar.gz code.tar.gz offline-install.sh offline-install.ps1 $( [ -f stanza_models.tar.gz ] && echo stanza_models.tar.gz ) > SHA256SUMS)
 du -sh "$OUT"
 echo "Готово. Скопируйте папку $OUT на флешку целиком."

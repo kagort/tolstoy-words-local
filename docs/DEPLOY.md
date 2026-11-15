@@ -255,9 +255,19 @@ powershell -ExecutionPolicy Bypass -File deploy\offline-pack.ps1     # Windows
 если на сервере их нет: перед этим запустите приложение на этом компьютере и дождитесь задачи «Загрузка моделей
 Stanza»); `--app-only` (`-AppOnly`) — только образ приложения, без `postgres:16` и `caddy:2` (если они на сервере уже
 есть). В папке `offline-update` появятся `images.tar.gz` (в Windows — `images.tar`), `code.tar.gz`,
-`offline-install.sh`, `ВЕРСИЯ.txt`, `SHA256SUMS` — скопируйте папку на флешку **целиком**.
+`offline-install.ps1` (Windows) и `offline-install.sh` (Linux), `ВЕРСИЯ.txt`, `SHA256SUMS` — скопируйте папку на
+флешку **целиком** (флешка — exFAT или NTFS: на FAT32 не поместится файл больше 4 ГБ).
 
-**На сервере** (флешка подключена, например, в `/media/usb`):
+**На сервере с Windows** (Docker Desktop запущен; флешка, например, диск `E:`):
+```powershell
+Copy-Item E:\offline-update C:\offline-update -Recurse      # на диск сервера: с флешки медленнее
+cd C:\offline-update
+powershell -ExecutionPolicy Bypass -File .\offline-install.ps1 -App "C:\quotverba"     # с HTTPS (Caddy) — добавьте -Https
+```
+`-App` — папка, где стоит Quotverba (в ней `docker-compose.yml` и `.env`); ставить нужно именно в неё — по имени
+папки Docker находит том с базой. Восстановление копии в Windows: `deploy\restore.ps1 backups\ИМЯ.dump`.
+
+**На сервере с Linux** (флешка подключена, например, в `/media/usb`):
 ```bash
 cd /media/usb/offline-update
 sudo -u tw bash ./offline-install.sh /opt/quotverba           # с HTTPS (Caddy) — добавьте --https
