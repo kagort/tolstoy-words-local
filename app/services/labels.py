@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import re
 
+SOURCE_TYPES = {"natural": "естественный", "generated": "нейросеть", "other": "другое"}
+
 TITLE_MAX = 28
 AUTHOR_MAX = 24
 

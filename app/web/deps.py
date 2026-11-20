@@ -14,10 +14,11 @@ from app.config import settings
 from app.nlp.morph import POS_LABELS, pos_label
 from app.nlp.syntax import REL_LABELS, ROLE_LABELS, SENT_TYPE_LABELS, rel_label_ud, role_label_ud
 
+from app.services.labels import SOURCE_TYPES
+
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
-SOURCE_TYPES = {"natural": "литература / естественный", "generated": "сгенерирован нейросетью", "other": "другое"}
 STATUS_LABELS = {
     "uploaded": "загружен", "queued": "в очереди", "processing": "разбирается", "ready": "готов", "error": "ошибка",
     "running": "выполняется", "done": "готово", "cancelled": "отменена", "deleting": "удаляется",

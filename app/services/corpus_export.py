@@ -18,10 +18,9 @@ from sqlalchemy.orm import Session
 
 from app.models import Corpus, SentenceRow, TextDoc, TokenRow, corpus_texts
 from app.nlp.normalize import normalize_text, paragraphs
-from app.services.labels import short_author
+from app.services.labels import SOURCE_TYPES, short_author
 
 PARTS = {"clean": "очищенные тексты (.txt)", "lemmas": "леммы (.txt, предложение на строку)", "conllu": "разметка CoNLL-U"}
-SOURCE_TYPES = {"natural": "естественный", "generated": "сгенерированный", "other": "другое"}
 
 
 _TR = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюя",
